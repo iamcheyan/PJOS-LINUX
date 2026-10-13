@@ -28,7 +28,10 @@ fi
 # up far enough to hand off. Keying it here rather than on the frontend exec is
 # deliberate — a card with no frontend is a perfectly healthy OS, and keying it
 # later would make that state look like a failed update and roll back forever.
-[ -x /usr/sbin/baseos-update ] && /usr/sbin/baseos-update confirm 2>/dev/null
+# An OS without its dynamic loader is not healthy, whatever is on the card: the
+# /usr/lib image did not mount, and only the rollback can repair that.
+[ -x /usr/sbin/baseos-update ] && [ -e /lib/ld-linux-aarch64.so.1 ] \
+	&& /usr/sbin/baseos-update confirm 2>/dev/null
 
 important_splash() {
 	[ -x /usr/bin/baseos-splash ] \

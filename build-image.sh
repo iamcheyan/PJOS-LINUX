@@ -24,6 +24,10 @@ eval "$(python3 "$HERE/tools/source_manifest.py" shell "$SOURCE" "$TARGET")"
   echo "boot-prefix size no longer matches source.json" >&2; exit 1;
 }
 
+# /usr/lib ships as a squashfs file that rcS mounts. Refuse a kernel that
+# cannot mount it before composing an image that would boot without libraries.
+python3 "$HERE/tools/lib_image.py" check "$TARGET"
+
 "$HERE/tools/make-bootlogo.sh" "$TARGET"
 
 # Sector math for the BaseOS 1.0 seven-partition A/B layout (docs/07).
@@ -40,8 +44,8 @@ PRIMARY_START=$((UDISK_START + UDISK_SECTORS))
 TOTAL_SECTORS=$((PRIMARY_START + 64 * 2048 + 2048))
 PRIMARY_SECTORS=$((TOTAL_SECTORS - 4 - PRIMARY_START + 1))
 
-# Host-native: image compose is mke2fs/mkfs.vfat/GPT/tar only (aarch64 work is
-# earlier). Explicit host platform avoids a cached arm64 image on Intel.
+# Host-native: image compose is mke2fs/mksquashfs/mkfs.vfat/GPT/tar only (aarch64
+# work is earlier). Explicit host platform avoids a cached arm64 image on Intel.
 docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   -v "$WORK":/work -v "$HERE/tools":/tools:ro \
   -v "$HERE/manifest":/manifest:ro \
@@ -53,7 +57,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   -e UDISK_START="$UDISK_START" -e UDISK_SECTORS="$UDISK_SECTORS" \
   -e PRIMARY_START="$PRIMARY_START" -e PRIMARY_SECTORS="$PRIMARY_SECTORS" \
   alpine:3.20 sh -euc '
-  apk add -q e2fsprogs e2fsprogs-extra dosfstools mtools python3 sgdisk
+  apk add -q e2fsprogs e2fsprogs-extra dosfstools mtools python3 sgdisk squashfs-tools
 
   OUT="/work/$OUT_NAME"
   rm -f "$OUT"
@@ -78,6 +82,36 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
 
   R=/tmp/r; rm -rf "$R"; mkdir "$R"
   tar -xf /work/rootfs.tar -C "$R"
+
+  # /usr/lib moves into a squashfs file and the directory stays as its mount
+  # point. The card reads about 20 MB/s and a frontend loads most of the GPU
+  # library before its first frame. LZ4 halves those bytes and unpacks faster
+  # than the card delivers; gzip and xz are smaller but cost more time to
+  # unpack than the read they save. The 4.9 kernel has no squashfs xattrs.
+  LIB_IMAGE=/usr/share/baseos/usr-lib.sqfs
+  mksquashfs "$R/usr/lib" "$R$LIB_IMAGE" -comp lz4 -Xhc -b 131072 -noappend \
+    -no-xattrs -no-exports -no-progress -mkfs-time 0 >/dev/null
+  chmod 644 "$R$LIB_IMAGE"
+  # Unpack it again and compare every name, mode, owner, link and content.
+  listing() {
+    (cd "$1" && find . | sort | while read -r p; do
+      if [ -L "$p" ]; then echo "$p -> $(readlink "$p")"
+      elif [ -f "$p" ]; then echo "$p $(stat -c "%a %u %g" "$p") $(sha256sum < "$p")"
+      else echo "$p $(stat -c "%a %u %g %F" "$p")"
+      fi
+    done)
+  }
+  unsquashfs -q -n -d /tmp/lib-check "$R$LIB_IMAGE" >/dev/null
+  listing "$R/usr/lib" > /tmp/lib.want
+  listing /tmp/lib-check > /tmp/lib.got
+  [ -s /tmp/lib.want ] && cmp /tmp/lib.want /tmp/lib.got || {
+    echo "FATAL: the /usr/lib image does not match the directory"; exit 1
+  }
+  cp "$R$LIB_IMAGE" /tmp/usr-lib.sqfs
+  find "$R/usr/lib" -mindepth 1 -delete
+  rm -rf /tmp/lib-check /tmp/lib.got
+  echo "/usr/lib image: $(wc -l < /tmp/lib.want) entries, $(stat -c %s /tmp/usr-lib.sqfs) bytes"
+
   mke2fs -q -F -t ext4 -O "$EXT4_OPTS" -b 4096 -L rootfs -d "$R" \
     -E offset=$((SLOT_START * 512)) "$OUT" $((SLOT_SECTORS / 8))
 
@@ -113,6 +147,15 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   debugfs -R "stat /usr/sbin/baseos-update" /tmp/p5.img 2>/dev/null | grep -q "Mode:  0755" && echo "p5 baseos-update exec OK"
   debugfs -R "cat /etc/baseos-release" /tmp/p5.img 2>/dev/null \
     | grep -qx "BASEOS_TARGET=$TARGET" && echo "p5 target identity OK"
+  # Without the image the system has no libraries. Anything left in the
+  # directory would sit unused under the mount.
+  debugfs -R "dump $LIB_IMAGE /tmp/usr-lib.p5" /tmp/p5.img 2>/dev/null
+  cmp /tmp/usr-lib.sqfs /tmp/usr-lib.p5 || { echo "FATAL: p5 lacks the /usr/lib image"; exit 1; }
+  [ "$(debugfs -R "ls -p /usr/lib" /tmp/p5.img 2>/dev/null \
+      | awk -F/ "NF > 5 && \$6 != \".\" && \$6 != \"..\"" | wc -l)" -eq 0 ] || {
+    echo "FATAL: p5 /usr/lib is not an empty mount point"; exit 1
+  }
+  echo "p5 /usr/lib image OK"
 
   mcopy -i "$OUT@@$((P2_START * 512))" ::/bootlogo.bmp /tmp/embedded-bootlogo.bmp
   cmp /work/bootlogo.bmp /tmp/embedded-bootlogo.bmp
@@ -121,7 +164,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   python3 /tools/source_manifest.py verify-image /work/source.json "$TARGET" \
     /work/boot-prefix.img "$OUT" /tmp/embedded-bootlogo.bmp
 
-  rm -f /tmp/p5.img /tmp/p6.img /tmp/embedded-bootlogo.bmp
+  rm -f /tmp/p5.img /tmp/p6.img /tmp/embedded-bootlogo.bmp /tmp/usr-lib.sqfs /tmp/usr-lib.p5
   ls -lh "$OUT"
   du -h "$OUT"
 '

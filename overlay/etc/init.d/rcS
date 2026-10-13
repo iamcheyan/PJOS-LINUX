@@ -41,6 +41,19 @@ case ",$root_opts," in *,ro,*)
 	fi
 	;;
 esac
+
+# /usr/lib. A composed image keeps the libraries in a squashfs file and the
+# directory empty. The card reads about 20 MB/s and a frontend loads most of
+# the 19 MB GPU library before its first frame. Compressed, that is half the
+# card time, and LZ4 unpacks faster than the card delivers. Everything that runs
+# before this line is static. A rootfs that still has its libraries in the
+# directory, like the bare tree the QEMU test boots, has no such file.
+usr_lib_image=/usr/share/baseos/usr-lib.sqfs
+if [ -f "$usr_lib_image" ]; then
+	/bin/mount -t squashfs -o loop,ro,nodev,nosuid "$usr_lib_image" /usr/lib 2>/dev/null \
+		|| echo 'baseos: the /usr/lib image did not mount; no dynamic program can start' > /dev/kmsg
+fi
+
 /bin/mkdir -p /dev/pts /dev/shm
 /bin/mount -t devpts -o gid=5,mode=620 devpts /dev/pts
 # debugfs: the sunxi disp2 driver's only display-output control surface is

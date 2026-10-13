@@ -602,5 +602,20 @@ run_session
 [ "$status" -eq 143 ]
 [ ! -e /tmp/update.log ] && [ ! -e /tmp/frontend.log ]
 echo 'ok: migration precedes confirmation; completion and maintenance skip it; recovery failure blocks startup'
+
+# No dynamic loader means the /usr/lib image did not mount. Such a boot must
+# not confirm an update trial: the rollback counts exactly these boots.
+rm -f /usr/sbin/baseos-boot-migrate /tmp/migration-fail
+reset
+nextui_card
+mv /lib/ld-linux-aarch64.so.1 /tmp/loader
+run_session
+[ ! -e /tmp/update.log ]
+mv /tmp/loader /lib/ld-linux-aarch64.so.1
+reset
+nextui_card
+run_session
+[ "$status" -eq 0 ] && [ "$(cat /tmp/update.log)" = confirm ]
+echo 'ok: a boot without the dynamic loader does not confirm an update trial'
 echo 'frontend session tests passed'
 TEST

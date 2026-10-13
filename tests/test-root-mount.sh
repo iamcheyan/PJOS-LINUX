@@ -12,7 +12,7 @@ mkdir -p "$TMP/bin"
 export ROOT_TEST_TMP="$TMP"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-awk '/^# Root filesystem\. The vendor initramfs/{copy=1} /^\/bin\/mkdir -p \/dev\/pts/{copy=0} copy' "$RCS" \
+awk '/^# Root filesystem\. The vendor initramfs/{copy=1} /^# \/usr\/lib\. A composed image/{copy=0} copy' "$RCS" \
 	| sed -e "s|/proc/mounts|$TMP/mounts|g" \
 		-e "s|/sys/fs/ext4/mmcblk0p5/errors_count|$TMP/errors_count|g" \
 		-e "s|/usr/sbin/e2fsck|$TMP/bin/e2fsck|g" \
