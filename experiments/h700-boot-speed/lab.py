@@ -8,6 +8,7 @@ backup of the device's own bytes, taken once with `backup`.
   lab.py backup
   lab.py build NAME [--ramdisk empty] [--cmdline TEXT] [--dtb NODE:PROP=VALUE ...] [--boot0-debug N]
   lab.py flash NAME | restore
+  lab.py deploy [--mode 755] LOCAL REMOTE [LOCAL REMOTE ...]
   lab.py measure LABEL [-n COUNT]
   lab.py collect LABEL
 
@@ -286,7 +287,46 @@ def restore(_args) -> None:
 
 # ---------------------------------------------------------------- measure
 
+BOOT_CRITICAL = ("/init", "/etc/init.d/rcS", "/etc/init.d/rcK", "/usr/sbin/frontend-session", "/usr/bin/busybox")
+
+
+def boot_critical_ok() -> None:
+    # init runs these directly. One without its execute bit leaves the device
+    # at the boot logo with no adb and no network: this is what froze the RG SP
+    # on 2026-10-13, after a copy of an adb-pushed file (mode 0666) replaced
+    # rcS and frontend-session without a chmod.
+    for path in BOOT_CRITICAL:
+        state = sh(f"if [ -f {path} ] && [ -x {path} ] && [ -s {path} ]; then echo ok; else ls -l {path} 2>&1; fi")
+        require(state == "ok", f"refusing to restart: {path} is not a non-empty executable file ({state})")
+    require(sh("sh -n /etc/init.d/rcS && sh -n /usr/sbin/frontend-session && echo ok") == "ok",
+            "refusing to restart: a startup script does not parse")
+
+
+def deploy(args) -> None:
+    """Install files on the device's root filesystem with an explicit mode."""
+    identity()
+    require(len(args.files) % 2 == 0 and args.files, "deploy takes LOCAL REMOTE pairs")
+    pairs = list(zip(args.files[::2], args.files[1::2]))
+    root_was = sh("grep ' / ' /proc/mounts | tail -1 | cut -d' ' -f4 | cut -d, -f1")
+    if root_was == "ro":
+        sh("mount -o remount,rw /")
+    try:
+        for local, remote in pairs:
+            blob = Path(local).read_bytes()
+            subprocess.run(ADB + ["push", local, "/tmp/lab-deploy"], check=True, capture_output=True)
+            sh(f"cat /tmp/lab-deploy > {remote}.lab-new && chmod {args.mode} {remote}.lab-new"
+               f" && mv -f {remote}.lab-new {remote}; rm -f /tmp/lab-deploy; sync")
+            state = sh(f"sha256sum {remote} | cut -d' ' -f1; stat -c %a {remote}").split()
+            require(state == [sha(blob), args.mode], f"{remote} did not install as intended: {state}")
+            print(f"  installed {remote} ({len(blob)} bytes, mode {args.mode})")
+    finally:
+        if root_was == "ro":
+            sh("sync; mount -o remount,ro /")
+    boot_critical_ok()
+
+
 def reboot() -> None:
+    boot_critical_ok()
     old = sh("cat /proc/sys/kernel/random/boot_id")
     subprocess.run(ADB + ["push", str(WORK / "backup/reboot_next"), "/tmp/reboot_next"], check=True, capture_output=True)
     require(sh("chmod 755 /tmp/reboot_next; sha256sum /tmp/reboot_next").split()[0] == REBOOT_NEXT_SHA, "reboot_next differs")
@@ -403,6 +443,10 @@ def main() -> None:
     m.add_argument("label")
     m.add_argument("-n", type=int, default=3)
     m.set_defaults(run=measure)
+    d = sub.add_parser("deploy")
+    d.add_argument("--mode", default="755")
+    d.add_argument("files", nargs="+")
+    d.set_defaults(run=deploy)
     c = sub.add_parser("collect")
     c.add_argument("label")
     c.set_defaults(run=lambda a: collect(a.label))

@@ -5,10 +5,13 @@ U-Boot or boot0 code. Every change here is an input those programs already
 read: the ramdisk beside the kernel, the kernel argument line, values in the
 device tree, and one byte in the boot0 header.
 
-**Status: stopped early.** After 25 good restarts, the 26th left the device
-frozen at the boot logo on every power-on. The cause is not yet known; see
-[Device state and recovery](#device-state-and-recovery). Nothing here is ready
-to ship.
+**Status.** The measurements below are from one RG SP. The build changes that
+came out of them (derived boot files for all eleven models, the migration for
+existing cards, root-filesystem handling) are on this branch and pass their
+tests and the U-Boot emulation for every model, but have not yet been booted
+from a built image. See [The freeze](#the-freeze) for the boot-logo freeze that
+interrupted the first session; it was a deployment mistake, not one of the
+changes.
 
 ## Results
 
@@ -41,6 +44,10 @@ PMIC probe (89–175 ms).
    complaint. The automatic `e2fsck` is lost.
 3. **U-Boot appends the boot image's own command-line field** to the kernel
    arguments, so arguments can be added without touching the env partition.
+   Emulating each model's U-Boot shows the same for all eleven
+   ([log](evidence/fast-boot-emulation.log)): the card is asked for exactly the
+   new image, the 512-byte ramdisk is copied, and `bootargs` gains
+   ` loglevel=1`.
 4. **USB ports 2 and 3 cannot simply be switched off.** Disabling both pairs of
    controllers saved 0.2 s but stopped USB device mode (adb) on the OTG port.
    Keeping EHCI 2 on and disabling OHCI 2, EHCI 3 and OHCI 3 kept adb working
@@ -92,42 +99,32 @@ controller would need a helper module that creates those devices after handoff.
   and the device became unreachable before it could be tried.
 - Any measurement with TF1 as the only card, or from a cold power-on.
 
-## Device state and recovery
+## The freeze
 
-The RG SP was left with experimental boot areas and startup scripts:
+After 25 good restarts the 26th left the device at the boot logo on every
+power-on, with or without TF2. The card was copied on a Mac and examined:
 
-- boot image: empty ramdisk, `loglevel=1` in the header command line;
-- bootloader package: `debug_mode` 0, OHCI 2, EHCI 3 and OHCI 3 marked `fail`;
-- boot0: `debug_mode` 0;
-- `/etc/init.d/rcS` and `/usr/sbin/frontend-session`: the reworked versions
-  with temporary step markers.
+- boot0, the bootloader package and the boot image were intact and exactly the
+  variant under test; both ext4 filesystems were clean;
+- `/etc/init.d/rcS` and `/usr/sbin/frontend-session` had mode 0666.
 
-Every change except the step markers had booted at least four times. The
-failing restart followed 25 restarts that each detached TF2 while Slot was
-still writing to it, so a damaged exFAT volume on TF2 is one suspect; the last script
-deploy is the other.
+The last deployment had replaced those two scripts with `cp` from files pushed
+by adb, which arrive with mode 0666, and skipped the `chmod` the two earlier
+deployments had done. init could run neither, so nothing started: no mounts,
+no adb, no frontend. [`lab.py`](lab.py) now installs files with an explicit,
+verified mode and refuses to restart the device unless the scripts init runs
+are non-empty, executable and parse.
 
-Backups of the original bytes are in `work/lab/backup/` of this checkout
-(ignored by git): `boot.bin` (all of p4), `toc1.bin`, `boot0.bin`, `env.bin`.
-The original scripts are in `work/lab/device-files/`.
-
-With the device reachable over adb: `lab.py restore`, then copy the two
-original scripts back. With TF1 in a card reader on a Mac (replace `N`):
-
-```sh
-diskutil unmountDisk /dev/diskN
-sudo dd if=work/lab/backup/toc1.bin of=/dev/rdiskN bs=512 seek=32800 conv=notrunc
-sudo dd if=work/lab/backup/boot.bin of=/dev/rdiskNs4 bs=1m
-```
-
-That restores the bootloader package and boot partition. boot0 keeps its quiet
-setting, which is harmless. The two scripts live on ext4, which macOS cannot
-write; reflashing BaseOS replaces everything.
+`work/lab/fix-card.py` (ignored by git; run with sudo on a Mac) copied the card
+for that diagnosis and wrote back the original boot areas from `work/lab/backup/`
+and the two original scripts, returning the card to its state before the
+experiments.
 
 ## Tools
 
-- [`lab.py`](lab.py): backup, build a variant, write and verify it, restart,
-  collect timings. It restarts with NextUI's `reboot_next` after remounting
-  `/data` and `/` read-only, as the earlier timing work did.
+- [`lab.py`](lab.py): backup, build a variant, write and verify it, install
+  files with a checked mode, restart, collect timings. It restarts with
+  NextUI's `reboot_next` after remounting `/data` and `/` read-only, as the
+  earlier timing work did.
 - [`fdt.py`](fdt.py): same-size device-tree edits, so no offset moves.
 - [`survey.py`](survey.py): read-only comparison of prepared firmware.
