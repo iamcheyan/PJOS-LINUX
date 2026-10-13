@@ -2,12 +2,24 @@
 # One-time migration delivered inside an ordinary rootfs update. No updater
 # format change is needed. The caller does not execute us after completion.
 # Shared boot sectors are not A/B protected: uninterrupted power is required.
+#
+# Installs the "fast" boot pair (TOC1 package + Android boot image) over either
+# audited predecessor, then turns off boot0's serial output:
+#   original  uncompressed kernel. Boots only as a matched pair.
+#   gzip      the first migration (boot-gzip-v1). A gzip half and a fast half
+#             boot together either way round, so every step from here boots.
+#   fast      gzip kernel, empty ramdisk, quiet U-Boot and kernel.
+# The running kernel is byte-identical under all three: nothing restarts, and
+# the new pair takes effect at the next ordinary boot.
 set -eu
 ROOT=${BASEOS_BOOT_TEST_ROOT:-}
 if [ -n "$ROOT" ]; then
 	[ "${BASEOS_BOOT_TESTING:-}" = 1 ] && [ -f "$ROOT/.boot-migration-test" ] || exit 1
 fi
-STATE="$ROOT/data/boot-gzip-v1"
+STATE="$ROOT/data/boot-pair-v2"
+# The first migration's directory is only ever read here: it may hold the
+# user's sole durable copy of the original pair.
+FIRST="$ROOT/data/boot-gzip-v1"
 ASSETS="$ROOT/usr/share/baseos/boot-gzip"
 DISK="$ROOT/dev/mmcblk0"
 BOOT="$ROOT/dev/mmcblk0p4"
@@ -22,16 +34,44 @@ if [ -z "$ROOT" ] && ! awk '
   ("," $4 ",") ~ /,rw,/ { persistent = 1 }
   END { exit !persistent }
 ' /proc/mounts; then
-	printf '%s\n' 'boot-gzip: deferred; persistent writable userdata is unavailable' >&2
+	printf '%s\n' 'boot-pair: deferred; persistent writable userdata is unavailable' >&2
 	exit 0
 fi
-mkdir -p "$STATE"
-log() { printf '%s\n' "boot-gzip: $*" >> "$STATE/migration.log"; }
+
+# The exit status is a contract: frontend-session halts startup on non-zero,
+# which is right only while a boot area has been written but not verified. Any
+# other ending, including an unexpected shell error under set -eu or a signal
+# before the first write, must be an ordinary exit so the device still starts;
+# with no marker a later boot tries again. An unverified ending keeps the
+# working copies in /tmp, where ADB can reach them while power stays on.
+WORK=
+unverified=0
+log() { { printf '%s\n' "boot-pair: $*" >&3; } 2>/dev/null || :; }
 splash() {
 	if [ -x "$ROOT/usr/bin/baseos-splash" ]; then
 		"$ROOT/usr/bin/baseos-splash" --important -1 "$*" 2>/dev/null || :
 	fi
 }
+finish() {
+	if [ "$unverified" = 1 ]; then
+		log "boot areas are unverified; their previous contents are kept in $WORK"
+		splash 'BOOT UPDATE FAILED: KEEP POWER ON'
+		exit 1
+	fi
+	[ -z "$WORK" ] || rm -rf "$WORK"
+	exit 0
+}
+trap finish EXIT
+trap 'exit 0' HUP INT TERM
+
+# One log descriptor, opened once. A redirection that cannot be opened makes
+# its command fail, and no write or readback below may fail for want of a log.
+if ! mkdir -p "$STATE" 2>/dev/null \
+	|| ! { printf '' >> "$STATE/migration.log"; } 2>/dev/null; then
+	printf '%s\n' 'boot-pair: deferred; cannot record progress on userdata' >&2
+	exit 0
+fi
+exec 3>>"$STATE/migration.log"
 complete() {
 	printf '%s\n' "$1" > "$STATE/complete.tmp" || return 1
 	sync
@@ -39,16 +79,50 @@ complete() {
 	sync
 }
 skip() {
-	log "$*; preserving the existing boot pair"
+	log "$*; preserving the existing boot areas"
 	complete "skipped: $*"
 }
-hash() { sha256sum "$1" | cut -d ' ' -f 1; }
-matches() { [ "$(hash "$1")" = "$2" ]; }
+defer() { log "deferred; $*"; exit 0; }
+sha() { sha256sum "$1" 2>&3 | cut -d ' ' -f 1; }
+# The length test keeps a hash that could not be computed from ever matching.
+matches() { [ "${#2}" -eq 64 ] && [ "$(sha "$1")" = "$2" ]; }
 
 # Both files belong to the verified installed rootfs, not a card manifest.
 . "$ASSETS/manifest"
 . "$ROOT/etc/baseos-release"
-if [ "$BASEOS_TARGET" != "$BOOT_TARGET" ]; then skip 'target mismatch'; exit 0; fi
+if [ "${BASEOS_TARGET:-}" != "${BOOT_TARGET:-unset}" ]; then skip 'target mismatch'; exit 0; fi
+# Every value used below must be present and well formed before it reaches
+# arithmetic or a comparison. A manifest from before the fast pair lacks the
+# newer keys. Nothing on the card has been judged yet, so leave no marker: a
+# rootfs update carrying a complete manifest can still migrate.
+for key in PACKAGE_OFFSET PACKAGE_SIZE BOOT_START BOOT_SECTORS BOOT_IMAGE_SIZE \
+	GZIP_BOOT_IMAGE_SIZE ORIGINAL_BOOT_IMAGE_SIZE BOOT0_OFFSET BOOT0_SIZE \
+	BOOT0_DEBUG_OFFSET BOOT0_BODY_OFFSET; do
+	eval "value=\${BOOT_$key:-}"
+	case "$value" in ''|*[!0-9]*|0?*) defer "manifest has no usable BOOT_$key" ;; esac
+done
+for key in PACKAGE_SHA256 BOOT_IMAGE_SHA256 GZIP_PACKAGE_SHA256 GZIP_BOOT_IMAGE_SHA256 \
+	ORIGINAL_PACKAGE_SHA256 ORIGINAL_BOOT_IMAGE_SHA256 ORIGINAL_BOOT_SHA256 \
+	BOOT0_BODY_SHA256; do
+	eval "value=\${BOOT_$key:-}"
+	case "$value" in *[!0-9a-f]*) value= ;; esac
+	[ "${#value}" -eq 64 ] || defer "manifest has no usable BOOT_$key"
+done
+# One read long enough for the longest audited image identifies whichever is
+# installed. Whole sectors only: see read_direct.
+read_bytes=0
+for size in "$BOOT_BOOT_IMAGE_SIZE" "$BOOT_GZIP_BOOT_IMAGE_SIZE" "$BOOT_ORIGINAL_BOOT_IMAGE_SIZE"; do
+	if [ "$size" -eq 0 ] || [ $((size % 512)) -ne 0 ] \
+		|| [ "$size" -gt $((BOOT_BOOT_SECTORS * 512)) ]; then
+		defer 'manifest image sizes do not fit the boot partition'
+	fi
+	[ "$size" -le "$read_bytes" ] || read_bytes=$size
+done
+if [ "$BOOT_PACKAGE_SIZE" -eq 0 ] || [ $((BOOT_PACKAGE_SIZE % 512)) -ne 0 ] \
+	|| [ $((BOOT_PACKAGE_OFFSET % 512)) -ne 0 ]; then
+	defer 'manifest boot package is not sector aligned'
+fi
+
 if [ -z "$ROOT" ] && { [ ! -b "$DISK" ] || [ ! -b "$BOOT" ]; }; then
 	skip 'boot block device unavailable'; exit 0
 fi
@@ -57,8 +131,8 @@ if [ "$(cat "$SYS/class/block/mmcblk0p4/start")" != "$BOOT_BOOT_START" ] \
 	skip 'unrecognized boot partition geometry'; exit 0
 fi
 
-# Defer a low-battery upgrade; the new rootfs can still boot the original
-# kernel. A later ordinary boot retries. No network or frontend setup needed.
+# Defer a low-battery upgrade; the new rootfs boots from every audited pair.
+# A later ordinary boot retries. No network or frontend setup needed.
 powered=0
 capacity=0
 for supply in "$SYS"/class/power_supply/*; do
@@ -70,98 +144,309 @@ for supply in "$SYS"/class/power_supply/*; do
 done
 case "$capacity" in ''|*[!0-9]*) capacity=0 ;; esac
 if [ "$powered" -ne 1 ] && [ "$capacity" -lt 50 ]; then
-	log 'deferred until external power or at least 50% battery'
-	exit 0
+	defer 'waiting for external power or at least 50% battery'
 fi
 if ! matches "$ASSETS/boot-package.bin" "$BOOT_PACKAGE_SHA256" \
-	|| ! matches "$ASSETS/boot.img" "$BOOT_BOOT_IMAGE_SHA256"; then
+	|| ! matches "$ASSETS/boot.img" "$BOOT_BOOT_IMAGE_SHA256" \
+	|| [ "$(wc -c < "$ASSETS/boot-package.bin")" -ne "$BOOT_PACKAGE_SIZE" ] \
+	|| [ "$(wc -c < "$ASSETS/boot.img")" -ne "$BOOT_BOOT_IMAGE_SIZE" ]; then
 	skip 'migration assets failed verification'; exit 0
 fi
 
-WORK=$(mktemp -d "$ROOT/tmp/boot-gzip.XXXXXX")
-trap 'rm -rf "$WORK"' EXIT
-package_read() {
-	dd if="$DISK" of="$WORK/package" bs=512 skip=$((BOOT_PACKAGE_OFFSET / 512)) \
-		count=$((BOOT_PACKAGE_SIZE / 512)) iflag=direct 2>>"$STATE/migration.log"
+WORK=$(mktemp -d "$ROOT/tmp/boot-pair.XXXXXX")
+# read_direct DEVICE OFFSET BYTES FILE: what the card holds, not what the
+# kernel remembers writing. BusyBox dd drops O_DIRECT without a word when a
+# read is refused, which happens for a buffer below one page (it is then not
+# sector aligned) or a length that is not whole sectors. A 1 MiB buffer and the
+# sector checks above keep every read here genuinely direct.
+read_direct() {
+	dd if="$1" of="$4" bs=1M skip="$2" count="$3" iflag=direct,skip_bytes,count_bytes 2>&3
 }
-verify_pair() {
-	package_read || return 1
-	matches "$WORK/package" "$1" || return 1
-	dd if="$BOOT" of="$WORK/boot-readback" bs=1M iflag=direct 2>>"$STATE/migration.log" || return 1
-	matches "$WORK/boot-readback" "$2"
+# Each write returns dd's status, and conv=fsync makes that include the flush
+# to the card. Only the source's own bytes are written: whatever follows the
+# image in the partition is left alone.
+write_image() { dd if="$1" of="$BOOT" bs=1M conv=notrunc,fsync 2>&3; }
+write_package() {
+	dd if="$1" of="$DISK" bs=512 seek=$((BOOT_PACKAGE_OFFSET / 512)) conv=notrunc,fsync 2>&3
 }
-if ! package_read; then skip 'cannot read boot package'; exit 0; fi
-current_package=$(hash "$WORK/package")
-current_boot=$(hash "$BOOT")
-if [ "$current_package" = "$BOOT_PACKAGE_SHA256" ] \
-	&& [ "$current_boot" = "$BOOT_BOOT_PARTITION_SHA256" ]; then
-	log 'gzip boot pair already installed'
-	complete already-installed
-	exit 0
-fi
-if [ "$current_package" != "$BOOT_ORIGINAL_PACKAGE_SHA256" ] \
-	|| [ "$current_boot" != "$BOOT_ORIGINAL_BOOT_SHA256" ]; then
-	skip 'firmware differs from the audited original pair'; exit 0
-fi
+# The boot0 patch must reach the card as one sector and nothing more. A plain
+# 512-byte write goes through the block cache, which rewrites the whole 4 KiB
+# block around it: seven sectors of boot0's body as well. O_DIRECT from a
+# page-aligned buffer sends just the one, so count and seek are in bytes here.
+write_boot0_sector() {
+	dd if="$1" of="$DISK" bs=1M count=512 seek="$BOOT_BOOT0_OFFSET" \
+		iflag=count_bytes oflag=direct,seek_bytes conv=notrunc,fsync 2>&3
+}
+# Readback tests: is the first $1 bytes of the partition / the package / boot0
+# on the card exactly the bytes with this hash?
+image_is() { read_direct "$BOOT" 0 "$1" "$WORK/image.readback" && matches "$WORK/image.readback" "$2"; }
+package_is() {
+	read_direct "$DISK" "$BOOT_PACKAGE_OFFSET" "$BOOT_PACKAGE_SIZE" "$WORK/package.readback" \
+		&& matches "$WORK/package.readback" "$1"
+}
+boot0_is() {
+	read_direct "$DISK" "$BOOT_BOOT0_OFFSET" "$BOOT_BOOT0_SIZE" "$WORK/boot0.readback" \
+		&& matches "$WORK/boot0.readback" "$1"
+}
 
-# Backups are durable on userdata before either shared boot component changes.
-# Never overwrite an existing backup unless its exact original hash matches.
-backup() {
-	if [ -e "$STATE/$2" ]; then
-		matches "$STATE/$2" "$3" || return 1
-	else
-		dd if="$1" of="$STATE/$2.tmp" bs=1M conv=fsync 2>>"$STATE/migration.log" || return 1
-		matches "$STATE/$2.tmp" "$3" || return 1
-		mv "$STATE/$2.tmp" "$STATE/$2" || return 1
-		sync
+# Identify the installed pair. U-Boot reads only the bytes the image header
+# describes, so an image is recognised by a hash over exactly that many bytes
+# from the start of the partition; what lies beyond differs from card to card.
+# These two files are also what an in-session rollback puts back.
+if ! read_direct "$DISK" "$BOOT_PACKAGE_OFFSET" "$BOOT_PACKAGE_SIZE" "$WORK/package.cur" \
+	|| ! read_direct "$BOOT" 0 "$read_bytes" "$WORK/image.cur"; then
+	skip 'cannot read the installed boot pair'; exit 0
+fi
+previous_package=$(sha "$WORK/package.cur")
+previous_image=$(sha "$WORK/image.cur")
+case "$previous_package" in
+"$BOOT_PACKAGE_SHA256") package_state=fast ;;
+"$BOOT_GZIP_PACKAGE_SHA256") package_state=gzip ;;
+"$BOOT_ORIGINAL_PACKAGE_SHA256") package_state=original ;;
+*) package_state=unknown ;;
+esac
+image_prefix_is() {
+	[ "$(head -c "$1" "$WORK/image.cur" | sha256sum | cut -d ' ' -f 1)" = "$2" ]
+}
+if image_prefix_is "$BOOT_BOOT_IMAGE_SIZE" "$BOOT_BOOT_IMAGE_SHA256"; then
+	image_state=fast image_bytes=$BOOT_BOOT_IMAGE_SIZE image_sha=$BOOT_BOOT_IMAGE_SHA256
+elif image_prefix_is "$BOOT_GZIP_BOOT_IMAGE_SIZE" "$BOOT_GZIP_BOOT_IMAGE_SHA256"; then
+	image_state=gzip image_bytes=$BOOT_GZIP_BOOT_IMAGE_SIZE image_sha=$BOOT_GZIP_BOOT_IMAGE_SHA256
+elif image_prefix_is "$BOOT_ORIGINAL_BOOT_IMAGE_SIZE" "$BOOT_ORIGINAL_BOOT_IMAGE_SHA256"; then
+	image_state=original image_bytes=$BOOT_ORIGINAL_BOOT_IMAGE_SIZE
+	image_sha=$BOOT_ORIGINAL_BOOT_IMAGE_SHA256
+else
+	image_state=unknown
+fi
+# A pair counts only when both halves are recognised. gzip/fast mixtures are
+# what an interrupted earlier run of this migration leaves behind; they boot
+# and are completed like a gzip pair. An original half beside anything else is
+# not a state this system could have booted from, so it is unknown firmware.
+case "$package_state/$image_state" in
+fast/fast) pair=fast ;;
+gzip/gzip|gzip/fast|fast/gzip) pair=gzip ;;
+original/original) pair=original ;;
+*)
+	skip "firmware differs from the audited pairs (package $package_state, image $image_state)"
+	exit 0 ;;
+esac
+
+# boot0 rewrites its own first sector on the card at every boot (checksum and
+# memory-training results), so only the bytes after that sector can be pinned
+# by hash. The header is judged by structure: magic, length word and a checksum
+# that reproduces. The Allwinner checksum is the 32-bit sum of every
+# little-endian word with the stored checksum (word 3) replaced by 0x5F0A6C39.
+# 16384 words sum to less than 2^46, so awk's doubles are exact. od prints
+# words in the byte order of the machine, which is little-endian on every
+# target; anywhere else the checks below fail and boot0 is simply left alone.
+# Word 4 is the length; only the first sector's words are kept for lookup.
+# Sets boot0_fault (empty when sound), boot0_debug and boot0_sum.
+boot0_inspect() {
+	boot0_fault= boot0_debug= boot0_sum=
+	read -r boot0_words boot0_length boot0_debug boot0_sum boot0_computed <<EOF
+$(od -An -v -tu4 "$1" 2>&3 | awk -v debug="$((BOOT_BOOT0_DEBUG_OFFSET / 4))" '
+	BEGIN { n = 0 }
+	{ for (i = 1; i <= NF; i++) { if (n < 128) word[n] = $i; total += $i; n++ } }
+	END {
+		printf "%d %.0f %d %.0f %.0f\n", n, word[4], word[debug] % 256, word[3],
+			(total - word[3] + 1594518585) % 4294967296
+	}')
+EOF
+	if [ "$boot0_words" != "$((BOOT_BOOT0_SIZE / 4))" ]; then
+		boot0_fault='cannot be read in full'
+	elif [ "$(od -An -tx1 -j4 -N8 "$1" 2>&3 | tr -d ' \n')" != 65474f4e2e425430 ]; then	# eGON.BT0
+		boot0_fault='unexpected magic'
+	elif [ "$boot0_length" != "$BOOT_BOOT0_SIZE" ]; then
+		boot0_fault='unexpected length'
+	elif [ "$(tail -c +$((BOOT_BOOT0_BODY_OFFSET + 1)) "$1" | sha256sum | cut -d ' ' -f 1)" \
+		!= "$BOOT_BOOT0_BODY_SHA256" ]; then
+		boot0_fault='unexpected contents'
+	elif [ "$boot0_sum" != "$boot0_computed" ]; then
+		boot0_fault='checksum does not reproduce'
+	elif [ "$boot0_debug" != 3 ] && [ "$boot0_debug" != 0 ]; then
+		boot0_fault="unexpected debug value $boot0_debug"
 	fi
+	[ -z "$boot0_fault" ]
 }
-need_kb=4096
-[ -f "$STATE/boot-original.bin" ] || need_kb=$((need_kb + BOOT_BOOT_SECTORS / 2))
-[ -f "$STATE/package-original.bin" ] || need_kb=$((need_kb + BOOT_PACKAGE_SIZE / 1024))
-free_kb=$(df -Pk "$STATE" | awk 'END { print $4 }')
-case "$free_kb" in ''|*[!0-9]*) skip 'cannot determine backup space'; exit 0 ;; esac
-if [ "$free_kb" -lt "$need_kb" ]; then skip 'insufficient userdata space for backups'; exit 0; fi
-splash 'OPTIMISING STARTUP: KEEP POWER ON'
-if ! backup "$BOOT" boot-original.bin "$BOOT_ORIGINAL_BOOT_SHA256" \
-	|| ! backup "$WORK/package" package-original.bin "$BOOT_ORIGINAL_PACKAGE_SHA256"; then
-	skip 'could not save and verify original boot backups'; exit 0
+# Examine boot0 before anything is written. A boot0 that fails any check is
+# never touched; the pair is still migrated and the result says why.
+boot0_plan=leave boot0_fault= boot0_debug= boot0_sum=
+if [ "$BOOT_BOOT0_BODY_OFFSET" -ne 512 ] || [ "$BOOT_BOOT0_DEBUG_OFFSET" -ge 512 ] \
+	|| [ $((BOOT_BOOT0_DEBUG_OFFSET % 4)) -ne 0 ] \
+	|| [ $((BOOT_BOOT0_OFFSET % 512)) -ne 0 ] || [ $((BOOT_BOOT0_SIZE % 512)) -ne 0 ]; then
+	# The patch assumes the debug byte is the low byte of a word inside the
+	# one sector boot0 rewrites, and that the pinned body is everything else.
+	boot0_fault='manifest describes a layout this patch does not cover'
+elif ! read_direct "$DISK" "$BOOT_BOOT0_OFFSET" "$BOOT_BOOT0_SIZE" "$WORK/boot0.cur"; then
+	boot0_fault='cannot be read'
+elif boot0_inspect "$WORK/boot0.cur"; then
+	if [ "$boot0_debug" = 0 ]; then boot0_plan=quiet; else boot0_plan=patch; fi
 fi
+boot0_note=
+[ "$boot0_plan" != leave ] || boot0_note="boot0 left unchanged: $boot0_fault"
+log "found package $package_state, image $image_state, ${boot0_note:-boot0 debug $boot0_debug}"
 
-install_pair() {
-	dd if="$ASSETS/boot.img" of="$BOOT" bs=1M conv=notrunc,fsync 2>>"$STATE/migration.log" || return 1
-	dd if="$ASSETS/boot-package.bin" of="$DISK" bs=512 seek=$((BOOT_PACKAGE_OFFSET / 512)) \
-		conv=notrunc,fsync 2>>"$STATE/migration.log" || return 1
+# A durable recovery copy must be on userdata before either shared boot
+# component changes. An existing backup that is not exactly what its name says
+# is never overwritten. save FILE BYTES NAME HASH keeps the first BYTES of FILE.
+save() {
+	if [ -e "$STATE/$3" ]; then
+		matches "$STATE/$3" "$4"
+		return
+	fi
+	dd if="$1" of="$STATE/$3.tmp" bs=1M count="$2" iflag=count_bytes conv=fsync 2>&3 || return 1
+	matches "$STATE/$3.tmp" "$4" || return 1
+	mv "$STATE/$3.tmp" "$STATE/$3" || return 1
 	sync
-	verify_pair "$BOOT_PACKAGE_SHA256" "$BOOT_BOOT_PARTITION_SHA256"
+}
+install_pair() {
+	if [ "$image_state" != fast ]; then
+		write_image "$ASSETS/boot.img" || return 1
+		# Beside a gzip or fast package this image already boots, so prove it
+		# before touching the package, which has no second copy on the card.
+		# Beside the original package it does not boot: go straight on and
+		# close that window, as the first migration did.
+		if [ "$pair" != original ] \
+			&& ! image_is "$BOOT_BOOT_IMAGE_SIZE" "$BOOT_BOOT_IMAGE_SHA256"; then
+			return 1
+		fi
+	fi
+	if [ "$package_state" != fast ]; then
+		write_package "$ASSETS/boot-package.bin" || return 1
+	fi
+	sync
+	image_is "$BOOT_BOOT_IMAGE_SIZE" "$BOOT_BOOT_IMAGE_SHA256" && package_is "$BOOT_PACKAGE_SHA256"
 }
 restore_pair() {
-	# Attempt both writes even if one fails, then judge actual direct readback.
-	dd if="$STATE/boot-original.bin" of="$BOOT" bs=1M conv=notrunc,fsync 2>>"$STATE/migration.log" || :
-	dd if="$STATE/package-original.bin" of="$DISK" bs=512 seek=$((BOOT_PACKAGE_OFFSET / 512)) \
-		conv=notrunc,fsync 2>>"$STATE/migration.log" || :
+	# Judge by direct readback, not by which write reported an error, and put
+	# back only what no longer matches: a component that was never changed is
+	# not put at risk a second time. Package first: it is the quick write, and
+	# beside a gzip package either image boots.
+	package_is "$previous_package" || write_package "$WORK/package.cur" || :
+	image_is "$read_bytes" "$previous_image" || write_image "$WORK/image.cur" || :
 	sync
-	verify_pair "$BOOT_ORIGINAL_PACKAGE_SHA256" "$BOOT_ORIGINAL_BOOT_SHA256"
+	package_is "$previous_package" && image_is "$read_bytes" "$previous_image"
 }
-# Do not allow a frontend/process signal to interrupt the paired write. This
-# cannot protect against loss of power; the backups support offline recovery.
-trap '' HUP INT TERM
-log 'original pair verified; backups complete; installing gzip pair'
-if install_pair; then
-	log 'gzip pair verified by direct readback'
-	complete installed
-	# The already-running kernel is byte-identical to the decompressed Image.
-	# Continue this session; the next ordinary boot uses the optimised pair.
-	# No migration-only restart, shutdown race or extra trial boot is needed.
-	log 'continuing startup; gzip takes effect at the next ordinary boot'
+# boot0 has no second copy on the card and no fixed image to compare with.
+# Returns 0 when it is patched and verified, 1 when it is verified to be
+# exactly as found (boot0_fault says why), 2 when its state is unknown.
+patch_boot0() {
+	# Build the sector from a fresh read, not from the one taken before the
+	# pair was written, and repeat every check on it.
+	if ! read_direct "$DISK" "$BOOT_BOOT0_OFFSET" "$BOOT_BOOT0_SIZE" "$WORK/boot0.cur"; then
+		boot0_fault='cannot be read'
+		return 1
+	fi
+	boot0_inspect "$WORK/boot0.cur" || return 1
+	[ "$boot0_debug" != 0 ] || return 0
+	boot0_before=$(sha "$WORK/boot0.cur")
+	old_debug=$boot0_debug old_sum=$boot0_sum
+	# The debug byte is the low byte of a little-endian word, so clearing it
+	# lowers the 32-bit sum by exactly its value. Adding 2^32 first keeps a
+	# checksum smaller than that value from going negative.
+	new_sum=$(((old_sum + 4294967296 - old_debug) % 4294967296))
+	boot0_fault='a patched header could not be prepared'
+	cp "$WORK/boot0.cur" "$WORK/boot0.new" || return 1
+	printf "$(printf '\\%03o\\%03o\\%03o\\%03o' $((new_sum & 255)) $((new_sum >> 8 & 255)) \
+		$((new_sum >> 16 & 255)) $((new_sum >> 24 & 255)))" \
+		| dd of="$WORK/boot0.new" bs=1 seek=12 conv=notrunc 2>&3 || return 1
+	printf '\000' \
+		| dd of="$WORK/boot0.new" bs=1 seek="$BOOT_BOOT0_DEBUG_OFFSET" conv=notrunc 2>&3 || return 1
+	# Prove the candidate with the full checksum, not the shortcut above,
+	# before any of it goes near the card.
+	if ! boot0_inspect "$WORK/boot0.new" || [ "$boot0_debug" != 0 ]; then
+		boot0_fault='the patched header failed its own checks'
+		return 1
+	fi
+	boot0_after=$(sha "$WORK/boot0.new")
+	trap '' HUP INT TERM
+	unverified=1
+	log "boot0: debug $old_debug -> 0, checksum $old_sum -> $new_sum; writing one sector"
+	# Only the first sector of the candidate is written: the one sector boot0
+	# itself rewrites. Then all of boot0 is read back and judged again.
+	if write_boot0_sector "$WORK/boot0.new" && boot0_is "$boot0_after" \
+		&& boot0_inspect "$WORK/boot0.readback" && [ "$boot0_debug" = 0 ]; then
+		unverified=0
+		return 0
+	fi
+	log 'boot0 patch failed verification; restoring the previous sector'
+	boot0_is "$boot0_before" || write_boot0_sector "$WORK/boot0.cur" || :
+	boot0_is "$boot0_before" || return 2
+	unverified=0
+	boot0_fault='the patch could not be verified and was undone'
+	return 1
+}
+
+if [ "$pair" = fast ] && [ "$boot0_plan" != patch ]; then
+	log 'fast boot pair already installed; nothing to write'
+	complete "already-installed${boot0_note:+; $boot0_note}"
 	exit 0
 fi
-log 'installation failed; restoring the original boot pair'
-if restore_pair; then
-	log 'original pair restored and verified; continuing normal startup'
-	complete rolled-back
-	exit 0
+splash 'OPTIMISING STARTUP: KEEP POWER ON'
+result=already-installed
+if [ "$pair" != fast ]; then
+	# The first migration's copy of the original pair is recovery enough while
+	# intact: written back together, its halves boot. It is not duplicated.
+	# Otherwise save the installed pair itself, image bytes only.
+	if [ -f "$FIRST/package-original.bin" ] && [ -f "$FIRST/boot-original.bin" ] \
+		&& matches "$FIRST/package-original.bin" "$BOOT_ORIGINAL_PACKAGE_SHA256" \
+		&& matches "$FIRST/boot-original.bin" "$BOOT_ORIGINAL_BOOT_SHA256"; then
+		log 'recovery copy: the original pair saved by the first migration is intact'
+	else
+		package_copy=package-$package_state.bin
+		image_copy=boot-image-$image_state.bin
+		need_kb=4096
+		[ -e "$STATE/$package_copy" ] || need_kb=$((need_kb + BOOT_PACKAGE_SIZE / 1024))
+		[ -e "$STATE/$image_copy" ] || need_kb=$((need_kb + image_bytes / 1024))
+		free_kb=$(df -Pk "$STATE" | awk 'END { print $4 }')
+		case "$free_kb" in ''|*[!0-9]*) skip 'cannot determine backup space'; exit 0 ;; esac
+		if [ "$free_kb" -lt "$need_kb" ]; then skip 'insufficient userdata space for backups'; exit 0; fi
+		if ! save "$WORK/package.cur" "$BOOT_PACKAGE_SIZE" "$package_copy" "$previous_package" \
+			|| ! save "$WORK/image.cur" "$image_bytes" "$image_copy" "$image_sha"; then
+			skip 'could not save and verify boot backups'; exit 0
+		fi
+		log "recovery copy: saved $package_copy and $image_copy"
+	fi
+	# Do not allow a frontend/process signal to interrupt the writes. This
+	# cannot protect against loss of power; the backups support offline recovery.
+	trap '' HUP INT TERM
+	unverified=1
+	log "backups complete; installing the fast pair over the $pair pair"
+	if install_pair; then
+		unverified=0
+		log 'fast pair verified by direct readback'
+		result=installed
+	else
+		log 'installation failed; restoring the previous boot pair'
+		if restore_pair; then
+			unverified=0
+			log 'previous pair restored and verified; continuing normal startup'
+			complete rolled-back
+			exit 0
+		fi
+		log 'RESTORE FAILED: keep power on; ADB remains available; do not reboot'
+		exit 1
+	fi
 fi
-log 'RESTORE FAILED: keep power on; ADB remains available; do not reboot'
-splash 'BOOT UPDATE FAILED: KEEP POWER ON'
-exit 1
+# boot0 goes last, once the pair it starts is proven.
+if [ "$boot0_plan" = patch ]; then
+	status=0
+	patch_boot0 || status=$?
+	case "$status" in
+	0)
+		log 'boot0 patch verified by direct readback'
+		result=installed ;;
+	1)
+		boot0_note="boot0 left unchanged: $boot0_fault"
+		log "$boot0_note" ;;
+	*)
+		log 'BOOT0 RESTORE FAILED: keep power on; ADB remains available; do not reboot'
+		exit 1 ;;
+	esac
+fi
+complete "$result${boot0_note:+; $boot0_note}"
+# The already-running kernel is byte-identical to the one in the fast image.
+# Continue this session; the next ordinary boot uses the optimised pair.
+# No migration-only restart, shutdown race or extra trial boot is needed.
+log 'continuing startup; changes take effect at the next ordinary boot'
+exit 0

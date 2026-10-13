@@ -567,13 +567,29 @@ chmod 755 /usr/sbin/baseos-boot-migrate
 run_session
 [ "$status" -eq 0 ]
 [ "$(cat /tmp/migration.log)" = called ]
+[ "$(cat /tmp/frontend.log)" = "$(printf 'nextui\nroot=unset\n')" ]
+# A card that completed the earlier gzip migration still runs the helper: only
+# the boot-pair-v2 marker means the faster pair has been dealt with.
 reset
 nextui_card
 mkdir -p /data/boot-gzip-v1
 echo installed > /data/boot-gzip-v1/complete
 run_session
-[ "$status" -eq 0 ] && [ ! -e /tmp/migration.log ]
-rm /data/boot-gzip-v1/complete
+[ "$status" -eq 0 ]
+[ "$(cat /tmp/migration.log)" = called ]
+[ "$(cat /data/boot-gzip-v1/complete)" = installed ]
+# Any completion text ends it, including a result that carries a note.
+for result in installed already-installed rolled-back 'skipped: target mismatch' \
+	'installed; boot0 left unchanged: unexpected magic'; do
+	reset
+	nextui_card
+	mkdir -p /data/boot-pair-v2
+	echo "$result" > /data/boot-pair-v2/complete
+	run_session
+	[ "$status" -eq 0 ] && [ ! -e /tmp/migration.log ]
+	[ "$(cat /tmp/frontend.log)" = "$(printf 'nextui\nroot=unset\n')" ]
+done
+rm -r /data/boot-pair-v2 /data/boot-gzip-v1
 reset
 nextui_card
 echo /dev/mmcblk1 > /run/usb-storage-device
