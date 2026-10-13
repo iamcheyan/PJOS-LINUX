@@ -96,7 +96,9 @@ family; `BASEOS_MODEL_STRING` is the stock-style compatibility value.
 `build-image.sh` reads p2/p5 offsets from `source.json`, not constants. It preserves
 p1/p3 byte-for-byte, derives the exact [boot files](12-kernel-gzip.md) including the
 one changed byte and checksum in boot0, retains p2 geometry while replacing only
-`bootlogo.bmp`, regenerates both GPTs, creates 4.9-safe journalled ext4 filesystems,
+`bootlogo.bmp`, regenerates both GPTs, packs `/usr/lib` into a
+[squashfs file](01-rootfs-and-init.md#the-usrlib-image) inside the rootfs, creates
+4.9-safe journalled ext4 filesystems,
 and creates the small FAT data partition expanded on first boot. Bootlogos are rendered
 per target at 480×640, 640×480, 720×480 or 720×720; runtime `fbsplash` still reads the
 actual framebuffer geometry.
@@ -137,6 +139,9 @@ Every image build checks:
 - rootfs slot A and `UDISK` with read-only `e2fsck`, and slot B empty;
 - `/init`, `gptgrow`, `gptslot`, executable `expand-storage` and `baseos-update`, and
   exact target identity in the rootfs;
+- the loop driver and LZ4 squashfs in the target's kernel;
+- the `/usr/lib` image against the directory it replaces, its copy inside slot A,
+  and an empty `/usr/lib` directory in slot A;
 - the embedded bootlogo bytes and native dimensions;
 - FAT32 readability on `primary`.
 

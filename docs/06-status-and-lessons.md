@@ -23,6 +23,7 @@ test does not establish hardware support on every target.
 | Hostname and mDNS | RG34XX SP network validation | Per-target and host-network compatibility |
 | Boot files without the initramfs, and their migration | RG SP: update from 1.3.0, migration on first boot, warm restarts, a cold power-on, an empty TF2 slot, sleep and wake | Every other target |
 | USB host controllers started by `h700_late_usb.ko` | RG SP: six root hubs present, adb over USB, sleep and wake, a USB audio adapter on the OTG port | A device on one of the five controllers the module starts; every other target |
+| `/usr/lib` served from a squashfs image | RG SP: update from the previous build through the updater, warm restarts, sleep and wake, all on-device checks | Every other target; a normal power-off and power-on; a 32-bit program |
 
 ## 2. Boot and build constraints
 
@@ -52,10 +53,6 @@ the relevant subsystem document for its acceptance criteria.
 ## 4. Open work
 
 - Read-only rootfs after initialization for power-loss resilience.
-- Serve `/usr/lib` from a squashfs image. On the RG SP this brought NextUI's
-  first frame 0.58 s earlier. The
-  [experiment notes](../experiments/h700-boot-speed/README.md) have the
-  measurements and what a squashfs root would need.
 - Complete the remaining hardware checks above across supported H700 models.
 - Define `/data` schema migration before storing state that cannot be regenerated.
 

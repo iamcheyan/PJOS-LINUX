@@ -3,7 +3,8 @@
 `/run`, `/tmp`, `/var` and `/dev` are RAM-backed; `/proc` and `/sys` are kernel
 interfaces. The root filesystem, `/data` and frontend card are persistent.
 The root filesystem is mounted read-write, by the vendor initramfs on a card
-that still has one and by `rcS` otherwise.
+that still has one and by `rcS` otherwise. `/usr/lib` is a read-only squashfs
+image stored in the root filesystem.
 
 ## Runtime policy
 

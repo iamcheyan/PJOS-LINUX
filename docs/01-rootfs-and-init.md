@@ -1,7 +1,9 @@
 # 01 — Root filesystem and init
 
 The active rootfs is a 512 MiB ext4 slot containing BusyBox, harvested vendor
-libraries and BaseOS tools. `/bin`, `/sbin` and `/lib` link into `/usr`.
+libraries and BaseOS tools. `/bin`, `/sbin` and `/lib` link into `/usr`. In a
+composed image `/usr/lib` is a squashfs file that `rcS` mounts over the
+directory. See [the `/usr/lib` image](#the-usrlib-image).
 
 ## 1. Build inputs
 
@@ -32,6 +34,7 @@ as harvested. See [boot performance](09-boot-profiling.md).
 | Path | Purpose |
 | --- | --- |
 | `/data` | Persistent p6 state: SSH keys, Bluetooth, entropy, time preferences and update state |
+| `/usr/lib` | Read-only squashfs image of the libraries, kernel modules and firmware |
 | `/mnt/sdcard` | Active frontend card: usable TF2 p1, otherwise TF1 p7 |
 | `/mnt/SDCARD` | Compatibility symlink to `/mnt/sdcard` |
 | `/mnt/system` | Temporary read-only TF1 mount for configuration and update discovery when needed |
@@ -46,6 +49,44 @@ read-only. If mounting p6 fails, `rcS` uses tmpfs for `/data`, so
 state from that boot is not persistent. Shutdown flushes persistent mounts;
 see [power handling](05-runtime-power-network.md).
 
+### The `/usr/lib` image
+
+`build-image.sh` packs `/usr/lib` into the squashfs file
+`/usr/share/baseos/usr-lib.sqfs` and leaves the directory empty. `rcS` mounts
+the file read-only over `/usr/lib` through a loop device, right after it has
+dealt with the root filesystem. Everything `rcS` runs before that is static:
+BusyBox and the bundled `e2fsck`. A bare rootfs tree, such as the one the QEMU
+test boots, has no image file and keeps its libraries in the directory.
+
+The image exists because the card is slow. It reads about 20 MB/s, and a
+frontend loads most of the 19 MB GPU library before it can draw. The image
+uses LZ4 HC with 128 KiB blocks. That halves the bytes, and the processor
+unpacks LZ4 faster than the card delivers. On the RG SP NextUI drew its first
+frame about 0.7 s earlier, and the time to the handoff did not change. gzip
+and xz images are smaller, but unpacking them takes longer than the read they
+save. [The experiment notes](../experiments/h700-boot-speed/README.md) have
+the measurements.
+
+The image has these consequences.
+
+- `/usr/lib` is read-only, including the kernel modules and firmware under
+  it. To try a changed library or module on a device, load it from another
+  path or build a new image.
+- The root stays ext4 and writable, and an update payload is still one slot
+  image. A card on an older release takes the update as before.
+- The kernel caches the compressed blocks as well as the unpacked pages. Both
+  are page cache, which the kernel gives up when a program needs the memory.
+- If the image does not mount, no dynamic program can start. `rcS` writes a
+  line to the kernel log and carries on with its static tools.
+  `frontend-session` does not confirm an update on such a boot, so the third
+  failed boot flips back to the previous slot.
+
+The build guards against that case twice. `tools/lib_image.py` reads each
+target's kernel configuration and refuses a kernel without the loop driver or
+LZ4 squashfs built in. `build-image.sh` unpacks the image again and compares
+every name, mode, owner, link and content with the directory before it
+empties the directory.
+
 ## 3. Init and startup order
 
 The kernel, or the vendor initramfs on a card that still has one, runs the
@@ -56,7 +97,7 @@ regular executable `/init` script, which executes BusyBox init. `/etc/inittab` r
 
 1. Mount kernel interfaces. If the kernel mounted the root filesystem
    read-only, run `e2fsck` when the filesystem has recorded errors, then
-   remount it writable. Mount the tmpfs filesystems. Apply SP Super Standby
+   remount it writable. Mount the `/usr/lib` image. Mount the tmpfs filesystems. Apply SP Super Standby
    where supported. Mount `debugfs` for the HDMI display-control and MENU GPIO
    interfaces.
 2. Handle charger-origin startup before ordinary initialization; see

@@ -108,6 +108,8 @@ only to seed history on migration. Diagnostics, including confirmation, use
 an open trial's attempt count and flips back on the third boot that reaches
 this check without prior confirmation. `frontend-session` confirms the trial
 on session start, even without an installed frontend, then removes trial state.
+It does not confirm when the dynamic loader is missing, because then the
+[`/usr/lib` image](01-rootfs-and-init.md#the-usrlib-image) did not mount.
 Charging-only sessions do not reach either operation.
 
 Rollback requires userspace to reach `boot-check`. It cannot recover a rootfs

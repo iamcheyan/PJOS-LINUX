@@ -38,6 +38,13 @@ Cold read of the 16 libraries from the squashfs image, caches dropped, three run
   does not drop pages that a running program has mapped. At 19.7 MB/s the
   25.0 MB would take about 1.3 s.
 
+The shipped image
+  squashfs-shipped is build v1.3.0-14-g05f61c0, installed by the updater. It
+  keeps /usr/lib in the file /usr/share/baseos/usr-lib.sqfs (27,353,088 bytes
+  for 52 MB of libraries) and rcS mounts that file over the directory. Only the
+  sampler was added to its startup script for these boots. The ext4 rows above
+  it ran on the previous build in the same slot of the same card.
+
 Seconds are kernel uptime. Reads are the whole card's, in MiB, up to the first frame.
 Busy is the time the card spent on requests between the handoff and the first frame.
 
@@ -66,6 +73,10 @@ squashfs-preload            3        3.024     1.78        5.04   33.6     2670
 squashfs-ra1024             1        2.772     1.52        4.70   41.1     2430
 squashfs-ra1024             2        2.810     1.44        4.42   41.1     2450
 squashfs-ra1024             3        2.781     1.44        4.44   41.1     2330
+squashfs-shipped            1        3.017     1.32        3.82   33.5     1970
+squashfs-shipped            2        2.747     1.31        3.93   33.6     2080
+squashfs-shipped            3        2.750     1.39        4.18   33.6     2090
+squashfs-shipped            4        2.749     1.39        4.19   33.5     2130
 
 medians                     n               handoff first frame  reads  busy ms
 ext4                        3                  1.35        4.76   43.6     2780
@@ -76,3 +87,4 @@ ext4-ra1024                 3                  1.39        4.87   54.4     2720
 squashfs                    3                  1.41        4.18   33.7     2130
 squashfs-preload            3                  1.78        4.43   33.6     1810
 squashfs-ra1024             3                  1.44        4.44   41.1     2430
+squashfs-shipped            4                  1.35        4.05   33.6     2085

@@ -11,6 +11,8 @@ counters and a hash of the framebuffer every 50 ms into /run/lab-trace. The
 first frame is the first sample whose hash differs from the boot logo's.
 
 A variant name selects the switches by the words it contains:
+  shipped       change nothing; the build under test serves /usr/lib its own way
+                and only needs the sampler at the end of the patch
   squashfs      bind /usr/lib from the squashfs image
   preload       read the library list in the background from the start of rcS
   preload-idle  the same at idle I/O priority
@@ -38,17 +40,20 @@ def run(rounds: int, variants: list[str]) -> None:
             mode = ("idle" if "preload-idle" in label else "late" if "preload-late" in label
                     else "early" if "preload" in label else "")
             ahead = "1024" if "ra1024" in label else ""
-            lab.sh("rm -f /etc/lab-sqfs /etc/lab-sqfs.used /etc/lab-preload-mode /etc/lab-ra;"
-                   + (" touch /etc/lab-sqfs;" if "squashfs" in label else "")
-                   + (f" echo {mode} > /etc/lab-preload-mode;" if mode else "")
-                   + (f" echo {ahead} > /etc/lab-ra;" if ahead else "")
-                   + " sync")
+            shipped = "shipped" in label
+            if not shipped:
+                lab.sh("rm -f /etc/lab-sqfs /etc/lab-sqfs.used /etc/lab-preload-mode /etc/lab-ra;"
+                       + (" touch /etc/lab-sqfs;" if "squashfs" in label else "")
+                       + (f" echo {mode} > /etc/lab-preload-mode;" if mode else "")
+                       + (f" echo {ahead} > /etc/lab-ra;" if ahead else "")
+                       + " sync")
             lab.reboot()
             lab.collect(label)
             newest = max(RUNS.glob(f"{label}-*.json"), key=lambda p: p.stat().st_mtime)
             newest.with_suffix(".trace").write_text(lab.sh("cat /run/lab-trace") + "\n")
             bound = lab.sh("grep -c ' /usr/lib squashfs ' /proc/mounts || true")
-            lab.require((bound == "1") == ("squashfs" in label), f"{label}: /usr/lib is not served as intended")
+            lab.require(shipped or (bound == "1") == ("squashfs" in label),
+                        f"{label}: /usr/lib is not served as intended")
 
 
 def boots() -> dict:

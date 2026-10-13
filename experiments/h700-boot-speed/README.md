@@ -172,6 +172,7 @@ before Linux, about 2.77 s, comes on top.
 |---|---:|---:|---:|
 | ext4, as the branch ships | 1.35 | 4.76 | 43.6 MiB |
 | `/usr/lib` from a squashfs image | 1.41 | 4.18 | 33.7 MiB |
+| The `/usr/lib` image as BaseOS now ships it, four boots | 1.35 | 4.05 | 33.6 MiB |
 | ext4, libraries read ahead from the start of `rcS` | 2.38 | 4.37 | 45.5 MiB |
 | The same at idle I/O priority | 2.35 | 4.28 | 45.5 MiB |
 | ext4, libraries read ahead from the end of `rcS` | 1.45 | 4.45 | 45.5 MiB |
@@ -196,7 +197,15 @@ over the real one. Every file in it had the same hash as its ext4 copy.
 [`evidence/first-frame-test-rcS.patch`](evidence/first-frame-test-rcS.patch)
 is the startup script the tests used.
 
-The branch ships none of these variants.
+BaseOS now ships the squashfs variant in a simpler form. `build-image.sh`
+stores `/usr/lib` as a squashfs file inside the ext4 root, and `rcS` mounts
+that file directly over the directory. With one mount and no bind the handoff
+is no later than on ext4, and the first frame came about 0.7 s earlier than in
+the ext4 row. The update to that build went through the normal updater, and
+the build passed all 41 checks of `validate-on-device.sh` and a 30-second
+sleep. [`evidence/lib-image-update-install.txt`](evidence/lib-image-update-install.txt)
+has the record, and [rootfs and init](../../docs/01-rootfs-and-init.md#the-usrlib-image)
+describes the image. Reading ahead and the larger read-ahead window stay out.
 
 ### What a squashfs root would need
 
@@ -215,9 +224,10 @@ Three things stand in the way of making the whole root squashfs.
   directory is on the root filesystem.
 
 Serving only `/usr/lib` from an image stored in the ext4 root avoids all
-three. The root stays ext4 and writable, the updater handles the same kind of
-slot image, and the first boot through the initramfs works as before. Every
-supported kernel has squashfs with LZ4 and the loop driver built in.
+three, which is why BaseOS ships that form. The root stays ext4 and writable,
+the updater handles the same kind of slot image, and the first boot through
+the initramfs works as before. Every supported kernel has squashfs with LZ4
+and the loop driver built in, and the build checks that.
 
 ## Not done
 
