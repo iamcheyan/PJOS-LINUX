@@ -3,7 +3,7 @@
 
 The faster image is the shipped gzip boot image with two changes: the ramdisk is
 a 512-byte empty cpio archive, and the Android header's command-line field holds
-"loglevel=1". It has booted on one RG SP. This test asks whether the U-Boot of
+the kernel arguments in HEADER_CMDLINE. It has booted on one RG SP. This test asks whether the U-Boot of
 every other supported model treats that image the same way.
 
 For each target it loads the pinned, gzip-patched vendor U-Boot into Unicorn and
@@ -72,8 +72,8 @@ import fdt  # noqa: E402
 
 REFERENCE = "rgsp"                      # the model the new image has booted on
 # The exact image that booted on the RG SP (evidence/variants.json, noinitrd-quiet).
-REFERENCE_IMAGE_SHA256 = "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b"
-HEADER_CMDLINE = "loglevel=1"
+REFERENCE_IMAGE_SHA256 = "95f32dc31133c524c3001de825b145244b9362acb98acd406a99aa6379406e99"
+HEADER_CMDLINE = "loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1"
 EMPTY_CPIO = (b"070701" + b"%08X" * 13 % (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0)
               + b"TRAILER!!!\0").ljust(512, b"\0")
 # What `bootargs` holds when the Android handler runs: the RG SP's recorded

@@ -1,11 +1,13 @@
 # 00 — Boot chain & partitions
 
-The vendor bootloader, kernel and initramfs come from each target's prepared
-firmware. Preparation normalizes stock layouts to StockMod geometry; image
-composition replaces the p2 bootlogo and regenerates GPT metadata. It also
-compresses the kernel with gzip and changes one pinned U-Boot instruction to
-select the existing gzip decoder. The decompressed kernel, initramfs, DTBs,
-boot0 and environment remain unchanged. See [gzip boot pairs](12-kernel-gzip.md).
+The vendor bootloader and kernel come from each target's prepared firmware.
+Preparation normalizes stock layouts to StockMod geometry; image composition
+replaces the p2 bootlogo and regenerates GPT metadata. It also derives the
+[boot files](12-kernel-gzip.md): a gzip kernel with one pinned U-Boot
+instruction selecting the existing gzip decoder, an empty ramdisk in place of
+the vendor initramfs, three kernel arguments, and serial output switched off in
+boot0 and U-Boot. The decompressed kernel, the hardware description in the
+device trees and the environment remain unchanged.
 
 The geometry below is the normalized H700 layout. Target-specific inputs and
 preserved-region hashes are recorded in `source.json`.
@@ -27,11 +29,11 @@ Windows drive letter. macOS can still expose the vendor FAT volume; see
 
 | # | name | start LBA | size (stock) | contents | our image |
 |---|---|---|---|---|---|
-| — | (gap) | 0–73727 | 36 MiB | protective MBR, primary GPT, **boot0 + U-Boot blobs** | regenerated GPT; U-Boot selector and checksums updated |
+| — | (gap) | 0–73727 | 36 MiB | protective MBR, primary GPT, **boot0 + U-Boot blobs** | regenerated GPT; U-Boot selector, serial output settings and checksums updated |
 | 1 | `special` | 73728 | 64 MiB | vendor special (an almost-empty ext4) | verbatim, hidden |
 | 2 | `boot-resource` | 204800 | 32 MiB | **vfat**: `bootlogo.bmp`, `fastbootlogo.bmp`, fonts, DTBs | verbatim except `bootlogo.bmp` ([04](04-boot-splash.md)), hidden |
 | 3 | `env` | 270336 | 16 MiB | U-Boot environment (bootargs) | verbatim, hidden |
-| 4 | `boot` | 303104 | 64 MiB | **Android boot image**: kernel + vendor initramfs | gzip kernel, original initramfs/DTB, hidden |
+| 4 | `boot` | 303104 | 64 MiB | **Android boot image**: kernel + vendor initramfs | gzip kernel, empty ramdisk, kernel arguments, original DTB, hidden |
 | 5 | `rootfs` | **434176 or 1482752** | 7 GiB stock | Ubuntu 22.04 (4.1 GB used) | **the active 512 MiB slot**, hidden |
 | — | *(slot B)* | 1482752 or 434176 | — | — | **512 MiB unallocated — the update target** |
 | 6 | `UDISK` | 2531328 | 512 MiB stock | stock scratch/swap | **128 MiB ext4 — `/data` persistent state**, hidden |
@@ -85,21 +87,32 @@ partitions=special@mmcblk0p1:...:rootfs@mmcblk0p5:UDISK@mmcblk0p6:primary@mmcblk
 console=ttyS0,115200 loglevel=4 cma=64M ... gpt=1 lcd_type=boe
 ```
 
-We never modify p3. `quiet` suppresses kernel log spam; to debug boot, one can
-temporarily remove it, but the image build never touches p3.
+We never modify p3. U-Boot appends the boot image header's own command-line
+field to these arguments, which is where BaseOS adds
+`loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1`; being
+last, its `loglevel` wins over `quiet`. To see kernel messages on the serial
+port while debugging, raise the level after startup (`dmesg -n 7`) or build a
+boot image with a different header field.
 
-## 2. The hidden vendor initramfs (p4 is an Android boot image)
+## 2. The boot image and the vendor initramfs
 
-Partition 4 (`boot`) is an **Android boot image** (`ANDROID!` magic) that
-bundles the kernel **and a vendor initramfs**. Extracting it (2 KiB page size; kernel
-then gzip'd ramdisk) reveals a small BusyBox-1.22 (2015) initramfs whose `/init`:
+Partition 4 (`boot`) is an **Android boot image** (`ANDROID!` magic, 2 KiB
+pages): kernel, then ramdisk, then device tree. The vendor ramdisk is a small
+BusyBox-1.22 (2015) initramfs whose `/init`:
 
 1. parses `root=` / `gpt=` / `console=` from `/proc/cmdline`;
 2. runs `e2fsck -y` on the root device;
 3. **mounts root with `-o rw,noatime,nodiratime,norelatime,noauto_da_alloc,barrier=0,data=ordered`**;
 4. `mount --move /dev` and `exec switch_root /mnt /init`.
 
-The root filesystem must satisfy two requirements:
+BaseOS images replace that ramdisk with an empty archive. The kernel then finds
+no `/init` in it, mounts `root=/dev/mmcblk0p5` itself, read-only, and runs the
+root filesystem's `/init`; `rcS` runs the check when it is due and remounts the
+root writable with the same options (see [boot files](12-kernel-gzip.md)).
+
+A card installed by release 1.3.0 or earlier still boots through the vendor
+initramfs until its first update migrates it, so the root filesystem must keep
+satisfying both paths:
 
 - **The root ext4 MUST have a journal.** The initramfs mounts with `data=ordered`,
   and the kernel *rejects* that on a journal-less filesystem
@@ -109,9 +122,12 @@ The root filesystem must satisfy two requirements:
   chokes on our `/init → sbin/init → busybox` symlink chain (stock's single-hop
   symlink works; the exact difference is unproven). We ship `/init` as a real
   script that `exec`s BusyBox init (see [01](01-rootfs-and-init.md)).
+- **Static `/dev/console` and `/dev/null` nodes.** Without the initramfs, `/dev`
+  is the root filesystem's own directory until `rcS` mounts devtmpfs.
 
-The vendor initramfs mounts root **read-write** (not read-only). We do not currently
-remount it `ro` — see the read-only-hardening item in [06](06-status-and-lessons.md).
+The root filesystem ends up mounted **read-write** on both paths. We do not
+remount it `ro` — see the read-only-hardening item in
+[06](06-status-and-lessons.md).
 
 ## 3. ext4 feature policy for the 4.9 BSP kernel
 

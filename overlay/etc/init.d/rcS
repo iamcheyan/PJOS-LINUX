@@ -77,10 +77,6 @@ fi
 /bin/mkdir -p /var/lib /var/log /var/tmp /var/lib/alsa /var/lib/bluealsa /var/empty
 /bin/ln -s /run /var/run
 
-# Stock loads the Bluetooth wake-handshake driver during early boot
-# (/etc/modules); its probe drives BT_WAKE (PG17) high. Keep that state.
-[ ! -f /lib/modules/rtl_btlpm.ko ] || /sbin/insmod /lib/modules/rtl_btlpm.ko 2>/dev/null
-
 # GPU: the build strips debug data from the vendor module. Load it in the
 # background to overlap startup; frontend-session waits for /dev/mali0.
 /sbin/insmod /lib/modules/mali_kbase.ko 2>/dev/null &
@@ -115,7 +111,7 @@ fi
 # busybox looks for it at /var/lib/hwclock/adjtime, and /var is tmpfs.
 /sbin/hwclock -u -s 2>/dev/null &
 
-# WiFi initialization stays in the background: never delay frontend handoff.
+# Radio initialization stays in the background: never delay frontend handoff.
 # The vendor kernel can enumerate the bootloader-powered SDIO card, then turn
 # off its unused WLAN regulator. Discard that stale card while power is still
 # off, before 8821cs powers it up and registers its driver. Otherwise the driver
@@ -131,6 +127,10 @@ fi
 # that on /data so later boots hold the first load instead of failing first.
 # Units whose first attempt works, the common case, are unaffected.
 (
+	# Stock loads the Bluetooth wake-handshake driver during early boot
+	# (/etc/modules); its probe drives BT_WAKE (PG17) high. Keep that state,
+	# and keep it ahead of the WiFi driver. Loading it takes about 40 ms.
+	[ ! -f /lib/modules/rtl_btlpm.ko ] || /sbin/insmod /lib/modules/rtl_btlpm.ko 2>/dev/null
 	wifi_slow=/data/wifi-slow-radio
 	wifi_off_cs=500                 # power-off interval, centiseconds (stock: ~380)
 	wifi_cut_cs=185                 # kernel disables the WLAN supply about here
@@ -310,7 +310,9 @@ fi
 if [ "$USB_STORAGE_MODE" -eq 0 ]; then
 	[ -x /usr/sbin/baseos-update ] && /usr/sbin/baseos-update apply
 fi
-[ "$TF1_CONFIG_MOUNTED" -eq 0 ] || /bin/umount /mnt/system
+# Unmounting waits for the kernel's next quiet point, about 60 ms. Nothing
+# below needs TF1 gone first, so let it finish beside the rest.
+[ "$TF1_CONFIG_MOUNTED" -eq 0 ] || /bin/umount /mnt/system &
 
 # Attach the audio repair before init can start a frontend and open the codec.
 # The module verifies the running kernel and idle audio state before attaching.

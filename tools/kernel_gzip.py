@@ -4,8 +4,9 @@
 The vendor Android handler forces raw Image. Change its compression selector,
 preserving the Android layout and every other TOC1 component. Then drop what
 startup only waits for: the initramfs (an empty archive), kernel serial output
-(`loglevel=1` in the Android header) and U-Boot/boot0 serial output
-(`debug_mode` 3 -> 0 in the TOC1 device tree and the boot0 header). The package
+and slow boot-time RCU grace periods (kernel arguments in the Android header)
+and U-Boot/boot0 serial output (`debug_mode` 3 -> 0 in the TOC1 device tree and
+the boot0 header). The package
 and boot image must be installed together. The earlier gzip-only pair is still
 derived so cards that carry it can be recognised. These are exact-firmware
 patches, not signatures to apply speculatively to another U-Boot build.
@@ -30,7 +31,10 @@ STAMP = 0x5F0A6C39
 BOOT0_OFFSET, BOOT0_SIZE, BOOT0_DEBUG, BOOT0_BODY = 8192, 65536, 0x34, 512
 # Android header command-line field (offset 0x40, 512 bytes, NUL padded).
 # U-Boot appends it to the kernel arguments; the kernel still prints panics.
-CMDLINE = b"loglevel=1"
+# loglevel=1 still prints a panic. The kernel waits several 10 ms ticks for
+# every RCU grace period while it starts; expedited ones take microseconds,
+# and rcu_normal_after_boot hands the running system back its usual behaviour.
+CMDLINE = b"loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1"
 # A newc archive holding only its end marker, padded to one 512-byte block.
 EMPTY_CPIO = (b"070701" + b"%08X" * 13 % (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0)
               + b"TRAILER!!!\0").ljust(512, b"\0")

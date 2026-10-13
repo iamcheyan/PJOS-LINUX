@@ -12,11 +12,12 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 rcs = (ROOT / 'overlay/etc/init.d/rcS').read_text()
-bt_start = rcs.index('# Stock loads the Bluetooth')
-bt_end = rcs.index('# GPU:', bt_start)
-start = rcs.index('# WiFi initialization')
+# The Bluetooth wake driver loads at the head of the same background block,
+# ahead of the WiFi driver.
+start = rcs.index('# Radio initialization')
 end = rcs.index('# machine-id', start)
-SCRIPT = rcs[bt_start:bt_end] + rcs[start:end] + '\necho ready > /run/frontend-handoff\n'
+assert rcs.index('# Stock loads the Bluetooth') > start and rcs.index('rtl_btlpm.ko') < rcs.index('8821cs.ko')
+SCRIPT = rcs[start:end] + '\necho ready > /run/frontend-handoff\n'
 
 
 class Radio:

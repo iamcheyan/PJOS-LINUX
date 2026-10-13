@@ -377,5 +377,235 @@
   "boot_ids": [
    "bcea004a-f03a-4406-8455-d987f8870ddd"
   ]
+ },
+ "prod-fast": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.729,
+   "min": 2.716,
+   "max": 3.105
+  },
+  "post_kernel_s": {
+   "median": 1.876,
+   "min": 1.834,
+   "max": 1.885
+  },
+  "combined_s": {
+   "median": 4.614,
+   "min": 4.55,
+   "max": 4.981
+  },
+  "kernel_init_s": 1.511,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "603f47fe-4111-4ff8-afea-a3da6d15c6aa",
+   "12b40bd5-0c3e-428b-98da-c49f8cf13ebf",
+   "70b01740-af67-434c-9b8b-4bd060702237"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.105,
+    "post_kernel_s": 1.876,
+    "combined_s": 4.981
+   },
+   {
+    "pre_kernel_s": 2.716,
+    "post_kernel_s": 1.834,
+    "combined_s": 4.55
+   },
+   {
+    "pre_kernel_s": 2.729,
+    "post_kernel_s": 1.885,
+    "combined_s": 4.614
+   }
+  ]
+ },
+ "fast-rcu": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.729,
+   "min": 2.722,
+   "max": 2.758
+  },
+  "post_kernel_s": {
+   "median": 1.708,
+   "min": 1.685,
+   "max": 1.775
+  },
+  "combined_s": {
+   "median": 4.437,
+   "min": 4.407,
+   "max": 4.533
+  },
+  "kernel_init_s": 1.351,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "21ba6ca7-d3a9-497a-91a1-7f7287de4c0a",
+   "0bb51758-cdf2-4037-9e6c-7f0cac8249f0",
+   "aa07280f-f57d-4c19-9ced-60c3da35ea58"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.758,
+    "post_kernel_s": 1.775,
+    "combined_s": 4.533
+   },
+   {
+    "pre_kernel_s": 2.729,
+    "post_kernel_s": 1.708,
+    "combined_s": 4.437
+   },
+   {
+    "pre_kernel_s": 2.722,
+    "post_kernel_s": 1.685,
+    "combined_s": 4.407
+   }
+  ]
+ },
+ "fast-rcu-tinylogo": {
+  "boots": 2,
+  "pre_kernel_s": {
+   "median": 2.87,
+   "min": 2.713,
+   "max": 3.027
+  },
+  "post_kernel_s": {
+   "median": 1.69,
+   "min": 1.674,
+   "max": 1.705
+  },
+  "combined_s": {
+   "median": 4.56,
+   "min": 4.388,
+   "max": 4.732
+  },
+  "kernel_init_s": 1.326,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "935ce45e-ce05-4dfb-bd53-2228076cb678",
+   "1d980d9e-1a94-4428-baa0-29b1f38a9e5f"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.713,
+    "post_kernel_s": 1.674,
+    "combined_s": 4.388
+   },
+   {
+    "pre_kernel_s": 3.027,
+    "post_kernel_s": 1.705,
+    "combined_s": 4.732
+   }
+  ]
+ },
+ "fast-rcu-1cpu": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.737,
+   "min": 2.736,
+   "max": 2.737
+  },
+  "post_kernel_s": {
+   "median": 1.905,
+   "min": 1.895,
+   "max": 1.918
+  },
+  "combined_s": {
+   "median": 4.641,
+   "min": 4.632,
+   "max": 4.655
+  },
+  "kernel_init_s": 1.553,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "f1ac2cc8-7347-42e7-a8ff-3924516d876d",
+   "1f2bceb6-d965-4e1c-8168-c158293200c1",
+   "be69f8bc-1b24-4512-87bb-d053a3380ae0"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.737,
+    "post_kernel_s": 1.918,
+    "combined_s": 4.655
+   },
+   {
+    "pre_kernel_s": 2.737,
+    "post_kernel_s": 1.895,
+    "combined_s": 4.632
+   },
+   {
+    "pre_kernel_s": 2.736,
+    "post_kernel_s": 1.905,
+    "combined_s": 4.641
+   }
+  ]
+ },
+ "fast-rcu-rcs2": {
+  "boots": 4,
+  "pre_kernel_s": {
+   "median": 2.756,
+   "min": 2.726,
+   "max": 2.801
+  },
+  "post_kernel_s": {
+   "median": 1.643,
+   "min": 1.624,
+   "max": 1.685
+  },
+  "combined_s": {
+   "median": 4.406,
+   "min": 4.36,
+   "max": 4.459
+  },
+  "kernel_init_s": 1.341,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "0f61692a-8a02-4654-984b-5eef810e7433",
+   "f7f6795a-953d-42a4-8fa9-159afddcf0ec",
+   "08eca5e4-6456-4a18-b1a3-edbb1ce0a25c",
+   "c64e55d4-ca53-4cfd-845a-13b254e4407d"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.801,
+    "post_kernel_s": 1.641,
+    "combined_s": 4.442
+   },
+   {
+    "pre_kernel_s": 2.737,
+    "post_kernel_s": 1.624,
+    "combined_s": 4.36
+   },
+   {
+    "pre_kernel_s": 2.726,
+    "post_kernel_s": 1.644,
+    "combined_s": 4.37
+   },
+   {
+    "pre_kernel_s": 2.774,
+    "post_kernel_s": 1.685,
+    "combined_s": 4.459
+   }
+  ]
  }
 }

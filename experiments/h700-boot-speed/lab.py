@@ -330,7 +330,10 @@ def reboot() -> None:
     old = sh("cat /proc/sys/kernel/random/boot_id")
     subprocess.run(ADB + ["push", str(WORK / "backup/reboot_next"), "/tmp/reboot_next"], check=True, capture_output=True)
     require(sh("chmod 755 /tmp/reboot_next; sha256sum /tmp/reboot_next").split()[0] == REBOOT_NEXT_SHA, "reboot_next differs")
+    # Pause the frontend first so nothing is still writing to the card when it
+    # is detached. Paused, never killed: init would respawn it.
     command = """cd /;
+for pid in $(ps | grep -E '[S]ystem/slot|[n]extui.elf|[m]inarch.elf' | awk '{print $1}'); do kill -STOP "$pid" 2>/dev/null; done;
 /bin/dd if=/dev/urandom of=/data/random-seed bs=512 count=1 2>/dev/null || exit 1;
 /bin/sync;
 if ! /bin/mount -o remount,ro /data; then echo RESTART_FAILED_DATA; exit 1; fi;

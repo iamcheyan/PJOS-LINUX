@@ -154,6 +154,9 @@ awk '/^# BaseOS settings always/{copy=1} /^# Dev image extras/{copy=0} copy' "$R
 		-e "s|/usr/sbin/baseos-update|$TMP/bin/baseos-update|g" \
 		-e "s|/bin/mount |$TMP/bin/mount |g" \
 		-e "s|/bin/umount |$TMP/bin/umount |g" > "$TMP/boot-block"
+# rcS lets the TF1 unmount finish in the background; wait for it here so the
+# recorded order is complete before it is compared.
+echo wait >> "$TMP/boot-block"
 [ -s "$TMP/boot-block" ] || fail "rcS config block not found"
 cat > "$TMP/bin/mount" <<'EOF'
 #!/bin/sh

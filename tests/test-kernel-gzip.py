@@ -41,10 +41,10 @@ GZIP_V1 = {
     "rgsp": ("fa745599c9eb95110f03c6c426e6d08e0317146d51059c6a790e25f604ea0942",
              "2b9aeb76ace6c781e21aec1edc200cab967b0bf0d162c54588a9c339caf7490c"),
 }
-# The fast package and boot image that booted on the RG SP: nq-all-silent in
+# The fast package and boot image that booted on the RG SP: fast-rcu in
 # experiments/h700-boot-speed/evidence/variants.json.
 PROVEN = {"rgsp": ("e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6",
-                   "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b")}
+                   "95f32dc31133c524c3001de825b145244b9362acb98acd406a99aa6379406e99")}
 EMPTY = (b"070701" + b"00000000" * 4 + b"00000001" + b"00000000" * 6 + b"0000000B" + b"00000000"
          + b"TRAILER!!!\0").ljust(512, b"\0")
 
@@ -100,9 +100,10 @@ def check(target):
     dtb = image[vendor + k.align(word(image, 16)):][:word(image, 0x670)]
     assert d["dtb"] == dtb == boot[at + 2048:at + 2048 + word(boot, 0x670)] and dtb[:4] == bytes.fromhex("d00dfeed")
     assert len(boot) == at + 2048 + k.align(len(dtb)) < len(d["gzip_boot"]) < len(image)
-    assert k.CMDLINE == b"loglevel=1" and boot[0x40:0x240] == b"loglevel=1" + bytes(502)
+    assert k.CMDLINE == b"loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1"
+    assert boot[0x40:0x240] == k.CMDLINE.ljust(512, b"\0")
     assert image[0x40:0x240] == bytes(512) == d["gzip_boot"][0x40:0x240]
-    assert diff(image[:2048], boot[:2048]) <= span(8, 4) | span(16, 4) | span(0x40, 10) | span(0x240, 32)
+    assert diff(image[:2048], boot[:2048]) <= span(8, 4) | span(16, 4) | span(0x40, len(k.CMDLINE)) | span(0x240, 32)
     assert boot[0x240:0x260] == k.image_id([packed, EMPTY, b"", b"", dtb])
     assert d["expected_boot"] == boot + partition[len(boot):]
 

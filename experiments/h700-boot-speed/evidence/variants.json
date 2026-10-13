@@ -11,6 +11,86 @@
    }
   }
  },
+ "diag-initcalls": {
+  "name": "diag-initcalls",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1 log_buf_len=1M initcall_debug=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "d68660f50b625f01dea150103cbbc2050b36507cf6ef6df21822a4901faa558a"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6"
+   }
+  }
+ },
+ "diag-rcu": {
+  "name": "diag-rcu",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 log_buf_len=1M initcall_debug=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "2c6fe8176783cf029e55ae404bd314be469c0771b7f86a4d41f354d425c399de"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6"
+   }
+  }
+ },
+ "fast-rcu-1cpu": {
+  "name": "fast-rcu-1cpu",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 maxcpus=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "33d9e3ed2bb00c16d76f6b3f1f6790e6f00f3e0a4d8e0ad8bea16dda55fbfe66"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6"
+   }
+  }
+ },
+ "fast-rcu": {
+  "name": "fast-rcu",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "95f32dc31133c524c3001de825b145244b9362acb98acd406a99aa6379406e99"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6"
+   }
+  }
+ },
  "noinitrd-quiet": {
   "name": "noinitrd-quiet",
   "notes": [
