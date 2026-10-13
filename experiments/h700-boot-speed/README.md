@@ -96,11 +96,13 @@ needs a decision and a check on each model before it ships.
 
 [`survey.py`](survey.py) compares the prepared firmware of every supported
 model, and [its summary](evidence/all-targets-survey-summary.txt) lists what
-matches. boot0 and U-Boot use `debug_mode` 3 on every target. The env
+matches. boot0's code is byte-identical on every target, and only its
+per-board settings differ. boot0 and U-Boot use `debug_mode` 3 on every
+target. The env
 partition, the initramfs `/init` script and the empty boot-image command line
-are identical everywhere. Every kernel has the `rcupdate` arguments and
-`initcall_blacklist`, and none has `usb_host_init_state` or
-`no-prescan-powerup`. Kernels, U-Boot builds and device trees differ per
+are identical everywhere. Every kernel has the `rcupdate` arguments, the ext4
+options and error counter that `rcS` uses, and `initcall_blacklist`. None has
+`usb_host_init_state` or `no-prescan-powerup`. Kernels, U-Boot builds and device trees differ per
 model, so the build derives each target's files separately.
 
 ## What still needs kernel code
@@ -114,8 +116,14 @@ module that creates those devices after handoff.
 
 - A compressed read-only rootfs. It would mostly help the frontend load its
   libraries, which happens after the handoff this work measures.
-- Any measurement with TF1 as the only card, from a cold power-on, or of sleep
-  and wake. The device cannot sleep while its USB cable is attached.
+- Any measurement with TF1 as the only card or from a cold power-on.
+
+## Sleep and wake
+
+On the shipped files the RG SP slept for 30 seconds with an RTC wake alarm set
+and resumed with the frontend, Wi-Fi and GPU working.
+[`evidence/sleep-wake-rtc-alarm.txt`](evidence/sleep-wake-rtc-alarm.txt) has
+the kernel messages. That was one cycle with the USB cable attached.
 
 ## The freeze
 

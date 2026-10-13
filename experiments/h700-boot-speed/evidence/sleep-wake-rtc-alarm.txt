@@ -1,0 +1,11 @@
+[  849.128704] PM: suspend entry 2026-10-13 22:28:47.480179678 UTC
+[  849.400064] PM: Suspending system (mem)
+[  850.395771] PM: suspend of devices complete after 993.659 msecs
+[  850.442550] Disabling non-boot CPUs ...
+[  850.486568] psci: CPU1 killed.
+[  850.606373] psci: CPU2 killed.
+[  850.696170] psci: CPU3 killed.
+[  850.727780] Enabling non-boot CPUs ...
+[  850.949432] Suspended for 29.699 seconds
+[  851.668222] PM: resume of devices complete after 801.441 msecs
+[  851.690739] PM: suspend exit 2026-10-13 22:29:19.742042833 UTC

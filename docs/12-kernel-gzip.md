@@ -143,7 +143,9 @@ image's bytes, unpacks the original kernel, copies the 512-byte ramdisk and
 appends the header command line to `bootargs`. The tests model the hardware
 calls. They run U-Boot's functions, not a whole boot, and they say nothing
 about how each target's kernel responds. Every target's kernel does contain
-the three arguments.
+the three arguments and the ext4 options and error counter that `rcS` uses.
+boot0's code is byte-identical on all eleven targets. Only its first 0x1300
+bytes differ, and they hold per-board settings such as memory timings.
 
 `tests/test-kernel-gzip.py` checks the derived files and the corruption gates
 for every target. `tests/test-boot-migration.sh` runs the real migration script
@@ -170,8 +172,9 @@ sum exactly to the difference. About one boot in twelve spent 0.3 to 0.6 s
 longer before Linux. Three of those four boots followed a large write to the
 card.
 
-Nobody has tested sleep and wake on the new files yet, because the device
-cannot sleep while its USB cable is attached. The other ten models have not
+On the new files the RG SP slept for 30 seconds, woke on an RTC alarm and
+resumed with the frontend, Wi-Fi and GPU working. Nobody has tested a cold
+power-on or a boot with an empty TF2 slot. The other ten models have not
 booted these files at all.
 [The experiment notes](../experiments/h700-boot-speed/README.md) list each
 measurement, and [boot profiling](09-boot-profiling.md) explains how the stages

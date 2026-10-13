@@ -27,7 +27,8 @@ BOOT0_OFFSET = 8 * 1024
 TOC1_OFFSET, TOC1_SIZE = 0x1004000, 0x140000
 ENV_LBA, BOOT_LBA = 270336, 303104
 KERNEL_SWITCHES = [b"usb_host_init_state", b"no-prescan-powerup", b"initcall_blacklist",
-                   b"ehci_enable", b"Waiting for root device %s..."]
+                   b"ehci_enable", b"Waiting for root device %s...", b"rcu_expedited",
+                   b"rcu_normal_after_boot", b"errors_count", b"noauto_da_alloc", b"nobarrier"]
 
 
 def sha(blob: bytes) -> str:
@@ -80,11 +81,15 @@ def survey(target: str, prefix: Path) -> dict:
         "magic": boot0[4:12].decode("latin1"), "length": length, "sha": sha(boot0[:length]),
         "checksum_ok": checksum(boot0[:length], 12) == word(boot0, 12),
         "debug_mode": boot0[0x34],
+        # The first instruction jumps to 0x1300; everything from there on is
+        # code and constant data, the part before it is per-board settings.
+        "code_sha": sha(boot0[0x1300:length]),
     }
 
     items = toc1_items(package)
     dtb = items["dtb"]
     out["uboot_sha"] = sha(items["u-boot"])
+    out["monitor_sha"] = sha(items["monitor"])
     out["dtb"] = {
         "sha": sha(dtb), "slack": len(dtb) - fdt.total_size(dtb),
         "uboot_debug_mode": u32(fdt.get(dtb, "platform", "debug_mode")),

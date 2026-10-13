@@ -21,7 +21,7 @@ test does not establish hardware support on every target.
 | GPT visibility attributes | RG40XX V boot | Windows drive-letter and format-prompt behavior |
 | Charger-only boot and PMIC shutdown | RG SP; POWER-hold startup on RG34XX SP | Per-target charging and power behavior |
 | Hostname and mDNS | RG34XX SP network validation | Per-target and host-network compatibility |
-| Boot files without the initramfs, and their migration | RG SP: update from 1.3.0, migration on first boot, warm restarts | Sleep and wake, cold power-on, every other target |
+| Boot files without the initramfs, and their migration | RG SP: update from 1.3.0, migration on first boot, warm restarts, one sleep and wake | Cold power-on, an empty TF2 slot, every other target |
 
 ## 2. Boot and build constraints
 

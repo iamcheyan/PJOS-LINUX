@@ -4,6 +4,7 @@
   boot0.length = 65536
   boot0.checksum_ok = True
   boot0.debug_mode = 3
+  boot0.code_sha = 9c43da78ccecd23d
   dtb.uboot_debug_mode = 3
   dtb.boot_clock = 1008
   dtb.pmic_bus_hz = None
@@ -32,6 +33,11 @@
   kernel_has.initcall_blacklist = True
   kernel_has.ehci_enable = True
   kernel_has.Waiting for root device %s... = True
+  kernel_has.rcu_expedited = True
+  kernel_has.rcu_normal_after_boot = True
+  kernel_has.errors_count = True
+  kernel_has.noauto_da_alloc = True
+  kernel_has.nobarrier = True
 
 == differs ==
   boot0.sha:
@@ -58,6 +64,9 @@
      "2dfa5b79f43ae84b"                                                     rg40xxv
      "7d707d67e778f57e"                                                     rgcubexx
      "a11271e1276173ce"                                                     rgsp
+  monitor_sha:
+     "676bc0206e3c9a7f"                                                     rg28xx rg34xx rg35xxh rg35xxplus rg35xxpro rg40xxh rg40xxv rgcubexx
+     "ba5a3412aed772ab"                                                     rg34xxsp rg35xxsp rgsp
   dtb.sha:
      "40820cf5e1480506"                                                     rg28xx
      "d62e36d45e8742cb"                                                     rg34xx
