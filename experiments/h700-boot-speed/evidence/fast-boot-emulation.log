@@ -1,5 +1,5 @@
 fast-boot emulation: python 3.12.15 on Linux aarch64, unicorn 2.1.4
-pinned firmware derived by tools/kernel_gzip.py (sha256 e3d163d44f452b9c, catalog 0672584280b1a691)
+pinned firmware derived by tools/kernel_gzip.py (sha256 04027ac94cd0ab30, catalog 0672584280b1a691)
 modelled instead of run as vendor code:
   env_get, env_set        environment kept in a Python dict, started from the env
                           partition (the hash table is set up by earlier boot code
