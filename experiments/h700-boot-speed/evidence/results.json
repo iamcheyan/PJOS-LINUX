@@ -607,5 +607,155 @@
     "combined_s": 4.459
    }
   ]
+ },
+ "shipped": {
+  "boots": 4,
+  "pre_kernel_s": {
+   "median": 2.718,
+   "min": 2.708,
+   "max": 3.322
+  },
+  "post_kernel_s": {
+   "median": 1.704,
+   "min": 1.637,
+   "max": 1.861
+  },
+  "combined_s": {
+   "median": 4.412,
+   "min": 4.365,
+   "max": 5.183
+  },
+  "kernel_init_s": 1.364,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "1c1f02b2-9cb7-4435-8cb6-9eab624545ba",
+   "faab096e-8c3c-48eb-82ff-a2e91ffdb3ad",
+   "045499ec-3c2a-410a-b1c9-af0bbdfc439f",
+   "f6b9e23c-7ff8-45fb-ae7d-d22a74eb0483"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.322,
+    "post_kernel_s": 1.861,
+    "combined_s": 5.183
+   },
+   {
+    "pre_kernel_s": 2.708,
+    "post_kernel_s": 1.723,
+    "combined_s": 4.431
+   },
+   {
+    "pre_kernel_s": 2.708,
+    "post_kernel_s": 1.684,
+    "combined_s": 4.392
+   },
+   {
+    "pre_kernel_s": 2.727,
+    "post_kernel_s": 1.637,
+    "combined_s": 4.365
+   }
+  ],
+  "note": "rootfs v1.3.0-7-g65dd2b4 installed from baseos-rgsp-1.3.0.bosupd by the 1.3.0 updater; boot files written by baseos-boot-migrate on its first boot"
+ },
+ "back-to-1.3.0": {
+  "boots": 1,
+  "pre_kernel_s": {
+   "median": 3.737,
+   "min": 3.737,
+   "max": 3.737
+  },
+  "post_kernel_s": {
+   "median": 2.346,
+   "min": 2.346,
+   "max": 2.346
+  },
+  "combined_s": {
+   "median": 6.083,
+   "min": 6.083,
+   "max": 6.083
+  },
+  "kernel_init_s": 1.847,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "13d145e1-a03d-4ebe-913e-f3da3acb139c"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.737,
+    "post_kernel_s": 2.346,
+    "combined_s": 6.083
+   }
+  ]
+ },
+ "diag-initcalls": {
+  "boots": 1,
+  "pre_kernel_s": {
+   "median": 2.725,
+   "min": 2.725,
+   "max": 2.725
+  },
+  "post_kernel_s": {
+   "median": 1.935,
+   "min": 1.935,
+   "max": 1.935
+  },
+  "combined_s": {
+   "median": 4.66,
+   "min": 4.66,
+   "max": 4.66
+  },
+  "kernel_init_s": 1.582,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "bf71c06d-89a6-41ad-8375-f1106624a4b0"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.725,
+    "post_kernel_s": 1.935,
+    "combined_s": 4.66
+   }
+  ]
+ },
+ "diag-rcu": {
+  "boots": 1,
+  "pre_kernel_s": {
+   "median": 2.746,
+   "min": 2.746,
+   "max": 2.746
+  },
+  "post_kernel_s": {
+   "median": 1.684,
+   "min": 1.684,
+   "max": 1.684
+  },
+  "combined_s": {
+   "median": 4.431,
+   "min": 4.431,
+   "max": 4.431
+  },
+  "kernel_init_s": 1.342,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "c531a7ac-55c9-4c95-87ed-e4a1bd20bdf0"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.746,
+    "post_kernel_s": 1.684,
+    "combined_s": 4.431
+   }
+  ]
  }
 }

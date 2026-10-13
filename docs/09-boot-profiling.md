@@ -10,9 +10,10 @@ remains unchanged; validation results are written to
 `work/<target>/gpu-strip-report.json`.
 
 The optimised module ships in the rootfs and through normal `.bosupd` updates.
-Kernel compression is a separate [boot-pair optimisation](12-kernel-gzip.md):
-it changes the kernel's storage format and U-Boot's compression selector,
-while preserving the decompressed kernel, initramfs and DTB.
+The [boot files](12-kernel-gzip.md) are a separate optimisation. They change
+how the kernel is stored, drop the vendor initramfs, add three kernel arguments
+and switch off serial output in boot0 and U-Boot. The unpacked kernel and the
+hardware description in the device tree stay the same.
 `tests/test-strip-gpu-module.py` covers the stripping checks.
 
 ## Measuring startup
@@ -47,8 +48,9 @@ BaseOS boot stages: pre-kernel ... s; post-kernel ... s; combined ... s (counter
 `pre-kernel` is the counter value at Linux's initial timekeeping origin,
 calculated as counter seconds minus raw monotonic seconds. It includes kernel
 loading/decompression and the earliest kernel work before timekeeping starts.
-`post-kernel` is raw monotonic time at frontend handoff: remaining kernel
-initialization, initramfs and rootfs startup. `combined` is their sum, the raw
+`post-kernel` is raw monotonic time at frontend handoff. It covers the rest of
+kernel initialization, the vendor initramfs on a card that still has one, and
+rootfs startup. `combined` is their sum, the raw
 counter value at that handoff. The division is Linux's clock origin, not the
 first kernel instruction. Reading the counter does not change or reset it.
 

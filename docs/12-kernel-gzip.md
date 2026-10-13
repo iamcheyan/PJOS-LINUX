@@ -1,160 +1,178 @@
 # 12 — Boot files and the one-update migration
 
-BaseOS keeps the vendor boot0, U-Boot and kernel code and changes only what
-they are given. All supported H700 images ship the same set of changes, derived
-per target from pinned vendor firmware. `manifest/kernel-gzip.json` pins each
-target's original boot0, boot package, U-Boot and boot partition by SHA-256.
-Unknown firmware is refused by the builder; a new vendor build requires a new
-audit and profile rather than a speculative binary patch.
+BaseOS runs the vendor's boot0, U-Boot and kernel code unchanged and alters
+only their inputs. Every supported H700 image ships the same six changes. The
+build derives them per target from pinned vendor firmware.
+`manifest/kernel-gzip.json` pins each target's original boot0, boot package,
+U-Boot and boot partition by SHA-256. The builder refuses firmware it does not
+recognise. A new vendor build needs a new audit and a new profile.
 
 ## What changes
 
-| Where | Change | Why |
+| Where | Change | Effect |
 | --- | --- | --- |
-| U-Boot, in the boot package | One Thumb instruction selects gzip for Android images | The kernel is stored gzip-compressed; less to read from the card |
-| Boot image, kernel | gzip level 9, fixed timestamp | As above. The decompressed kernel is byte-identical |
-| Boot image, ramdisk | A 512-byte empty archive replaces the vendor initramfs | The kernel mounts the root partition itself; `rcS` does what the initramfs did (see below) |
-| Boot image, header command line | `loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1` | U-Boot appends this field to the kernel arguments. Only panics are printed to the serial port; RCU grace periods are fast while the kernel starts and normal afterwards |
-| Boot package, device tree | `/soc/platform` `debug_mode` 3 → 0 | U-Boot stops printing to the serial port |
-| boot0 header | `debug_mode` byte 3 → 0 | boot0 stops printing to the serial port |
+| U-Boot, inside the boot package | One Thumb instruction selects gzip for Android images. | U-Boot can unpack a gzip kernel. |
+| Boot image, kernel | The kernel is stored as gzip level 9 with a fixed timestamp. | The kernel takes 7 MiB on the card instead of 17 MiB, so U-Boot reads less. The unpacked kernel is byte-identical. |
+| Boot image, ramdisk | A 512-byte empty archive replaces the vendor initramfs. | The kernel mounts the root partition itself. `rcS` does what the initramfs did. |
+| Boot image, header command line | The field holds `loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1`. | U-Boot appends the field to the kernel arguments. The kernel prints only panics to the serial port. RCU grace periods take microseconds while the kernel starts and return to normal afterwards. |
+| Boot package, device tree | `debug_mode` in `/soc/platform` changes from 3 to 0. | U-Boot prints nothing to the serial port. |
+| boot0 header | The `debug_mode` byte changes from 3 to 0. | boot0 prints nothing to the serial port. |
 
-Nothing else differs: U-Boot's other code, the monitor, the device trees'
-hardware description, the environment partition and the kernel are unchanged.
-The serial port stays usable after startup; `dmesg` is complete.
+The rest of U-Boot, the monitor, the hardware description in the device trees,
+the environment partition and the kernel stay as the vendor shipped them. The
+serial port works as before once the system is up, and `dmesg` still holds
+every kernel message.
 
 ### What the initramfs did
 
 The vendor initramfs ran `e2fsck -y` on the root partition, mounted it with
 `rw,noatime,nodiratime,noauto_da_alloc,barrier=0,data=ordered` and switched to
-it. Without it the kernel mounts the partition read-only with default options
-and has already replayed the journal. `rcS` then:
+it. Without the initramfs the kernel replays the journal and mounts the
+partition read-only with default options. `rcS` then does two things.
 
-1. runs the bundled static `e2fsck -y` only if the filesystem carries recorded
-   errors (`/sys/fs/ext4/mmcblk0p5/errors_count`);
-2. remounts the root `rw,noatime,nodiratime,nobarrier,noauto_da_alloc`, unless
-   that check changed anything, in which case the root stays read-only until
-   the next restart rather than being written through stale cached state.
+1. It runs the bundled static `e2fsck -y` if the filesystem has recorded
+   errors. The count is in `/sys/fs/ext4/mmcblk0p5/errors_count`.
+2. It remounts the root with `rw,noatime,nodiratime,nobarrier,noauto_da_alloc`.
+   If `e2fsck` changed anything, `rcS` leaves the root read-only until the
+   next restart, because the kernel may still hold the old contents in memory.
 
-On a card that still boots through the initramfs the root arrives writable and
-this block does nothing, so one rootfs serves every boot set below.
+A card that still boots through the initramfs hands `rcS` a writable root, and
+`rcS` skips both steps. One rootfs therefore works with all three boot states
+described below.
 
 ## Build contract
 
-`tools/kernel_gzip.py` derives three pieces from the pristine prepared inputs
-and checks that only the intended bytes changed in each:
+`tools/kernel_gzip.py` derives three pieces from the prepared inputs. For each
+piece it checks that only the intended bytes changed.
 
-- the boot package: the selector instruction, four device-tree bytes and the
-  U-Boot and package checksums;
-- the boot image: header sizes, command line and image ID, the gzip kernel and
-  the empty ramdisk. Load addresses and the appended device tree are kept;
-- boot0: the debug byte and its checksum, in the first copy at 8 KiB. boot0
-  keeps a second copy at 256 KiB and rewrites the first sector of both on every
-  boot, so that copy follows at the first start (seen on the RG SP).
+- In the boot package it changes the selector instruction, four device-tree
+  bytes, and the U-Boot and package checksums.
+- In the boot image it changes the header sizes, the command line and the
+  image ID, and it replaces the kernel and the ramdisk. It keeps the load
+  addresses and the appended device tree.
+- In boot0 it changes the debug byte and the checksum of the copy at 8 KiB.
+  boot0 keeps a second copy at 256 KiB and rewrites the first sector of both
+  copies on every boot, so the second copy takes the new setting at the first
+  start. The RG SP showed this.
 
-It also still derives the gzip-only pair that release 1.3.0 shipped, so the
-migration can recognise cards that carry it.
+The tool also derives the gzip-only pair that release 1.3.0 shipped. The
+migration needs those hashes to recognise cards that carry that pair.
 
-`build-image.sh` installs and verifies all three in fresh images.
-`build-rootfs.sh` includes the package, the boot image and a manifest in
-`/usr/share/baseos/boot-gzip/`, so the unchanged `baseos-update/1` archive
-format can deliver the migration to existing installations. The payload adds
-roughly 8 MiB to the rootfs.
+`build-image.sh` installs and verifies all three pieces in fresh images.
+`build-rootfs.sh` puts the boot package, the boot image and a manifest in
+`/usr/share/baseos/boot-gzip/`. An ordinary `baseos-update/1` archive can then
+deliver the migration to existing cards. These files add about 8 MiB to the
+rootfs.
 
 ## Migration of existing cards
 
 Copy the target's normal `.bosupd` onto the frontend card and restart. The
-existing updater installs the rootfs. Its first boot shows an
-optimising-startup message, replaces the boot files, continues to the frontend
-and confirms the rootfs trial. The running kernel is identical in every boot
-set, so no extra restart is needed; the next ordinary boot uses the new files.
+updater installs the rootfs and restarts. The new system shows an
+optimising-startup message on its first boot, replaces the boot files,
+confirms the update and starts the frontend. The kernel is identical in every
+boot state, so the device does not restart again. The next ordinary boot uses
+the new files.
 
-`baseos-boot-migrate` recognises three audited states of the boot package and
-boot image, by hash, and refuses anything else:
+`baseos-boot-migrate` identifies the installed boot package and boot image by
+hash. It knows three states and refuses any other.
 
-| Installed | Meaning | Steps |
+| Installed | Meaning | What the migration does |
 | --- | --- | --- |
-| original | Vendor files, uncompressed kernel | Both files are written, then verified. Not bootable in between |
-| gzip | The pair release 1.3.0 installed | Boot image written and verified, then the package written and verified. Every state in between boots |
-| fast | The current set | Nothing to write |
+| original | The vendor files, with an uncompressed kernel. | It writes both files and then verifies them. The card cannot boot between the two writes. |
+| gzip | The pair that release 1.3.0 installed. | It writes and verifies the boot image, then writes and verifies the boot package. The card can boot after every step. |
+| fast | The current files. | It writes nothing. |
 
-A boot image is recognised by a hash over exactly the bytes its header
-describes; whatever follows it in the partition is ignored and left alone. A
-gzip half beside a fast half, as an interrupted earlier run leaves behind, is
-recognised and completed.
+The migration hashes exactly the bytes that the image header describes.
+It ignores and preserves whatever follows the image in the partition. An
+interrupted earlier run can leave a gzip file beside a fast file. The
+migration recognises that mixture and completes it.
 
-boot0 is handled last and separately. boot0 rewrites its own first sector on
-the card at every boot (checksum and memory-training values), so only the
-bytes after that sector are pinned by hash. The migration checks the magic,
-length, a checksum that reproduces and the pinned body, then rewrites that one
-sector with the debug byte cleared and the checksum adjusted, and reads all of
-boot0 back. A boot0 that fails any check is left untouched; the rest of the
-migration still completes and the result records why.
+The migration changes boot0 last. boot0 rewrites its own first sector on the
+card at every boot with a new checksum and memory-training values, so a hash
+can pin only the bytes after that sector. The migration checks the magic, the
+length, the checksum and the pinned bytes. It then writes that one sector back
+with the debug byte cleared and the checksum adjusted, and reads all of boot0
+again to verify it. If boot0 fails any check, the migration leaves it
+untouched, still replaces the other two files, and records the reason.
 
 ### Checks, failure handling and recovery
 
-Before writing, the migration checks target identity, partition geometry, the
-replacement files' hashes, persistent writable userdata and power: external
-power or at least 50% battery, otherwise it defers to a later boot without
-leaving a marker. Charging-only and USB-storage sessions do not migrate.
+Before it writes, the migration checks the target, the partition geometry, the
+hashes of the replacement files, and that userdata is persistent and writable.
+It also needs external power or at least 50% battery. Without either it leaves
+no marker and tries again at a later boot. Charging-only and USB-storage
+sessions do not migrate.
 
-A recovery copy is on userdata before the first write: the original pair saved
-by the first migration under `/data/boot-gzip-v1/` if it is intact, otherwise
-the installed package and the installed image's own bytes under
-`/data/boot-pair-v2/`. Nothing in `/data/boot-gzip-v1/` is modified.
+The migration makes sure a recovery copy is on userdata before the first
+write. If the first migration's copy of the original pair in
+`/data/boot-gzip-v1/` is intact, that copy is enough. Otherwise the migration
+saves the installed boot package and the installed image's own bytes in
+`/data/boot-pair-v2/`. It never modifies `/data/boot-gzip-v1/`.
 
-A failed write or readback puts the previous files back and verifies them. If
-that cannot be verified, frontend startup and trial confirmation stop, the
-display asks to keep power on and ADB remains available. Do not restart in that
-condition; the previous contents are kept in `/tmp`.
+If a write or a readback fails, the migration writes the previous files back
+and verifies them. If that verification also fails, it stops frontend startup
+and update confirmation, asks on screen to keep power on, and leaves ADB
+running. Do not restart the device in that state. The previous files are in
+`/tmp`.
 
-**The update is not power-loss-safe.** The shared boot areas are outside rootfs
-A/B protection. The boot package has no second copy; boot0 has one, but whether
-the boot ROM falls back to it has not been tested. Coming from the gzip pair, power lost between
-steps still leaves a bootable card; power lost during a write can leave a
-component torn, as can any power loss while coming from the original pair.
-Repair then means writing the saved files back from another computer or
-reflashing the card.
+**A power loss during the migration can leave the card unbootable.** The A/B
+rootfs slots do not cover the boot areas. The boot package has no second copy.
+boot0 has one, but nobody has tested whether the boot ROM falls back to it.
+Coming from the gzip pair, the card still boots if power fails between two
+steps. Power lost during a write can leave that file half written. Coming from
+the original pair, power lost at any point after the first write leaves the
+card unbootable. To repair such a card, write the saved files back from
+another computer or reflash it.
 
-`/data/boot-pair-v2/migration.log` records the operation; `complete` contains
-`installed`, `already-installed`, `rolled-back` or a `skipped:` reason,
-followed by a note if boot0 was left unchanged. Completed boots execute one
-shell-builtin existence check and start no helper.
+`/data/boot-pair-v2/migration.log` records each run. `complete` holds
+`installed`, `already-installed`, `rolled-back` or `skipped:` with a reason,
+and a note if the migration left boot0 unchanged. Later boots test only that
+`complete` exists, with a shell builtin, and start no helper.
 
-An older rootfs started on the new boot files, which only a manual slot flip
-can produce, still boots, but it lacks the wait for the second card slot
-described in [rootfs and init](01-rootfs-and-init.md) and may pick TF1 as the
-frontend card.
+Only a manual slot flip can start an older rootfs on the new boot files. That
+rootfs still boots. It lacks the wait for the second card slot described in
+[rootfs and init](01-rootfs-and-init.md), so it may pick TF1 as the frontend
+card.
 
 ## Validation and timing
 
-Each target's own U-Boot is run under Unicorn against the exact boot image the
-build ships (`tests/test-fast-boot-emulation.py`,
-`tests/test-kernel-gzip-emulation.py`): the card is asked for exactly the
-image's bytes, the kernel unpacks to the original, the 512-byte ramdisk is
-copied, and the header command line is appended to `bootargs`. Hardware
-operations are modelled: this is function-level emulation, not a whole boot,
-and it says nothing about how each kernel takes the changes. Every target's
-kernel contains the arguments used.
+`tests/test-fast-boot-emulation.py` and `tests/test-kernel-gzip-emulation.py`
+run each target's own U-Boot under Unicorn against the exact boot image the
+build ships. For all eleven targets U-Boot asks the card for exactly the
+image's bytes, unpacks the original kernel, copies the 512-byte ramdisk and
+appends the header command line to `bootargs`. The tests model the hardware
+calls. They run U-Boot's functions, not a whole boot, and they say nothing
+about how each target's kernel responds. Every target's kernel does contain
+the three arguments.
 
 `tests/test-kernel-gzip.py` checks the derived files and the corruption gates
 for every target. `tests/test-boot-migration.sh` runs the real migration script
-on ordinary files in a disposable Alpine container: every transition, injected
-write failures at each write, rollback, the boot0 patch arithmetic, and one
-end-to-end run with the files the build produces for the RG SP.
-`tests/test-root-mount.sh` covers the root-partition handling in `rcS`.
+on ordinary files in a disposable Alpine container. It covers every
+transition, a failure injected at each write, the rollback, the boot0 checksum
+arithmetic, and one run with the files the build produces for the RG SP.
+`tests/test-root-mount.sh` covers the root-partition steps in `rcS`.
 
-The RG SP is the physical test device. There the migration script itself
-replaced a 1.3.0 card's files, and warm restarts with USB attached measured
-(medians, seconds from the hardware counter's origin):
+The RG SP is the only device these files have booted on. There, a card running
+release 1.3.0 took the update from a `.bosupd`, migrated on its first boot and
+passed `validate-on-device.sh` except for the two checks that need NextUI. Warm
+restarts with USB attached gave these medians, in seconds from the hardware
+counter's origin:
 
 | | Before Linux | Linux to handoff | Combined |
 | --- | ---: | ---: | ---: |
-| Release 1.3.0 | 3.46 | 2.26 | 5.73 |
-| This set, with the `rcS` changes | 2.76 | 1.64 | 4.41 |
+| Release 1.3.0, 3 boots | 3.46 | 2.26 | 5.73 |
+| These files and the `rcS` changes, 4 boots | 2.72 | 1.70 | 4.41 |
 
-Measured one change at a time: about 0.7 s is serial output in the three
-stages, 0.5 s the initramfs, 0.2 s the RCU arguments and under 0.1 s `rcS`.
-Those were separate runs and do not sum exactly. Other models still need
-physical acceptance tests. See [experiments](../experiments/h700-boot-speed/README.md)
-for the individual measurements and [boot profiling](09-boot-profiling.md) for
-how the stages are measured.
+Measured one change at a time, serial output in the three stages costs about
+0.7 s, the initramfs 0.5 s, the slow RCU grace periods 0.2 s and the two waits
+removed from `rcS` under 0.1 s. Those runs were separate, so the parts do not
+sum exactly to the difference. About one boot in twelve spent 0.3 to 0.6 s
+longer before Linux. Three of those four boots followed a large write to the
+card.
+
+Nobody has tested sleep and wake on the new files yet, because the device
+cannot sleep while its USB cable is attached. The other ten models have not
+booted these files at all.
+[The experiment notes](../experiments/h700-boot-speed/README.md) list each
+measurement, and [boot profiling](09-boot-profiling.md) explains how the stages
+are measured.

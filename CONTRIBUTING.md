@@ -220,6 +220,7 @@ python3 tests/test-audio-module.py
 ./tests/test-boot-splash-policy.sh
 ./tests/test-frontend-session.sh
 ./tests/test-boot-migration.sh
+./tests/test-root-mount.sh
 python3 tests/test-kernel-gzip.py  # requires all prepared firmware inputs
 ./tests/test-wifi-init.sh
 ./tests/test-systemctl-wifi.sh
@@ -259,11 +260,12 @@ measurement scope, comparison procedure and GPU module optimization.
 
 ## Technical documentation
 
-The [gzip boot-pair implementation](docs/12-kernel-gzip.md) covers every supported
-target, including one-time migration through a normal `.bosupd`. Its benefit
-appears in the pre-kernel and combined timings, outside the existing
-kernel-to-frontend budget. The original
-[RG SP experiment](experiments/rgsp-kernel-gzip/README.md) retains investigation evidence.
+The [boot files](docs/12-kernel-gzip.md) cover every supported target and reach
+existing cards through a one-time migration inside a normal `.bosupd`. They
+shorten both the time before Linux and the kernel-to-frontend time. The
+[boot-speed experiments](experiments/h700-boot-speed/README.md) hold the
+measurements behind each change and the tools that took them. The original
+[RG SP gzip experiment](experiments/rgsp-kernel-gzip/README.md) retains its investigation evidence.
 The [RG SP boot-timing follow-up](experiments/rgsp-boot-timing/README.md) records
 counter-based stages and the repeated gzip/original-kernel comparison separately
 from LED-on and frontend rendering measurements.

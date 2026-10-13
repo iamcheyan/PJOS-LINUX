@@ -38,36 +38,46 @@ as harvested. See [boot performance](09-boot-profiling.md).
 | `/run`, `/tmp`, `/var`, `/dev/shm` | tmpfs runtime state |
 | `/mnt/vendor` | Compatibility files shipped in the rootfs; no vendor partition mounted here |
 
-The vendor initramfs mounts root read-write. Normal initialization does not
-remount it read-only. If mounting p6 fails, `rcS` uses tmpfs for `/data`, so
+The root filesystem is mounted read-write. On a card that still boots through
+the vendor initramfs, the initramfs mounts it that way. Otherwise the kernel
+mounts it read-only and `rcS` remounts it writable with the same options. See
+[boot files](12-kernel-gzip.md). Normal initialization does not remount it
+read-only. If mounting p6 fails, `rcS` uses tmpfs for `/data`, so
 state from that boot is not persistent. Shutdown flushes persistent mounts;
 see [power handling](05-runtime-power-network.md).
 
 ## 3. Init and startup order
 
-The vendor initramfs switches root to the regular executable `/init` script,
-which executes BusyBox init. `/etc/inittab` runs `rcS`, then respawns
+The kernel, or the vendor initramfs on a card that still has one, runs the
+regular executable `/init` script, which executes BusyBox init. `/etc/inittab` runs `rcS`, then respawns
 `frontend-session` and a serial getty. It invokes `rcK` on shutdown.
 
 `rcS` performs this sequence:
 
-1. Mount kernel interfaces and tmpfs filesystems. Apply SP Super Standby where
-   supported. Mount `debugfs` for the HDMI display-control and MENU GPIO interfaces.
+1. Mount kernel interfaces. If the kernel mounted the root filesystem
+   read-only, run `e2fsck` when the filesystem has recorded errors, then
+   remount it writable. Mount the tmpfs filesystems. Apply SP Super Standby
+   where supported. Mount `debugfs` for the HDMI display-control and MENU GPIO
+   interfaces.
 2. Handle charger-origin startup before ordinary initialization; see
    [charger-only boot](11-charger-only-boot.md).
-3. Load the Bluetooth wake-handshake module, start Mali in the background,
-   mount `/data`, and check the system-update trial.
-4. Restore time preferences and entropy, read the RTC as UTC with `hwclock -u -s`,
-   and start Wi-Fi module/interface initialization in the background (with a
-   remembered power-off retry for slow-resetting radios; see [runtime notes](05-runtime-power-network.md)).
+3. Start Mali in the background, mount `/data`, and check the system-update
+   trial.
+4. Restore time preferences and entropy, and read the RTC as UTC with
+   `hwclock -u -s`. Start radio initialization in the background. It loads the
+   Bluetooth wake-handshake module first and the Wi-Fi module after it, with a
+   remembered power-off retry for radios that reset slowly. See
+   [runtime notes](05-runtime-power-network.md).
 5. Restore or generate the machine ID, then run first-boot storage expansion.
-6. Wait for a TF2 card the kernel is still identifying, up to the handoff
-   budget; an empty slot costs one read. Sample MENU through
-   `boot-menu-held`'s GPIO check, or use the marker retained by charger
-   handling. Select USB-storage mode before mounting frontend storage.
+6. Wait for a TF2 card that the kernel is still identifying, at most until
+   the handoff budget ends. An empty slot costs one file read. Sample MENU
+   through the GPIO check in `boot-menu-held`, or use the marker that charger
+   handling kept. Select USB-storage mode before mounting frontend storage.
 7. For normal startup, mount usable TF2 p1 or fall back to TF1 p7. Apply
-   `baseos.conf` from TF1, then scan for system updates. Storage mode uses
-   configuration defaults and skips card access and update application.
+   `baseos.conf` from TF1, then scan for system updates. When TF1 was mounted
+   only for its settings, unmount it in the background, because the unmount
+   takes about 60 ms. Storage mode uses configuration defaults and skips card
+   access and update application.
 8. Start SSH/SFTP and USB adb through `/etc/init.d/dev` in the background.
 
 Services requiring a network do not block frontend startup. There is no udev

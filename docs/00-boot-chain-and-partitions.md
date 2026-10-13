@@ -1,13 +1,13 @@
 # 00 — Boot chain & partitions
 
 The vendor bootloader and kernel come from each target's prepared firmware.
-Preparation normalizes stock layouts to StockMod geometry; image composition
-replaces the p2 bootlogo and regenerates GPT metadata. It also derives the
-[boot files](12-kernel-gzip.md): a gzip kernel with one pinned U-Boot
-instruction selecting the existing gzip decoder, an empty ramdisk in place of
-the vendor initramfs, three kernel arguments, and serial output switched off in
-boot0 and U-Boot. The decompressed kernel, the hardware description in the
-device trees and the environment remain unchanged.
+Preparation normalizes stock layouts to StockMod geometry. Image composition
+replaces the p2 bootlogo, regenerates the GPT and derives the
+[boot files](12-kernel-gzip.md). Those are a gzip kernel, one pinned U-Boot
+instruction that selects the existing gzip decoder, an empty ramdisk in place
+of the vendor initramfs, three kernel arguments, and serial output switched off
+in boot0 and U-Boot. The unpacked kernel, the hardware description in the
+device trees and the environment stay unchanged.
 
 The geometry below is the normalized H700 layout. Target-specific inputs and
 preserved-region hashes are recorded in `source.json`.
@@ -87,47 +87,50 @@ partitions=special@mmcblk0p1:...:rootfs@mmcblk0p5:UDISK@mmcblk0p6:primary@mmcblk
 console=ttyS0,115200 loglevel=4 cma=64M ... gpt=1 lcd_type=boe
 ```
 
-We never modify p3. U-Boot appends the boot image header's own command-line
-field to these arguments, which is where BaseOS adds
-`loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1`; being
-last, its `loglevel` wins over `quiet`. To see kernel messages on the serial
-port while debugging, raise the level after startup (`dmesg -n 7`) or build a
+We never modify p3. U-Boot appends the command-line field of the boot image
+header to these arguments, and BaseOS puts
+`loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1` there.
+That `loglevel` comes last, so it overrides `quiet`. To see kernel messages on
+the serial port while debugging, run `dmesg -n 7` after startup, or build a
 boot image with a different header field.
 
 ## 2. The boot image and the vendor initramfs
 
-Partition 4 (`boot`) is an **Android boot image** (`ANDROID!` magic, 2 KiB
-pages): kernel, then ramdisk, then device tree. The vendor ramdisk is a small
-BusyBox-1.22 (2015) initramfs whose `/init`:
+Partition 4 (`boot`) holds an Android boot image with the `ANDROID!` magic and
+2 KiB pages. It contains the kernel, then a ramdisk, then a device tree. The
+vendor ramdisk is a small BusyBox 1.22 initramfs from 2015. Its `/init` does
+four things.
 
-1. parses `root=` / `gpt=` / `console=` from `/proc/cmdline`;
-2. runs `e2fsck -y` on the root device;
-3. **mounts root with `-o rw,noatime,nodiratime,norelatime,noauto_da_alloc,barrier=0,data=ordered`**;
-4. `mount --move /dev` and `exec switch_root /mnt /init`.
+1. It parses `root=`, `gpt=` and `console=` from `/proc/cmdline`.
+2. It runs `e2fsck -y` on the root device.
+3. It mounts root with
+   `-o rw,noatime,nodiratime,norelatime,noauto_da_alloc,barrier=0,data=ordered`.
+4. It runs `mount --move /dev` and `exec switch_root /mnt /init`.
 
-BaseOS images replace that ramdisk with an empty archive. The kernel then finds
-no `/init` in it, mounts `root=/dev/mmcblk0p5` itself, read-only, and runs the
-root filesystem's `/init`; `rcS` runs the check when it is due and remounts the
-root writable with the same options (see [boot files](12-kernel-gzip.md)).
+BaseOS images replace that ramdisk with an empty archive. The kernel finds no
+`/init` in it, mounts `root=/dev/mmcblk0p5` read-only and runs the `/init` of
+the root filesystem. `rcS` then runs the filesystem check when one is due and
+remounts the root writable with the same options. See
+[boot files](12-kernel-gzip.md).
 
-A card installed by release 1.3.0 or earlier still boots through the vendor
-initramfs until its first update migrates it, so the root filesystem must keep
-satisfying both paths:
+A card installed by release 1.3.0 or earlier boots through the vendor initramfs
+until its first update migrates it. The root filesystem must therefore satisfy
+both paths.
 
-- **The root ext4 MUST have a journal.** The initramfs mounts with `data=ordered`,
-  and the kernel *rejects* that on a journal-less filesystem
-  (`EXT4-fs: can't mount with data=, fs mounted w/o journal`) — an eternal boot
-  splash. So `mke2fs` for p5 must **not** pass `^has_journal`.
-- **Our `/init` must be a regular file, not a symlink.** The 2015 `switch_root`
-  chokes on our `/init → sbin/init → busybox` symlink chain (stock's single-hop
-  symlink works; the exact difference is unproven). We ship `/init` as a real
-  script that `exec`s BusyBox init (see [01](01-rootfs-and-init.md)).
-- **Static `/dev/console` and `/dev/null` nodes.** Without the initramfs, `/dev`
-  is the root filesystem's own directory until `rcS` mounts devtmpfs.
+- The root ext4 must have a journal. The initramfs mounts with `data=ordered`,
+  and the kernel rejects that option on a filesystem without a journal with
+  `EXT4-fs: can't mount with data=, fs mounted w/o journal`. The device then
+  stays on the boot splash. Do not pass `^has_journal` to `mke2fs` for p5.
+- `/init` must be a regular file. The 2015 `switch_root` fails when `/init`
+  is a symlink to `sbin/init`, which is itself a symlink to `busybox`. Stock's
+  single symlink works, and nobody has established the exact difference. We ship `/init` as a script
+  that runs BusyBox init. See [01](01-rootfs-and-init.md).
+- The image needs static `/dev/console` and `/dev/null` nodes. Without the
+  initramfs, `/dev` is the root filesystem's own directory until `rcS` mounts
+  devtmpfs.
 
-The root filesystem ends up mounted **read-write** on both paths. We do not
-remount it `ro` — see the read-only-hardening item in
-[06](06-status-and-lessons.md).
+Both paths end with the root filesystem mounted read-write. We do not remount
+it read-only. See the read-only item in [06](06-status-and-lessons.md).
 
 ## 3. ext4 feature policy for the 4.9 BSP kernel
 

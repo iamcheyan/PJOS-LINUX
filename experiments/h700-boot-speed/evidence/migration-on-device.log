@@ -1,0 +1,46 @@
+1+1 records in
+1+1 records out
+1310720 bytes (1.3MB) copied, 0.059241 seconds, 21.1MB/s
+19+1 records in
+19+1 records out
+20436992 bytes (19.5MB) copied, 0.901200 seconds, 21.6MB/s
+0+1 records in
+0+1 records out
+65536 bytes (64.0KB) copied, 0.003534 seconds, 17.7MB/s
+boot-pair: found package gzip, image gzip, boot0 debug 3
+boot-pair: recovery copy: the original pair saved by the first migration is intact
+boot-pair: backups complete; installing the fast pair over the gzip pair
+6+1 records in
+6+1 records out
+7237632 bytes (6.9MB) copied, 0.359447 seconds, 19.2MB/s
+6+1 records in
+6+1 records out
+7237632 bytes (6.9MB) copied, 0.318335 seconds, 21.7MB/s
+2560+0 records in
+2560+0 records out
+1310720 bytes (1.3MB) copied, 0.230235 seconds, 5.4MB/s
+6+1 records in
+6+1 records out
+7237632 bytes (6.9MB) copied, 0.322373 seconds, 21.4MB/s
+1+1 records in
+1+1 records out
+1310720 bytes (1.3MB) copied, 0.059032 seconds, 21.2MB/s
+boot-pair: fast pair verified by direct readback
+0+1 records in
+0+1 records out
+65536 bytes (64.0KB) copied, 0.003585 seconds, 17.4MB/s
+4+0 records in
+4+0 records out
+4 bytes (4B) copied, 0.000240 seconds, 16.3KB/s
+1+0 records in
+1+0 records out
+1 bytes (1B) copied, 0.000047 seconds, 20.8KB/s
+boot-pair: boot0: debug 3 -> 0, checksum 180038375 -> 180038372; writing one sector
+0+1 records in
+0+1 records out
+512 bytes (512B) copied, 0.001254 seconds, 398.7KB/s
+0+1 records in
+0+1 records out
+65536 bytes (64.0KB) copied, 0.003260 seconds, 19.2MB/s
+boot-pair: boot0 patch verified by direct readback
+boot-pair: continuing startup; changes take effect at the next ordinary boot

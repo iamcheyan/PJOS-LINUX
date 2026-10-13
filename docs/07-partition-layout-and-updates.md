@@ -8,7 +8,7 @@ Userdata and frontend storage retain their existing extents.
 
 U-Boot loads the partition named `boot`; the kernel mounts partition number 5
 as root. Its start address comes from GPT, allowing a slot switch without
-changing the vendor bootloader, kernel or initramfs. Partition names and order
+changing the vendor bootloader or kernel. Partition names and order
 must remain compatible with the vendor boot chain.
 
 ## 2. Layout
@@ -57,11 +57,11 @@ image-sha256=<sha256 of decompressed rootfs image>
 The rootfs bytes come from the image built by `build-image.sh`. The manifest
 hash verifies decompressed image integrity; payloads are not signed.
 `build-all.sh` also prints download-file checksums for the release page.
-The updater replaces rootfs only and leaves p2 artwork alone. A rootfs can carry
-the [one-time gzip boot migration](12-kernel-gzip.md): the new system installs a
-matched U-Boot/kernel pair on its first boot, then continues to the frontend and
-confirms the trial. The next ordinary boot uses gzip. Those shared boot sectors
-are outside rootfs A/B rollback protection.
+The updater replaces rootfs only and leaves p2 artwork alone. A rootfs carries
+the [one-time boot-file migration](12-kernel-gzip.md). On its first boot the new
+system replaces the boot package and boot image, quiets boot0, starts the
+frontend and confirms the trial. The next ordinary boot uses the new files. A/B
+rollback does not cover those shared boot areas.
 
 ## 4. Selection and application
 
