@@ -115,8 +115,15 @@ device-tree blob and that memory is read-only. The module now gives the
 property a value of its own.
 
 With the module the RG SP slept for 30 seconds and resumed with all six
-controllers. Nothing was plugged into a host port during these tests, so host
-mode with a real USB device is untested.
+controllers.
+
+A USB audio adapter plugged into the OTG port worked as a host device.
+[`evidence/usb-host-otg-test.txt`](evidence/usb-host-otg-test.txt) has the
+kernel messages. The OTG port has host controllers of its own, EHCI 0 and
+OHCI 0, which the kernel starts when a device is attached. That test therefore
+shows that host mode still works on the one USB port the RG SP has. It does not
+use any of the five controllers the module starts. The RG SP has no known
+connector for those five, so nothing has been attached to one of them.
 
 ## All eleven targets
 
@@ -143,7 +150,8 @@ carries a retry for radios that reset slowly, so the branch leaves it alone.
 
 - A compressed read-only rootfs. It would mostly help the frontend load its
   libraries, which happens after the handoff this work measures.
-- A USB device plugged into a host port since the USB change.
+- A USB device on one of the five controllers the module starts. A model
+  with a second USB port or an internal USB device would show it.
 
 ## Sleep and wake
 

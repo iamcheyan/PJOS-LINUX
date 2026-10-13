@@ -218,9 +218,11 @@ card.
 On the new files the RG SP slept for 30 seconds, woke on an RTC alarm and
 resumed with the frontend, Wi-Fi, GPU and all six USB host controllers
 working. A cold power-on with TF2 removed took 4.38 s before the USB change
-and used TF1 without waiting for the empty slot. Nobody has plugged a USB
-device into a host port since the USB change. The other ten models have not
-booted these files at all.
+and used TF1 without waiting for the empty slot. A USB audio adapter on the
+OTG port worked as a host device after the USB change. The OTG port uses host
+controllers of its own, which the kernel starts on demand, so that test does
+not cover the five controllers the module starts. The RG SP has no known
+connector for those. The other ten models have not booted these files at all.
 [The experiment notes](../experiments/h700-boot-speed/README.md) list each
 measurement, and [boot profiling](09-boot-profiling.md) explains how the stages
 are measured.

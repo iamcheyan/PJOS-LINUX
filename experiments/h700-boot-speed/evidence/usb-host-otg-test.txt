@@ -1,0 +1,20 @@
+[  150.451121] insmod_host_driver
+[  150.451139] [ehci0-controller]: sunxi_usb_enable_ehci
+[  150.451160] [sunxi-ehci0]: probe, pdev->name: 5101000.ehci0-controller, sunxi_ehci: 0xffffff80091d1218, 0x:ffffff8009c20000, irq_no:11c
+[  150.451636] sunxi-ehci 5101000.ehci0-controller: SW USB2.0 'Enhanced' Host Controller (EHCI) Driver
+[  150.451695] sunxi-ehci 5101000.ehci0-controller: new USB bus registered, assigned bus number 7
+[  150.452760] sunxi-ehci 5101000.ehci0-controller: irq 284, io mem 0x00000001
+[  150.480899] sunxi-ehci 5101000.ehci0-controller: USB 0.0 started, EHCI 1.00
+[  150.484248] [ohci0-controller]: sunxi_usb_enable_ohci
+[  150.484258] [sunxi-ohci0]: probe, pdev->name: 5101000.ohci0-controller, sunxi_ohci: 0xffffff80091d04d8
+[  150.484536] sunxi-ohci 5101000.ohci0-controller: SW USB2.0 'Open' Host Controller (OHCI) Driver
+[  150.484563] sunxi-ohci 5101000.ohci0-controller: new USB bus registered, assigned bus number 8
+[  150.484633] sunxi-ohci 5101000.ohci0-controller: irq 285, io mem 0x00000001
+[  150.863025] sunxi-ehci 5101000.ehci0-controller: ehci_irq: highspeed device connect
+[  151.051121] sunxi-ehci 5101000.ehci0-controller: ehci_irq: highspeed device disconnect
+[  151.591343] usb 8-1: new full-speed USB device number 2 using sunxi-ohci
+[  151.874182] usb 8-1: not running at top speed; connect to a high speed hub
+[  151.924086] usb 8-1: Warning! Unlikely big volume range (=11520), cval->res is probably wrong.
+[  151.924098] usb 8-1: [2] FU [PCM Playback Volume] ch = 1, val = -11520/0/1
+[  151.940088] usb 8-1: Warning! Unlikely big volume range (=8191), cval->res is probably wrong.
+[  151.940099] usb 8-1: [5] FU [Mic Capture Volume] ch = 1, val = 0/8191/1

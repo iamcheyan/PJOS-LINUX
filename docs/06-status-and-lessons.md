@@ -22,7 +22,7 @@ test does not establish hardware support on every target.
 | Charger-only boot and PMIC shutdown | RG SP; POWER-hold startup on RG34XX SP | Per-target charging and power behavior |
 | Hostname and mDNS | RG34XX SP network validation | Per-target and host-network compatibility |
 | Boot files without the initramfs, and their migration | RG SP: update from 1.3.0, migration on first boot, warm restarts, a cold power-on, an empty TF2 slot, sleep and wake | Every other target |
-| USB host controllers started by `h700_late_usb.ko` | RG SP: six root hubs present, adb over USB, sleep and wake | A device plugged into a host port; every other target |
+| USB host controllers started by `h700_late_usb.ko` | RG SP: six root hubs present, adb over USB, sleep and wake, a USB audio adapter on the OTG port | A device on one of the five controllers the module starts; every other target |
 
 ## 2. Boot and build constraints
 
