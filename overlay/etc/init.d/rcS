@@ -11,6 +11,36 @@
 os_sleep=/sys/class/power_supply/axp2202-battery/os_sleep
 [ -w "$os_sleep" ] && printf '16' > "$os_sleep"
 grep -q ' /dev devtmpfs ' /proc/mounts || /bin/mount -t devtmpfs dev /dev
+
+# Root filesystem. The vendor initramfs used to run e2fsck on it and mount it
+# writable; a boot without that initramfs arrives here with the kernel's own
+# read-only mount instead. Finish the job the same way, so the rest of the
+# system cannot tell which boot pair is installed. The kernel has already
+# replayed the journal, so a check is only due when the filesystem carries
+# recorded errors. e2fsck repairs a mounted root behind the kernel's back: when
+# it changed anything, keep the root read-only until the next restart rather
+# than write through stale cached state. Nothing runs here on a root that is
+# already writable.
+root_opts=
+while read -r _ root_dir _ root_o _; do
+	[ "$root_dir" != / ] || root_opts=$root_o
+done < /proc/mounts
+case ",$root_opts," in *,ro,*)
+	root_errors=0
+	[ ! -r /sys/fs/ext4/mmcblk0p5/errors_count ] \
+		|| read -r root_errors < /sys/fs/ext4/mmcblk0p5/errors_count
+	root_fsck=0
+	if [ "$root_errors" != 0 ] && [ -x /usr/sbin/e2fsck ]; then
+		/usr/sbin/e2fsck -y /dev/mmcblk0p5 >/dev/null 2>&1 || root_fsck=$?
+		echo "baseos: root filesystem had $root_errors recorded errors; e2fsck exit $root_fsck" > /dev/kmsg
+	fi
+	if [ "$root_fsck" -eq 0 ]; then
+		/bin/mount -o remount,rw,noatime,nodiratime,nobarrier,noauto_da_alloc / 2>/dev/null \
+			|| /bin/mount -o remount,rw,noatime / 2>/dev/null \
+			|| echo 'baseos: root filesystem stays read-only: remount failed' > /dev/kmsg
+	fi
+	;;
+esac
 /bin/mkdir -p /dev/pts /dev/shm
 /bin/mount -t devpts -o gid=5,mode=620 devpts /dev/pts
 # debugfs: the sunxi disp2 driver's only display-output control surface is

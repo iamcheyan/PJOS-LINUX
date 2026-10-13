@@ -12,6 +12,7 @@
 #   work/tools/boot-clock     (H700 hardware-counter boot-stage timing)
 #   work/tools/axp-off        (cut power at the PMIC; rcK's last step)
 #   work/tools/sftp-server    (OpenSSH sftp subsystem child for dropbear)
+#   work/tools/e2fsck         (root filesystem repair, run only when flagged)
 #   work/tools/adbd           (Android adb daemon, USB-only, static)
 #   work/tools/avahi-daemon   (mDNS responder for <hostname>.local, static)
 # Must use --platform linux/arm64 so the produced binaries are aarch64 for the
@@ -99,6 +100,29 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   gcc -static -O2 -Wall -Wextra -o /out/charger-wait /src/charger-wait.c
   gcc -static -O2 -Wall -Wextra -o /out/boot-clock /src/boot-clock.c
   strip /out/axp-off /out/charger-wait /out/boot-clock
+'
+
+# e2fsck: the vendor initramfs used to check the root filesystem on every boot.
+# BaseOS boots without it, so rcS runs this checker itself, and only when the
+# filesystem carries recorded errors. Built alone and static; nothing else from
+# e2fsprogs ships.
+docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" -v "$TOOLS":/out alpine:3.20 sh -euc '
+  apk add -q build-base linux-headers ca-certificates tar xz
+  E2FS_VERSION=1.47.2
+  E2FS_SHA256=08242e64ca0e8194d9c1caad49762b19209a06318199b63ce74ae4ef2d74e63c
+  cd /tmp
+  wget -q "https://mirrors.edge.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v$E2FS_VERSION/e2fsprogs-$E2FS_VERSION.tar.xz"
+  echo "$E2FS_SHA256  e2fsprogs-$E2FS_VERSION.tar.xz" | sha256sum -c -
+  tar xf "e2fsprogs-$E2FS_VERSION.tar.xz"
+  cd "e2fsprogs-$E2FS_VERSION"
+  ./configure --disable-nls --disable-debugfs --disable-imager --disable-resizer \
+    --disable-defrag --disable-uuidd --disable-fuse2fs --disable-e2initrd-helper \
+    --disable-mmp --disable-tdb --disable-fsck LDFLAGS=-static >/dev/null
+  make -j"$(nproc)" libs >/dev/null 2>&1
+  make -j"$(nproc)" -C e2fsck e2fsck >/dev/null 2>&1
+  strip e2fsck/e2fsck
+  cp e2fsck/e2fsck /out/e2fsck
+  chmod 755 /out/e2fsck
 '
 
 # sftp-server: dropbear 2024.85 ships the sftp subsystem execing
