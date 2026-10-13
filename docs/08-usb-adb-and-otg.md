@@ -7,7 +7,10 @@
 BaseOS enables USB-only adb by default alongside BaseOS's SSH/SFTP service. For reliable adb,
 the data cable must be connected before the handheld is powered on. If the cable is
 disconnected, restart with it connected. BaseOS does not run a reconnect watcher,
-poll the port, force a USB role, or modify the vendor DTB.
+poll the port or force a USB role. The boot files hold back five USB host
+controllers so the kernel reaches init sooner, and `h700_late_usb.ko` starts
+them during startup. EHCI 2 is not held back, because the OTG port does not
+enumerate as a device without it. See [boot files](12-kernel-gzip.md).
 
 A BaseOS-owned maintenance boot exposes user storage as writable
 USB mass storage. Connect the cable, then hold MENU from power-on. A one-shot state

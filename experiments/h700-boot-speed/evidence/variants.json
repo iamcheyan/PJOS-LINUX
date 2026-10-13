@@ -71,6 +71,31 @@
    }
   }
  },
+ "fast-rcu-lateusb": {
+  "name": "fast-rcu-lateusb",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "dtb ehci1-controller@0x05200000:status 6f6b617900 -> 6c61746500",
+   "dtb ohci1-controller@0x05200400:status 6f6b617900 -> 6c61746500",
+   "dtb ohci2-controller@0x05310400:status 6f6b617900 -> 6c61746500",
+   "dtb ehci3-controller@0x05311000:status 6f6b617900 -> 6c61746500",
+   "dtb ohci3-controller@0x05311400:status 6f6b617900 -> 6c61746500",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "95f32dc31133c524c3001de825b145244b9362acb98acd406a99aa6379406e99"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "f6664df7c8960297f2e690c10345220471f37282eb564355df1872fcd855cd15"
+   }
+  }
+ },
  "fast-rcu": {
   "name": "fast-rcu",
   "notes": [

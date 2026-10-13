@@ -4,9 +4,10 @@
 The vendor Android handler forces raw Image. Change its compression selector,
 preserving the Android layout and every other TOC1 component. Then drop what
 startup only waits for: the initramfs (an empty archive), kernel serial output
-and slow boot-time RCU grace periods (kernel arguments in the Android header)
-and U-Boot/boot0 serial output (`debug_mode` 3 -> 0 in the TOC1 device tree and
-the boot0 header). The package
+and slow boot-time RCU grace periods (kernel arguments in the Android header),
+U-Boot/boot0 serial output (`debug_mode` 3 -> 0 in the TOC1 device tree and
+the boot0 header) and five USB host controllers (status "okay" -> "late" in
+that device tree; a module starts them once init is running). The package
 and boot image must be installed together. The earlier gzip-only pair is still
 derived so cards that carry it can be recognised. These are exact-firmware
 patches, not signatures to apply speculatively to another U-Boot build.
@@ -29,6 +30,13 @@ STAMP = 0x5F0A6C39
 # header. It rewrites its own first sector on the card at every boot; the body
 # after that sector never changes.
 BOOT0_OFFSET, BOOT0_SIZE, BOOT0_DEBUG, BOOT0_BODY = 8192, 65536, 0x34, 512
+# USB host controllers the kernel must not start by itself. h700_late_usb.ko
+# starts every node whose status is exactly "late"; any other value but "okay"
+# would leave the port dead. EHCI 2 is not in this list and must stay "okay":
+# without it the OTG port does not enumerate as a device.
+LATE_USB = ("ehci1-controller@0x05200000", "ohci1-controller@0x05200400", "ohci2-controller@0x05310400",
+            "ehci3-controller@0x05311000", "ohci3-controller@0x05311400")
+KEPT_USB = "ehci2-controller@0x05310000"
 # Android header command-line field (offset 0x40, 512 bytes, NUL padded).
 # U-Boot appends it to the kernel arguments; the kernel still prints panics.
 # loglevel=1 still prints a panic. The kernel waits several 10 ms ticks for
@@ -155,12 +163,16 @@ def derive(target: str, prefix: Path, catalog: Path = CATALOG) -> dict:
     tree_start, tree_size = items["dtb"]
     tree = bytearray(package[tree_start:tree_start + tree_size])
     debug = tree_start + fdt_edit.replace(tree, "platform", "debug_mode", struct.pack(">I", 3), bytes(4))
+    quiet = set(range(debug, debug + 4))
+    for node in LATE_USB:
+        held = tree_start + fdt_edit.replace(tree, node, "status", b"okay\0", b"late\0")
+        quiet |= set(range(held, held + 4))
+    require(fdt_edit.find(tree, KEPT_USB, "status")[1] == b"okay\0", "EHCI 2 is not enabled in the device tree")
     package[tree_start:tree_start + tree_size] = tree
     struct.pack_into("<I", package, 20, checksum(package, 20))
-    quiet = set(range(debug, debug + 4))
     require(quiet.isdisjoint(allowed) and changed(gzip_package, package) <= set(range(20, 24)) | quiet and
             changed(original_package, package) <= allowed | quiet,
-            "patch changed bytes outside the instruction, debug_mode and checksums")
+            "patch changed bytes outside the instruction, debug_mode, USB status values and checksums")
 
     boot0 = bytearray(original_boot0)
     require(boot0[4:12] == b"eGON.BT0" and word(boot0, 0x10) == BOOT0_SIZE == len(boot0), "not the expected boot0")

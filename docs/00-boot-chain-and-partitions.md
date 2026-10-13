@@ -5,9 +5,10 @@ Preparation normalizes stock layouts to StockMod geometry. Image composition
 replaces the p2 bootlogo, regenerates the GPT and derives the
 [boot files](12-kernel-gzip.md). Those are a gzip kernel, one pinned U-Boot
 instruction that selects the existing gzip decoder, an empty ramdisk in place
-of the vendor initramfs, three kernel arguments, and serial output switched off
-in boot0 and U-Boot. The unpacked kernel, the hardware description in the
-device trees and the environment stay unchanged.
+of the vendor initramfs, three kernel arguments, serial output switched off in
+boot0 and U-Boot, and five USB host controllers marked for a later start. The
+unpacked kernel, the rest of the device trees and the environment stay
+unchanged.
 
 The geometry below is the normalized H700 layout. Target-specific inputs and
 preserved-region hashes are recorded in `source.json`.

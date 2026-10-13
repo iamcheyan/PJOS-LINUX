@@ -28,11 +28,19 @@ over to the frontend.
 | Two waits removed from `rcS` | 4 | 2.756 | 1.643 | 4.406 |
 | The same, installed by a `.bosupd` and the migration | 4 | 2.718 | 1.704 | 4.412 |
 
-The last row is what the branch ships. It is 1.3 s faster than release 1.3.0.
-Three or four boots per row is a small sample. Kernel start-up alone varies by
-about 0.15 s between identical boots, most of it in the PMIC probe, which took
-between 89 and 175 ms. [`evidence/results.json`](evidence/results.json) has
-every run.
+The USB change came after those runs and was measured with TF2 removed, so
+NextUI started from TF1. Medians of three boots each:
+
+| Variant | Before Linux | Linux to handoff | Combined |
+|---|---:|---:|---:|
+| Everything above | 2.761 | 1.632 | 4.369 |
+| Five USB host controllers started by a module | 2.774 | 1.336 | 4.165 |
+
+The branch ships everything in both tables. That is about 1.5 s faster than
+release 1.3.0. Three or four boots per row is a small sample. Kernel start-up
+alone varies by about 0.15 s between identical boots, most of it in the PMIC
+probe, which took between 89 and 175 ms.
+[`evidence/results.json`](evidence/results.json) has every run.
 
 About one boot in twelve spent 0.3 to 0.6 s longer before Linux. Three of
 those four boots followed a large write to the card.
@@ -69,7 +77,12 @@ those four boots followed a large write to the card.
 7. A step-by-step trace of `rcS` found that unmounting TF1 after reading its
    settings takes about 60 ms, and that loading the Bluetooth wake driver
    takes about 40 ms. Both now run beside the rest of startup.
-8. This adbd ends a session as soon as nothing holds its terminal open. It cut
+8. A faster boot reaches the Wi-Fi driver load sooner after the kernel cuts
+   the radio's supply. That would shorten the power-off interval the radio has
+   always had before its first power-up, and some radios need a long one.
+   `rcS` now starts the first load no earlier than it used to, at 2.25 s. The
+   load runs in the background, so the handoff does not wait for it.
+9. This adbd ends a session as soon as nothing holds its terminal open. It cut
    off BusyBox `dd if=… of=… 2>/dev/null` after a few sectors. `lab.py`
    appends a marker to every command and rejects output without it.
 
@@ -83,14 +96,27 @@ those four boots followed a large write to the card.
   [`evidence/startup-reorder-tried.patch`](evidence/startup-reorder-tried.patch)
   keeps that attempt.
 
-## Tested but not adopted: USB host controllers
+## USB host controllers
 
-Disabling OHCI 2, EHCI 3 and OHCI 3 in the device tree saved another 0.2 s.
-On top of the boot0 row, three boots gave a combined median of 4.400 s. No
-target defines a power pin for USB ports 2 and 3. Disabling EHCI 2 as well
-stopped USB device mode, so adb over USB no longer worked. Nothing was plugged
-into a host port during these tests, so host mode is untested. This change
-needs a decision and a check on each model before it ships.
+The kernel spends 0.3 s starting six USB host controllers before it runs init.
+Three ways of avoiding that were tried.
+
+- Disabling every controller of ports 2 and 3 saved 0.2 s, but the OTG port
+  no longer enumerated as a device, so adb over USB stopped working.
+- Disabling OHCI 2, EHCI 3 and OHCI 3 and keeping EHCI 2 saved 0.2 s and kept
+  adb working. Those ports would have stayed off for good.
+- Marking five controllers `late` and starting them from a module saved 0.3 s
+  and left all six running 0.4 s after init starts. The branch ships this.
+  [`src/h700-late-usb`](../../src/h700-late-usb/h700_late_usb.c) is the module.
+
+The first version of the module wrote the new status into the device-tree
+property and crashed, because property values still point into the boot-time
+device-tree blob and that memory is read-only. The module now gives the
+property a value of its own.
+
+With the module the RG SP slept for 30 seconds and resumed with all six
+controllers. Nothing was plugged into a host port during these tests, so host
+mode with a real USB device is untested.
 
 ## All eleven targets
 
@@ -107,23 +133,31 @@ model, so the build derives each target's files separately.
 
 ## What still needs kernel code
 
-The SD controllers take 183 ms, the PMIC probe up to 175 ms and the USB host
-controllers 315 ms, and this kernel has no setting that shortens or defers
-them. Deferring USB ports or the Wi-Fi SDIO controller would need a helper
-module that creates those devices after handoff.
+The SD controllers take 183 ms and the PMIC probe up to 175 ms, and this
+kernel has no setting that shortens or defers them. The Wi-Fi SDIO controller
+could be started late by a module, as the USB host controllers are, for about
+90 ms. The Wi-Fi driver's power-up timing is delicate, and `rcS` already
+carries a retry for radios that reset slowly, so the branch leaves it alone.
 
 ## Not done
 
 - A compressed read-only rootfs. It would mostly help the frontend load its
   libraries, which happens after the handoff this work measures.
-- Any measurement with TF1 as the only card or from a cold power-on.
+- A USB device plugged into a host port since the USB change.
 
 ## Sleep and wake
 
-On the shipped files the RG SP slept for 30 seconds with an RTC wake alarm set
-and resumed with the frontend, Wi-Fi and GPU working.
+The RG SP slept for 30 seconds with an RTC wake alarm set and resumed with the
+frontend, Wi-Fi and GPU working, once before the USB change and once after it.
 [`evidence/sleep-wake-rtc-alarm.txt`](evidence/sleep-wake-rtc-alarm.txt) has
-the kernel messages. That was one cycle with the USB cable attached.
+the kernel messages of the first cycle. Both ran with the USB cable attached.
+
+## Empty second slot and cold power-on
+
+With TF2 removed, a cold power-on took 4.38 s to the handoff and used TF1. The
+kernel reported the empty slot as powered off, so `rcS` did not wait for it.
+[`evidence/hands-on-empty-slot-cold-boot.txt`](evidence/hands-on-empty-slot-cold-boot.txt)
+has the details. That boot was before the USB change.
 
 ## The freeze
 

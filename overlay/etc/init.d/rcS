@@ -81,6 +81,12 @@ fi
 # background to overlap startup; frontend-session waits for /dev/mali0.
 /sbin/insmod /lib/modules/mali_kbase.ko 2>/dev/null &
 
+# USB host controllers: the boot files hold back every one except the one the
+# OTG port needs, so the kernel does not spend 0.3 s starting them before init.
+# This module starts them now, beside the rest of startup. On boot files that
+# hold nothing back it finds nothing to do.
+[ ! -f /lib/modules/h700_late_usb.ko ] || /sbin/insmod /lib/modules/h700_late_usb.ko 2>/dev/null &
+
 # Persistent state partition (p6, label "userdata"). It survives system
 # updates: an A/B slot flip only moves the rootfs partition.
 /bin/mkdir -p /data
@@ -134,6 +140,7 @@ fi
 	wifi_slow=/data/wifi-slow-radio
 	wifi_off_cs=500                 # power-off interval, centiseconds (stock: ~380)
 	wifi_cut_cs=185                 # kernel disables the WLAN supply about here
+	wifi_first_cs=225               # startup used to reach the first load about here
 	wifi_uptime() {                 # centiseconds; empty when unavailable
 		read -r wifi_up _ < /proc/uptime 2>/dev/null || wifi_up=
 		wifi_up="${wifi_up%.*}${wifi_up#*.}"
@@ -173,6 +180,10 @@ fi
 		wifi_hold_until $((wifi_cut_cs + wifi_off_cs))
 		wifi_load 40
 	else
+		# Startup now gets here sooner after the kernel cuts the WLAN supply.
+		# The radio keeps the power-off interval it has always had before its
+		# first power-up: start no earlier than startup used to.
+		wifi_hold_until "$wifi_first_cs"
 		wifi_load 8
 		if [ ! -d /sys/class/net/wlan0 ]; then
 			echo 'baseos: wifi: no wlan0 after the first load; retrying after a longer power-off' > /dev/kmsg

@@ -1,8 +1,8 @@
 # 12 — Boot files and the one-update migration
 
 BaseOS runs the vendor's boot0, U-Boot and kernel code unchanged and alters
-only their inputs. Every supported H700 image ships the same six changes. The
-build derives them per target from pinned vendor firmware.
+only their inputs. Every supported H700 image ships the same seven changes.
+The build derives them per target from pinned vendor firmware.
 `manifest/kernel-gzip.json` pins each target's original boot0, boot package,
 U-Boot and boot partition by SHA-256. The builder refuses firmware it does not
 recognise. A new vendor build needs a new audit and a new profile.
@@ -17,6 +17,7 @@ recognise. A new vendor build needs a new audit and a new profile.
 | Boot image, header command line | The field holds `loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1`. | U-Boot appends the field to the kernel arguments. The kernel prints only panics to the serial port. RCU grace periods take microseconds while the kernel starts and return to normal afterwards. |
 | Boot package, device tree | `debug_mode` in `/soc/platform` changes from 3 to 0. | U-Boot prints nothing to the serial port. |
 | boot0 header | The `debug_mode` byte changes from 3 to 0. | boot0 prints nothing to the serial port. |
+| Boot package, device tree | The status of five USB host controllers changes from `okay` to `late`. | The kernel does not start them before init. A module starts them during startup. |
 
 The rest of U-Boot, the monitor, the hardware description in the device trees,
 the environment partition and the kernel stay as the vendor shipped them. The
@@ -40,13 +41,43 @@ A card that still boots through the initramfs hands `rcS` a writable root, and
 `rcS` skips both steps. One rootfs therefore works with all three boot states
 described below.
 
+### The USB host controllers
+
+The vendor kernel starts each USB host controller in turn before it runs init.
+An EHCI controller takes about 30 ms and an OHCI controller about 70 ms, and
+the six of them together take 0.3 s. The boot files mark EHCI 1, OHCI 1,
+OHCI 2, EHCI 3 and OHCI 3 with the status `late`. The kernel treats any status
+other than `okay` as unavailable and skips those five.
+
+`rcS` loads `h700_late_usb.ko` in the background right after the GPU module.
+The module looks for host controller nodes whose status is exactly `late`,
+gives each one the status `okay` and creates its platform device under the
+same parent as before. The built-in vendor drivers then start the controller
+as they would have during kernel start-up, and its sysfs path is unchanged. On
+the RG SP all six controllers are running 0.4 s after init starts.
+
+EHCI 2 keeps the status `okay`. With every controller of ports 2 and 3 off,
+the OTG port did not enumerate as a USB device and adb over USB stopped
+working. With EHCI 2 left on, it worked.
+
+Two things differ from the vendor boot. USB bus numbers change, because EHCI 2
+now registers first and becomes `usb1`. Each port's EHCI controller still
+registers before its OHCI controller. And a rootfs without the module leaves
+the five controllers off, which matters only for the case described under
+[migration](#migration-of-existing-cards).
+
+The module calls only exported kernel functions. The build compiles it for
+each target's kernel and checks every imported symbol version against that
+kernel, as it does for the speaker module.
+
 ## Build contract
 
 `tools/kernel_gzip.py` derives three pieces from the prepared inputs. For each
 piece it checks that only the intended bytes changed.
 
-- In the boot package it changes the selector instruction, four device-tree
-  bytes, and the U-Boot and package checksums.
+- In the boot package it changes the selector instruction, the U-Boot and
+  package checksums, and 24 device-tree bytes: the `debug_mode` value and the
+  five status values.
 - In the boot image it changes the header sizes, the command line and the
   image ID, and it replaces the kernel and the ramdisk. It keeps the load
   addresses and the appended device tree.
@@ -130,9 +161,10 @@ and a note if the migration left boot0 unchanged. Later boots test only that
 `complete` exists, with a shell builtin, and start no helper.
 
 Only a manual slot flip can start an older rootfs on the new boot files. That
-rootfs still boots. It lacks the wait for the second card slot described in
-[rootfs and init](01-rootfs-and-init.md), so it may pick TF1 as the frontend
-card.
+rootfs still boots, with two faults. It lacks the wait for the second card slot
+described in [rootfs and init](01-rootfs-and-init.md), so it may pick TF1 as
+the frontend card. It also lacks `h700_late_usb.ko`, so five USB host
+controllers stay off.
 
 ## Validation and timing
 
@@ -153,6 +185,9 @@ on ordinary files in a disposable Alpine container. It covers every
 transition, a failure injected at each write, the rollback, the boot0 checksum
 arithmetic, and one run with the files the build produces for the RG SP.
 `tests/test-root-mount.sh` covers the root-partition steps in `rcS`.
+`tests/test-late-usb.py` checks, for every target, that the module knows every
+controller the build holds back. `h700_late_usb.ko` builds for all eleven
+kernels, and every symbol version it imports matches each of them.
 
 The RG SP is the only device these files have booted on. There, a card running
 release 1.3.0 took the update from a `.bosupd`, migrated on its first boot and
@@ -163,18 +198,28 @@ counter's origin:
 | | Before Linux | Linux to handoff | Combined |
 | --- | ---: | ---: | ---: |
 | Release 1.3.0, 3 boots | 3.46 | 2.26 | 5.73 |
-| These files and the `rcS` changes, 4 boots | 2.72 | 1.70 | 4.41 |
+| Everything except the USB change, 4 boots | 2.72 | 1.70 | 4.41 |
+
+The USB change was measured later with TF2 removed, so NextUI started from
+TF1. Medians of three boots each:
+
+| | Before Linux | Linux to handoff | Combined |
+| --- | ---: | ---: | ---: |
+| Everything except the USB change | 2.76 | 1.63 | 4.37 |
+| With the five controllers started by the module | 2.77 | 1.34 | 4.17 |
 
 Measured one change at a time, serial output in the three stages costs about
-0.7 s, the initramfs 0.5 s, the slow RCU grace periods 0.2 s and the two waits
-removed from `rcS` under 0.1 s. Those runs were separate, so the parts do not
+0.7 s, the initramfs 0.5 s, the USB host controllers 0.3 s, the slow RCU grace
+periods 0.2 s and the two waits removed from `rcS` under 0.1 s. Those runs were separate, so the parts do not
 sum exactly to the difference. About one boot in twelve spent 0.3 to 0.6 s
 longer before Linux. Three of those four boots followed a large write to the
 card.
 
 On the new files the RG SP slept for 30 seconds, woke on an RTC alarm and
-resumed with the frontend, Wi-Fi and GPU working. Nobody has tested a cold
-power-on or a boot with an empty TF2 slot. The other ten models have not
+resumed with the frontend, Wi-Fi, GPU and all six USB host controllers
+working. A cold power-on with TF2 removed took 4.38 s before the USB change
+and used TF1 without waiting for the empty slot. Nobody has plugged a USB
+device into a host port since the USB change. The other ten models have not
 booted these files at all.
 [The experiment notes](../experiments/h700-boot-speed/README.md) list each
 measurement, and [boot profiling](09-boot-profiling.md) explains how the stages

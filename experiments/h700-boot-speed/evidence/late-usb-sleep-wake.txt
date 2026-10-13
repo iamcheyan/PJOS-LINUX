@@ -1,0 +1,18 @@
+[    1.156025] h700_late_usb: loading out-of-tree module taints kernel.
+[    1.449997] h700_late_usb: started 5 held-back host controllers, 0 failed
+[   35.445537] PM: suspend entry 2026-10-13 22:46:24.332345980 UTC
+[   35.767559] [ehci3-controller]: sunxi_ehci_hcd_suspend
+[   35.767712] [ehci1-controller]: sunxi_ehci_hcd_suspend
+[   35.779352] [ehci2-controller]: sunxi_ehci_hcd_suspend
+[   35.856620] [ohci3-controller]: sunxi_ohci_hcd_suspend
+[   35.866484] [ohci2-controller]: sunxi_ohci_hcd_suspend
+[   35.866647] [ohci1-controller]: sunxi_ohci_hcd_suspend
+[   37.110522] [ehci1-controller]: sunxi_ehci_hcd_resume
+[   37.110535] [ohci1-controller]: sunxi_ohci_hcd_resume
+[   37.110542] [ehci2-controller]: sunxi_ehci_hcd_resume
+[   37.110736] [ohci2-controller]: sunxi_ohci_hcd_resume
+[   37.111822] [ehci3-controller]: sunxi_ehci_hcd_resume
+[   37.123104] [ohci3-controller]: sunxi_ohci_hcd_resume
+[   37.194602] Suspended for 28.908 seconds
+[   37.917913] PM: resume of devices complete after 808.468 msecs
+[   37.926666] PM: suspend exit 2026-10-13 22:46:55.732812163 UTC

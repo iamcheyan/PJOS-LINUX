@@ -61,8 +61,10 @@ regular executable `/init` script, which executes BusyBox init. `/etc/inittab` r
    interfaces.
 2. Handle charger-origin startup before ordinary initialization; see
    [charger-only boot](11-charger-only-boot.md).
-3. Start Mali in the background, mount `/data`, and check the system-update
-   trial.
+3. Start Mali in the background. Load `h700_late_usb.ko` in the background as
+   well, which starts the USB host controllers that the
+   [boot files](12-kernel-gzip.md) hold back. Mount `/data`, and check the
+   system-update trial.
 4. Restore time preferences and entropy, and read the RTC as UTC with
    `hwclock -u -s`. Start radio initialization in the background. It loads the
    Bluetooth wake-handshake module first and the Wi-Fi module after it, with a

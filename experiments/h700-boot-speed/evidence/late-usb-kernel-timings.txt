@@ -1,0 +1,33 @@
+----------------------------------------
+1 BOOTEVENT (unit:msec)
+----------------------------------------
+        81.584165 : ON
+       414.448247 :    1-swapper/0       : initcall: of_platform_default_populate_init    40.847042ms
+       482.828289 :    1-swapper/0       : probe: probe=platform_drv_probe drv=disp(ffffff800902b720)    42.023334ms
+       483.252705 :    1-swapper/0       : initcall: disp_module_init    42.897541ms
+       581.364747 :    1-swapper/0       : probe: probe=platform_drv_probe drv=axp2101-regulator(ffffff8009078758)    88.250416ms
+       585.188413 :    1-swapper/0       : probe: probe=i2c_device_probe drv=axp20x-i2c(ffffff8009089740)   100.335124ms
+       585.375080 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-twi(ffffff800909ace0)   101.005625ms
+       585.922663 :    1-swapper/0       : initcall: sunxi_twi_adap_init   102.655416ms
+       602.763455 :    1-swapper/0       : initcall: vin_init    16.235917ms
+       705.325038 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ehci(ffffff800908db78)    25.107750ms
+       705.810204 :    1-swapper/0       : initcall: ehci_hcd_init    26.122166ms
+       761.342829 :    1-swapper/0       : probe: probe=platform_drv_probe drv=axp2202-bat-power-supply(ffffff80090e14d8)    24.652500ms
+       761.431413 :    1-swapper/0       : initcall: axp2202_bat_power_driver_init    24.977083ms
+       825.047162 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-mmc(ffffff80090e4830)    57.104750ms
+       884.011995 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-mmc(ffffff80090e4830)    56.421416ms
+       953.871245 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-mmc(ffffff80090e4830)    68.351167ms
+       954.628620 :    1-swapper/0       : initcall: sunxi_mmc_driver_init   187.646666ms
+      1041.262078 :    1-swapper/0       : probe: probe=i2c_device_probe drv=deeplay(ffffff800909a070)    35.238041ms
+      1041.314453 :    1-swapper/0       : initcall: deeplay_encrypt_init    35.456791ms
+      1062.177995 :    1-swapper/0       : Kernel_init_done
+      1175.731619 : 1250-insmod          : probe: probe=platform_drv_probe drv=sunxi-ehci(ffffff800908db78)    27.815458ms
+      1249.702327 : 1250-insmod          : probe: probe=platform_drv_probe drv=sunxi-ohci(ffffff800908dd10)    72.930458ms
+      1319.683327 : 1250-insmod          : probe: probe=platform_drv_probe drv=sunxi-ohci(ffffff800908dd10)    68.936667ms
+      1345.854744 : 1250-insmod          : probe: probe=platform_drv_probe drv=sunxi-ehci(ffffff800908db78)    25.162708ms
+      1419.620577 : 1250-insmod          : probe: probe=platform_drv_probe drv=sunxi-ohci(ffffff800908dd10)    72.779000ms
+      1419.843618 : 1250-insmod          : initcall: h700_late_usb_init [h700_late_usb]   272.952166ms
+      7526.576762 : 1634-insmod          : probe: probe=sdio_bus_probe drv=rtl8821cs(ffffff8000be2a88)    59.740958ms
+      7528.006262 : 1634-insmod          : initcall: rtw_drv_entry [8821cs]   162.127041ms
+         0.000000 : OFF
+----------------------------------------

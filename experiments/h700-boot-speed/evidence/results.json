@@ -757,5 +757,146 @@
     "combined_s": 4.431
    }
   ]
+ },
+ "shipped-tf1": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.761,
+   "min": 2.737,
+   "max": 3.031
+  },
+  "post_kernel_s": {
+   "median": 1.632,
+   "min": 1.608,
+   "max": 1.65
+  },
+  "combined_s": {
+   "median": 4.369,
+   "min": 4.368,
+   "max": 4.681
+  },
+  "kernel_init_s": 1.343,
+  "frontend_card": [
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat"
+  ],
+  "boot_ids": [
+   "d12c6455-57b6-4c40-ac85-bd92faad93a5",
+   "65a1cb67-3ca0-4ca9-85e0-67e47d6cf845",
+   "cadf5e3a-def0-4233-8aa4-76a9a3e03432"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.031,
+    "post_kernel_s": 1.65,
+    "combined_s": 4.681
+   },
+   {
+    "pre_kernel_s": 2.737,
+    "post_kernel_s": 1.632,
+    "combined_s": 4.369
+   },
+   {
+    "pre_kernel_s": 2.761,
+    "post_kernel_s": 1.608,
+    "combined_s": 4.368
+   }
+  ],
+  "note": "TF2 removed; NextUI from TF1; boot files and rootfs as shipped before the USB change"
+ },
+ "lateusb-tf1": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.77,
+   "min": 2.756,
+   "max": 3.167
+  },
+  "post_kernel_s": {
+   "median": 2.106,
+   "min": 2.084,
+   "max": 2.31
+  },
+  "combined_s": {
+   "median": 5.08,
+   "min": 4.841,
+   "max": 5.274
+  },
+  "kernel_init_s": 1.072,
+  "frontend_card": [
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat"
+  ],
+  "boot_ids": [
+   "2e233c88-6577-41da-827a-ac8cc17c048c",
+   "a357ad34-0582-4202-b1a4-1e260bf96c39",
+   "c8aba027-21b1-4a3d-8da6-05df3f2a0ccc"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.167,
+    "post_kernel_s": 2.106,
+    "combined_s": 5.274
+   },
+   {
+    "pre_kernel_s": 2.756,
+    "post_kernel_s": 2.084,
+    "combined_s": 4.841
+   },
+   {
+    "pre_kernel_s": 2.77,
+    "post_kernel_s": 2.31,
+    "combined_s": 5.08
+   }
+  ],
+  "note": "first module version crashed in its init function; the crash report was printed to the serial port and delayed the handoff"
+ },
+ "lateusb2-tf1": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.774,
+   "min": 2.756,
+   "max": 3.067
+  },
+  "post_kernel_s": {
+   "median": 1.336,
+   "min": 1.326,
+   "max": 1.408
+  },
+  "combined_s": {
+   "median": 4.165,
+   "min": 4.1,
+   "max": 4.404
+  },
+  "kernel_init_s": 1.072,
+  "frontend_card": [
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat"
+  ],
+  "boot_ids": [
+   "56d59caf-a51c-4cf9-96f5-55cd068e7cbf",
+   "d27670af-2f92-4059-9192-a1b87f57c56e",
+   "93c06a48-fa1e-4a2f-97b9-fe35908ff59f"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.774,
+    "post_kernel_s": 1.326,
+    "combined_s": 4.1
+   },
+   {
+    "pre_kernel_s": 2.756,
+    "post_kernel_s": 1.408,
+    "combined_s": 4.165
+   },
+   {
+    "pre_kernel_s": 3.067,
+    "post_kernel_s": 1.336,
+    "combined_s": 4.404
+   }
+  ],
+  "note": "fixed module; five USB host controllers held back in the device tree and started by h700_late_usb.ko"
  }
 }

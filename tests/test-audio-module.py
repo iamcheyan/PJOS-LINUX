@@ -79,7 +79,8 @@ class AudioModuleTests(unittest.TestCase):
             self.addCleanup(context.stop)
         self.vendor = {'vendor.ko': vendor}
         self.blob = module_blob()
-        (self.output / 'module/h700_speaker_amp.ko').write_bytes(self.blob)
+        for name in audio.MODULES:
+            (self.output / f'module/{name}.ko').write_bytes(self.blob)
         (self.output / 'expected.json').write_text(json.dumps({'stamp': audio.stamp('test')}))
         silence = contextlib.redirect_stdout(io.StringIO())
         silence.__enter__()
@@ -125,9 +126,26 @@ class AudioModuleTests(unittest.TestCase):
             audio.validate_module(module_blob(module_size=760), self.kernel, self.vendor)
 
     def test_corrupt_code_is_a_cache_miss(self):
+        for name in audio.MODULES:
+            audio.verify('test', self.output)
+            self.assertTrue(audio.current('test', self.output))
+            (self.output / f'{name}.ko').write_bytes(module_blob(text=b'corrupt code!'))
+            self.assertFalse(audio.current('test', self.output))
+
+    def test_every_module_is_checked_and_published(self):
+        (self.output / 'module/h700_late_usb.ko').write_bytes(module_blob(crc=999))
+        with self.assertRaisesRegex(ValueError, 'symbol versions differ'):
+            audio.verify('test', self.output)
+        self.assertFalse((self.output / '.artifact.json').exists())
+        (self.output / 'module/h700_late_usb.ko').unlink()
+        with self.assertRaises(OSError):
+            audio.verify('test', self.output)
+        (self.output / 'module/h700_late_usb.ko').write_bytes(self.blob)
         audio.verify('test', self.output)
-        (self.output / 'h700_speaker_amp.ko').write_bytes(module_blob(text=b'corrupt code!'))
-        self.assertFalse(audio.current('test', self.output))
+        record = json.loads((self.output / '.artifact.json').read_text())
+        self.assertEqual(set(record['modules']), set(audio.MODULES))
+        for name in audio.MODULES:
+            self.assertEqual((self.output / f'{name}.ko').read_bytes(), self.blob)
 
     def test_truncated_cache_metadata_is_a_cache_miss(self):
         audio.verify('test', self.output)

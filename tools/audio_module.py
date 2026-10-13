@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Prepare and verify the out-of-tree H700 module against pinned vendor kernels.
+"""Prepare and verify the out-of-tree H700 modules against pinned vendor kernels.
+
+Two modules are built in one kernel-build run: the speaker-amplifier fix and
+the one that starts the USB host controllers the boot files hold back.
 
 An import CRC check alone cannot validate private ASoC layouts. profiles.json
 is a reviewed allowlist of exact Images; refreshing firmware requires auditing
-those layouts and the codec callbacks before adding a new Image hash.
+those layouts and the codec callbacks before adding a new Image hash. The USB
+module uses exported calls only, so its import CRCs are its whole contract.
 """
 import argparse
 import gzip
@@ -18,6 +22,9 @@ import kernel_abi
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / 'src/h700-speaker-amp'
+LATE_USB = ROOT / 'src/h700-late-usb'
+# The first name is the audio module; every name is built, checked and shipped.
+MODULES = ('h700_speaker_amp', 'h700_late_usb')
 
 
 def digest(blob):
@@ -41,7 +48,8 @@ def inputs(target):
 def stamp(target):
     kernel, _, config, _ = inputs(target)
     h = hashlib.sha256(kernel + config)
-    for path in sorted(SOURCE.rglob('*')) + [Path(__file__), ROOT / 'build-audio-module.sh', ROOT / 'tools/kernel_abi.py']:
+    for path in (sorted(SOURCE.rglob('*')) + sorted(LATE_USB.rglob('*'))
+                 + [Path(__file__), ROOT / 'build-audio-module.sh', ROOT / 'tools/kernel_abi.py']):
         if path.is_file():
             h.update(path.name.encode() + b'\0' + path.read_bytes())
     return h.hexdigest()
@@ -71,6 +79,10 @@ def prepare(target, output):
     module_dir.mkdir(exist_ok=True)
     for name in ['Makefile', 'h700_speaker_amp.c']:
         shutil.copyfile(SOURCE / name, module_dir / name)
+    # One kbuild directory and one prepared kernel tree serve both modules.
+    shutil.copyfile(LATE_USB / 'h700_late_usb.c', module_dir / 'h700_late_usb.c')
+    with (module_dir / 'Makefile').open('a') as makefile:
+        makefile.write((LATE_USB / 'Makefile').read_text())
     start = kernel.index(b'Linux version ')
     banner = kernel[start:kernel.index(b'\0', start)].decode()
     names = {'linux_banner': 'LINUX_BANNER', 'sunxi_spk_event': 'SPK_EVENT',
@@ -121,32 +133,39 @@ def verify(target, output):
     if expected['stamp'] != current_stamp:
         raise ValueError('module inputs changed during compilation')
     kernel, modules, _, _ = inputs(target)
-    blob = (output / 'module/h700_speaker_amp.ko').read_bytes()
-    imported = validate_module(blob, kernel, modules)
+    blobs = {name: (output / f'module/{name}.ko').read_bytes() for name in MODULES}
+    imported = {name: validate_module(blob, kernel, modules) for name, blob in blobs.items()}
     # Publish bytes first, then their integrity record. Interrupted publication
     # is a cache miss; a later build never trusts an unsealed output.
-    (output / 'h700_speaker_amp.ko').write_bytes(blob)
-    record = {'target': target, 'stamp': current_stamp, 'sha256': digest(blob)}
+    for name, blob in blobs.items():
+        (output / f'{name}.ko').write_bytes(blob)
+    record = {'target': target, 'stamp': current_stamp, 'sha256': digest(blobs[MODULES[0]]),
+              'modules': {name: digest(blob) for name, blob in blobs.items()}}
     temporary = output / '.artifact.json.tmp'
     temporary.write_text(json.dumps(record) + '\n')
     temporary.replace(output / '.artifact.json')
-    print(f'{target}: audio module verified ({len(blob)} bytes, {imported} symbol versions)')
+    for name, blob in blobs.items():
+        print(f'{target}: {name} verified ({len(blob)} bytes, {imported[name]} symbol versions)')
 
 
 def current(target, output):
     kernel, modules, _, _ = inputs(target)
     try:
         record = json.loads((output / '.artifact.json').read_text())
-        blob = (output / 'h700_speaker_amp.ko').read_bytes()
-        if (record['target'] != target or record['stamp'] != stamp(target) or
-                record['sha256'] != digest(blob)):
+        if record['target'] != target or record['stamp'] != stamp(target):
             return False
-        # An intact digest is not an ABI proof: check against the actual current
-        # kernel, including if cached exports/expected metadata was modified.
-        validate_module(blob, kernel, modules)
+        for name in MODULES:
+            blob = (output / f'{name}.ko').read_bytes()
+            if record['modules'][name] != digest(blob):
+                return False
+            # An intact digest is not an ABI proof: check against the actual
+            # current kernel, including if cached metadata was modified.
+            validate_module(blob, kernel, modules)
+        if record['sha256'] != record['modules'][MODULES[0]]:
+            return False
     except (OSError, ValueError, KeyError, TypeError, struct.error):
         return False
-    print(f'{target}: audio module is current')
+    print(f'{target}: kernel modules are current')
     return True
 
 

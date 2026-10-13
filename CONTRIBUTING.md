@@ -222,6 +222,7 @@ python3 tests/test-audio-module.py
 ./tests/test-boot-migration.sh
 ./tests/test-root-mount.sh
 python3 tests/test-kernel-gzip.py  # requires all prepared firmware inputs
+python3 tests/test-late-usb.py     # requires all prepared firmware inputs
 ./tests/test-wifi-init.sh
 ./tests/test-systemctl-wifi.sh
 ./tests/test-poweroff-policy.sh

@@ -41,9 +41,9 @@ GZIP_V1 = {
     "rgsp": ("fa745599c9eb95110f03c6c426e6d08e0317146d51059c6a790e25f604ea0942",
              "2b9aeb76ace6c781e21aec1edc200cab967b0bf0d162c54588a9c339caf7490c"),
 }
-# The fast package and boot image that booted on the RG SP: fast-rcu in
-# experiments/h700-boot-speed/evidence/variants.json.
-PROVEN = {"rgsp": ("e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6",
+# The fast package and boot image that booted on the RG SP: fast-rcu-lateusb
+# in experiments/h700-boot-speed/evidence/variants.json.
+PROVEN = {"rgsp": ("f6664df7c8960297f2e690c10345220471f37282eb564355df1872fcd855cd15",
                    "95f32dc31133c524c3001de825b145244b9362acb98acd406a99aa6379406e99")}
 EMPTY = (b"070701" + b"00000000" * 4 + b"00000001" + b"00000000" * 6 + b"0000000B" + b"00000000"
          + b"TRAILER!!!\0").ljust(512, b"\0")
@@ -107,24 +107,43 @@ def check(target):
     assert boot[0x240:0x260] == k.image_id([packed, EMPTY, b"", b"", dtb])
     assert d["expected_boot"] == boot + partition[len(boot):]
 
-    # TOC1: the selector patch plus the device-tree debug_mode value, 3 -> 0.
-    # Nothing else in the dtb item changes; both checksums follow.
+    # TOC1: the selector patch, the device-tree debug_mode value, 3 -> 0, and
+    # the status of five USB host controllers, "okay" -> "late". Nothing else
+    # in the dtb item changes; both checksums follow.
     package, old, previous = d["package"], d["original_package"], d["gzip_package"]
     items = {old[e:e + 64].split(b"\0")[0]: struct.unpack_from("<2I", old, e + 64) for e in range(64, 64 + 4 * 368, 368)}
     start, size = items[b"dtb"]
     tree = old[start:start + size]
     debug, value = fdt_edit.find(tree, "platform", "debug_mode")
     assert value == bytes([0, 0, 0, 3]) and fdt_edit.find(d["package_dtb"], "platform", "debug_mode") == (debug, bytes(4))
-    assert d["package_dtb"] == package[start:start + size] and diff(tree, d["package_dtb"]) == {debug + 3}
+    held = set()
+    assert len(k.LATE_USB) == 5 and k.KEPT_USB not in k.LATE_USB
+    for node in k.LATE_USB:
+        at, status = fdt_edit.find(tree, node, "status")
+        assert status == b"okay\0" and fdt_edit.find(d["package_dtb"], node, "status") == (at, b"late\0")
+        held |= span(at, 4)
+    assert fdt_edit.find(d["package_dtb"], k.KEPT_USB, "status")[1] == b"okay\0"
+    # Every other host controller node keeps the status the vendor gave it.
+    for path, name, at, status in fdt_edit.walk(tree):
+        if name == "status" and "hci" in path and path.split("/")[-1] not in k.LATE_USB:
+            assert fdt_edit.find(d["package_dtb"], path.split("/")[-1], "status") == (at, status)
+    tree_edits = {debug + 3} | held
+    assert d["package_dtb"] == package[start:start + size] and diff(tree, d["package_dtb"]) == tree_edits
     selector = p["uboot_offset"] + p["selector_offset"]
     gzip_only = span(20, 4) | span(p["uboot_offset"] + 12, 4) | span(selector, 4)
-    assert diff(old, previous) <= gzip_only and diff(old, package) <= gzip_only | {start + debug + 3}
-    assert {start + debug + 3} <= diff(previous, package) <= span(20, 4) | {start + debug + 3}
+    in_package = {start + at for at in tree_edits}
+    assert diff(old, previous) <= gzip_only and diff(old, package) <= gzip_only | in_package
+    assert in_package <= diff(previous, package) <= span(20, 4) | in_package
     assert package[selector:selector + 4] == previous[selector:selector + 4] == bytes.fromhex("40f20123")
     assert d["uboot"] == package[p["uboot_offset"]:][:p["uboot_size"]] and k.checksum(d["uboot"], 12) == word(d["uboot"], 12)
     assert k.checksum(previous, 20) == word(previous, 20) and k.checksum(package, 20) == word(package, 20)
-    # The value is one aligned big-endian word, so the checksum drops by 3 << 24.
-    assert (start + debug) % 4 == 0 and word(package, 20) == (word(previous, 20) - (3 << 24)) & 0xFFFFFFFF
+    # Every edit is a whole aligned word, so the checksum moves by the sum of
+    # the differences between the new and old little-endian words.
+    delta = 0
+    for at in sorted({a & ~3 for a in tree_edits}):
+        assert (start + at) % 4 == 0
+        delta += word(d["package_dtb"], at) - word(tree, at)
+    assert word(package, 20) == (word(previous, 20) + delta) & 0xFFFFFFFF
     rejects("matched 0", fdt_edit.find, tree, "platform", "no_such_property")
     rejects("offsets", fdt_edit.replace, bytearray(tree), "platform", "debug_mode", value, bytes(8))
     rejects("device tree", fdt_edit.find, b"\0" + tree[1:], "platform", "debug_mode")

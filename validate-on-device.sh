@@ -83,6 +83,10 @@ chk "keymon running"                   "pidof keymon.elf"
 echo "=== dev services ==="
 chk "sftp-server present + executable"  "test -x /usr/libexec/sftp-server"
 chk "adbd running"                      "pidof adbd"
+# The boot files hold back five USB host controllers and h700_late_usb.ko starts
+# them. Together with EHCI 2 that makes six root hubs, as on the vendor boot.
+chk "USB host module loaded (h700_late_usb)" "grep -q h700_late_usb /proc/modules"
+chk "all six USB host controllers started"   "test \"\$(ls -d /sys/bus/usb/devices/usb[0-9]* | wc -l)\" -ge 6"
 chk "adb has no TCP 5555 listener"       "! netstat -lnt 2>/dev/null | grep -q ':5555 '"
 # The adb gadget is bound to the always-present UDC; device (peripheral) mode is
 # auto-selected by the sunxi manager on cable attach. We deliberately do NOT

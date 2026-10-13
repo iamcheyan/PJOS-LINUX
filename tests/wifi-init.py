@@ -171,6 +171,22 @@ try:
 finally:
     r.close()
 
+# A fast boot reaches the radio block early. The first load still waits for the
+# point startup used to reach, so the radio's power-off interval is not cut
+# short, and the frontend handoff does not wait for it.
+r = Radio(power=0, stale=False, uptime='1.50')
+try:
+    r.run()
+    assert r.process.wait(timeout=0.5) == 0, 'Hold blocked frontend handoff'
+    r.wait(lambda: 'ip link set wlan0 up' in r.events(), timeout=5)
+    events = r.events()
+    assert [e.split()[0] for e in events] == ['btlpm', 'wifi-driver', 'rfkill', 'ip'], events
+    assert 2.25 <= uptime_of(events[1]) <= 2.60, events[1]
+    assert not r.marker()
+    print('PASS: an early start holds the first load until uptime %.2f s' % uptime_of(events[1]))
+finally:
+    r.close()
+
 # First enumeration fails: unload, hold the radio off for a stock-length
 # interval, load again, and remember the unit as slow on /data.
 r = Radio(power=0, stale=False, fail_first=True, wlan0=False)

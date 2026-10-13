@@ -1,0 +1,8 @@
+boot 40ed3529-e54c-4e4a-b09b-8ae6a5b8b0cd
+handoff (legacy, before Linux, Linux to handoff, combined): 1.66 2.717 1.666 4.384
+frontend card: /dev/mmcblk0p7 vfat
+power-on reason: bootreason=button
+second slot block device: ls: /dev/mmcblk1: No such file or directory
+second slot as the kernel sees it: clock:  0 Hz power mode: 0 (off) 
+card-detect line:  gpio-150 (                    |cd                  ) in  hi    
+frontend: nextui.elf 

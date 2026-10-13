@@ -11,9 +11,9 @@ remains unchanged; validation results are written to
 
 The optimised module ships in the rootfs and through normal `.bosupd` updates.
 The [boot files](12-kernel-gzip.md) are a separate optimisation. They change
-how the kernel is stored, drop the vendor initramfs, add three kernel arguments
-and switch off serial output in boot0 and U-Boot. The unpacked kernel and the
-hardware description in the device tree stay the same.
+how the kernel is stored, drop the vendor initramfs, add three kernel arguments,
+switch off serial output in boot0 and U-Boot, and leave five USB host
+controllers for a module to start. The unpacked kernel stays the same.
 `tests/test-strip-gpu-module.py` covers the stripping checks.
 
 ## Measuring startup
