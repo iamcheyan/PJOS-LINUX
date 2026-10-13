@@ -37,7 +37,9 @@ NextUI started from TF1. Medians of three boots each:
 | Five USB host controllers started by a module | 2.774 | 1.336 | 4.165 |
 
 The branch ships everything in both tables. That is about 1.5 s faster than
-release 1.3.0. Three or four boots per row is a small sample. Kernel start-up
+release 1.3.0. The final build, installed from its `.bosupd` by the normal
+updater, took 4.02, 4.10 and 4.18 s over three boots and passed all 39 checks
+of `validate-on-device.sh`. Three or four boots per row is a small sample. Kernel start-up
 alone varies by about 0.15 s between identical boots, most of it in the PMIC
 probe, which took between 89 and 175 ms.
 [`evidence/results.json`](evidence/results.json) has every run.
@@ -146,10 +148,79 @@ could be started late by a module, as the USB host controllers are, for about
 90 ms. The Wi-Fi driver's power-up timing is delicate, and `rcS` already
 carries a retry for radios that reset slowly, so the branch leaves it alone.
 
+## After the handoff: squashfs and reading ahead
+
+Everything above stops at the handoff. These tests also timed the first frame
+NextUI draws, to find out whether a compressed root filesystem would help.
+[`first-frame.py`](first-frame.py) ran them, and
+[`evidence/first-frame-squashfs-preload.txt`](evidence/first-frame-squashfs-preload.txt)
+has every boot.
+
+Before the handoff there is little to gain. Startup reads 3.3 MiB from the
+root partition, and the card is busy for 0.19 s. The kernel mounts the ext4
+root in 11 ms.
+
+After the handoff NextUI takes 3.4 s to draw its first frame, and the card is
+busy for 2.8 s of that. The card runs in SD high-speed mode at about 20 MB/s,
+so the number of bytes decides the time. NextUI reads 28 MiB from the root
+partition, most of it the 19 MB GPU library, and 12 MiB from its own card.
+
+The table gives medians of three boots, in seconds of kernel uptime. The time
+before Linux, about 2.77 s, comes on top.
+
+| Variant | Handoff | First frame | Read from the card by then |
+|---|---:|---:|---:|
+| ext4, as the branch ships | 1.35 | 4.76 | 43.6 MiB |
+| `/usr/lib` from a squashfs image | 1.41 | 4.18 | 33.7 MiB |
+| ext4, libraries read ahead from the start of `rcS` | 2.38 | 4.37 | 45.5 MiB |
+| The same at idle I/O priority | 2.35 | 4.28 | 45.5 MiB |
+| ext4, libraries read ahead from the end of `rcS` | 1.45 | 4.45 | 45.5 MiB |
+| ext4 with a 1024 KiB read-ahead window | 1.39 | 4.87 | 54.4 MiB |
+| squashfs, libraries read ahead from the start of `rcS` | 1.78 | 4.43 | 33.6 MiB |
+| squashfs with a 1024 KiB read-ahead window | 1.44 | 4.44 | 41.1 MiB |
+
+- With `/usr/lib` served from squashfs the first frame came 0.58 s earlier.
+  The handoff came 0.06 s later, because `rcS` first set up a loop device and
+  two mounts. The image used LZ4 HC, which the processor unpacks faster than
+  the card delivers. gzip and xz images are smaller, but unpacking them costs
+  more time than the smaller read saves.
+- Reading the libraries ahead on ext4 brought the first frame 0.3 to 0.5 s
+  earlier. Started early, it delayed the handoff by a full second, because
+  `rcS` waited for the card behind it. Idle I/O priority did not prevent that.
+  Started at the end of `rcS`, it gained 0.3 s.
+- A larger read-ahead window read more from the card and gained nothing.
+
+The squashfs test kept the ext4 root. It wrote a squashfs image of the rootfs
+to the unused slot, mounted it through a loop device and bound its `/usr/lib`
+over the real one. Every file in it had the same hash as its ext4 copy.
+[`evidence/first-frame-test-rcS.patch`](evidence/first-frame-test-rcS.patch)
+is the startup script the tests used.
+
+The branch ships none of these variants.
+
+### What a squashfs root would need
+
+Three things stand in the way of making the whole root squashfs.
+
+- The vendor initramfs mounts the root with `-t ext4`. A card on release 1.3.0
+  or earlier takes its first boot of a new rootfs through that initramfs,
+  because the migration runs inside the new rootfs. A squashfs root therefore
+  cannot arrive in the update that removes the initramfs. It needs a release
+  in between and an update format that older updaters refuse.
+- Nothing recovers a slot the kernel cannot mount. The kernel panics and
+  stays there, and no watchdog restarts it. The rollback after three failed
+  boots starts in `rcS`, which never runs.
+- `tools/mkupdate.py` looks for the version stamp in the raw bytes of the
+  slot, `build-image.sh` checks the slot with `e2fsck`, and root's home
+  directory is on the root filesystem.
+
+Serving only `/usr/lib` from an image stored in the ext4 root avoids all
+three. The root stays ext4 and writable, the updater handles the same kind of
+slot image, and the first boot through the initramfs works as before. Every
+supported kernel has squashfs with LZ4 and the loop driver built in.
+
 ## Not done
 
-- A compressed read-only rootfs. It would mostly help the frontend load its
-  libraries, which happens after the handoff this work measures.
 - A USB device on one of the five controllers the module starts. A model
   with a second USB port or an internal USB device would show it.
 
@@ -200,3 +271,5 @@ git ignores that folder. The script runs with sudo on a Mac.
   size, so no offset moves.
 - [`survey.py`](survey.py) reads the prepared firmware of every target and
   reports what differs.
+- [`first-frame.py`](first-frame.py) restarts the device with the libraries
+  served in different ways and reports when the first frontend frame appears.

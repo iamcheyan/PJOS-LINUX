@@ -1,0 +1,24 @@
+Final build installed on the RG SP by the normal updater, 2026-10-14
+The card ran build v1.3.0-7-g65dd2b4 from slot B with the new boot files. The
+file baseos-rgsp-1.3.0.bosupd (build v1.3.0-11-ga2ba8c3) was copied to the
+frontend card and the device restarted. The updater wrote slot A, restarted,
+and the new build confirmed itself. That took 103 s from the restart command
+to 18 s of uptime on the new build.
+
+State afterwards
+  baseos-update status   version 1.3.0 (v1.3.0-11-ga2ba8c3), slot A (active LBA 434176,
+                         inactive LBA 1482752), trial none (committed), no payload left on the card
+  first boot             before Linux 3.009 s, Linux to handoff 1.337 s, combined 4.347 s
+  boot files             already the new ones, so this boot wrote none (/data/boot-pair-v2/complete: installed)
+  modules                8821cs h700_speaker_amp rtl_btlpm mali_kbase h700_late_usb
+  USB root hubs          6
+  root                   ext4 rw,noatime,nodiratime,nobarrier,noauto_da_alloc,data=ordered
+  frontend               nextui.elf running
+  kernel log             no ext4 error, oops or panic
+
+Three warm restarts on that build (seconds from the hardware counter's origin)
+  before Linux 2.703  Linux to handoff 1.316  combined 4.020  card /dev/mmcblk0p7 vfat
+  before Linux 2.766  Linux to handoff 1.409  combined 4.175  card /dev/mmcblk0p7 vfat
+  before Linux 2.755  Linux to handoff 1.341  combined 4.096  card /dev/mmcblk0p7 vfat
+
+validate-on-device.sh on that build: 39 passed, 0 failed (validate-on-device.log).

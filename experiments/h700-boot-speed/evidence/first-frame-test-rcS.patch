@@ -1,0 +1,48 @@
+--- overlay/etc/init.d/rcS	2026-10-14 00:42:58
++++ overlay/etc/init.d/rcS (test)	2026-10-14 01:31:42
+@@ -40,6 +40,23 @@
+ 			|| echo 'baseos: root filesystem stays read-only: remount failed' > /dev/kmsg
+ 	fi
+ 	;;
++esac
++# LAB: serve /usr/lib from the squashfs image in the unused slot, once per arming.
++if [ -e /etc/lab-sqfs ] && /bin/mv /etc/lab-sqfs /etc/lab-sqfs.used; then
++	/sbin/losetup -r -o 222298112 /dev/loop0 /dev/mmcblk0 \
++		&& /bin/mount -t squashfs -o ro /dev/loop0 /lab-sq \
++		&& /bin/mount -o bind /lab-sq/usr/lib /usr/lib \
++		&& echo 'lab: /usr/lib comes from squashfs' > /dev/kmsg
++fi
++# LAB: optional read-ahead window for the card.
++[ ! -s /etc/lab-ra ] || /bin/cat /etc/lab-ra > /sys/block/mmcblk0/queue/read_ahead_kb
++# LAB: read the frontend's libraries into the page cache in the background.
++lab_mode=
++[ ! -s /etc/lab-preload-mode ] || read -r lab_mode < /etc/lab-preload-mode
++lab_reader='while read -r f; do /bin/cat "$f"; done < /etc/lab-preload.list > /dev/null 2>&1; read -r u _ < /proc/uptime; echo "lab: preload ('"$lab_mode"') done at $u" > /dev/kmsg'
++case $lab_mode in
++early) /bin/sh -c "$lab_reader" & ;;
++idle) /bin/ionice -c 3 /bin/sh -c "$lab_reader" & ;;
+ esac
+ /bin/mkdir -p /dev/pts /dev/shm
+ /bin/mount -t devpts -o gid=5,mode=620 devpts /dev/pts
+@@ -341,4 +358,21 @@
+ # Dev image extras (serial getty is in inittab; this starts SSH).
+ [ -x /etc/init.d/dev ] && /etc/init.d/dev &
+ 
++[ "$lab_mode" != late ] || /bin/sh -c "$lab_reader" &
++
++# LAB: sample card reads and the screen for about 11 s.
++(
++	i=0
++	while [ "$i" -lt 220 ]; do
++		read -r up _ < /proc/uptime
++		read -r _ _ s5 _ < /sys/block/mmcblk0/mmcblk0p5/stat
++		read -r _ _ s7 _ < /sys/block/mmcblk0/mmcblk0p7/stat
++		read -r _ _ sa _ _ _ _ _ _ ta _ < /sys/block/mmcblk0/stat
++		fb=$(/bin/dd if=/dev/fb0 bs=1382400 count=1 2>/dev/null | /bin/md5sum)
++		echo "$up $s5 $s7 $sa $ta ${fb%% *}"
++		i=$((i + 1))
++		/bin/usleep 30000
++	done > /run/lab-trace
++) &
++
+ : # rcS must succeed; init proceeds to respawn frontend-session

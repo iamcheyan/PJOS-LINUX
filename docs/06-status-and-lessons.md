@@ -52,6 +52,10 @@ the relevant subsystem document for its acceptance criteria.
 ## 4. Open work
 
 - Read-only rootfs after initialization for power-loss resilience.
+- Serve `/usr/lib` from a squashfs image. On the RG SP this brought NextUI's
+  first frame 0.58 s earlier. The
+  [experiment notes](../experiments/h700-boot-speed/README.md) have the
+  measurements and what a squashfs root would need.
 - Complete the remaining hardware checks above across supported H700 models.
 - Define `/data` schema migration before storing state that cannot be regenerated.
 

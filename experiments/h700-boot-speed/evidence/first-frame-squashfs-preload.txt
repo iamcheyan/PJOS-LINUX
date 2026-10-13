@@ -1,0 +1,78 @@
+First frontend frame with the libraries served in different ways
+RG SP, 2026-10-14, NextUI on TF1, second slot empty, warm restarts with USB attached.
+Rootfs build v1.3.0-7-g65dd2b4 with the final rcS and boot files of this branch.
+
+How the test works
+  first-frame-test-rcS.patch is the startup script used. It samples the card's
+  read counters and an MD5 of the first framebuffer every 50 ms for 11 s. The
+  first frame is the first sample that differs from the boot logo. The sampler
+  runs in every variant, so its own cost is the same in all of them.
+
+  squashfs variants bind /usr/lib from a squashfs image of the final rootfs
+  (LZ4 HC, 128 KiB blocks), written raw to the start of the unused slot and
+  mounted through a loop device. Every file under /usr/lib in the image hashed
+  the same as the file on ext4. The root itself stays ext4.
+
+  preload variants read the 16 root-partition libraries that nextui.elf maps
+  (25.0 MB, of which libmali.so.0 is 19.1 MB) with cat, in the background.
+
+Card and root partition
+  Bus mode: SD high-speed, 50 MHz, 4 bits. A raw 60 MiB read or write runs at 19.7 MB/s.
+  Read-ahead window: 128 KiB. Scheduler: cfq.
+  Kernel root mount (ext4, clean): 11 ms, from 1.5698 to 1.5804 s in kernel-initcalls-full.dmesg.
+  At the handoff (uptime 1.34 s), three boots:
+    root partition  89 requests, 3.3 MiB read, card busy 190 ms (that boot replayed the journal)
+    whole card      123 to 125 requests, 3.5 to 3.7 MiB read
+  Eight seconds after the handoff: 42.8 MiB read from the root partition, 11.7 MiB from the frontend card.
+
+Squashfs images of the rootfs tree (116 MB)
+  LZ4 HC, 128 KiB blocks   62,509,056 bytes
+  LZ4 HC, 1 MiB blocks     61,292,544
+  LZ4, 128 KiB blocks      72,028,160
+  gzip, 128 KiB blocks     53,977,088
+  xz, 128 KiB blocks       45,051,904
+
+Cold read of the 16 libraries from the squashfs image, caches dropped, three runs
+  730 to 750 ms, 14.3 MiB read from the card for 25.0 MB of files.
+  The same test on ext4 is not valid on a running system, because the kernel
+  does not drop pages that a running program has mapped. At 19.7 MB/s the
+  25.0 MB would take about 1.3 s.
+
+Seconds are kernel uptime. Reads are the whole card's, in MiB, up to the first frame.
+Busy is the time the card spent on requests between the handoff and the first frame.
+
+variant                  boot before Linux  handoff first frame  reads  busy ms
+ext4                        1        2.727     1.35        4.72   43.6     2740
+ext4                        2        2.799     1.41        4.85   43.6     2780
+ext4                        3        2.762     1.35        4.76   43.6     2780
+ext4-preload                1        2.735     2.42        4.47   45.5     1460
+ext4-preload                2        2.802     2.34        4.30   45.5     1440
+ext4-preload                3        2.802     2.38        4.37   45.3     1310
+ext4-preload-idle           1        2.801     2.44        4.98   45.5     1930
+ext4-preload-idle           2        2.773     2.35        4.28   45.5     1430
+ext4-preload-idle           3        2.737     2.34        4.24   45.4     1410
+ext4-preload-late           1        2.745     1.50        4.47   45.5     2330
+ext4-preload-late           2        3.196     1.42        4.45   45.5     2350
+ext4-preload-late           3        3.015     1.45        4.41   45.5     2360
+ext4-ra1024                 1        3.296     1.36        4.49   54.4     2700
+ext4-ra1024                 2        3.055     1.45        4.90   54.4     2720
+ext4-ra1024                 3        2.779     1.39        4.87   54.4     2750
+squashfs                    1        2.763     1.40        4.18   33.8     2130
+squashfs                    2        2.771     1.49        4.33   33.7     2190
+squashfs                    3        2.773     1.41        4.13   33.6     2050
+squashfs-preload            1        3.164     1.88        4.43   33.6     1790
+squashfs-preload            2        2.820     1.66        4.07   33.7     1810
+squashfs-preload            3        3.024     1.78        5.04   33.6     2670
+squashfs-ra1024             1        2.772     1.52        4.70   41.1     2430
+squashfs-ra1024             2        2.810     1.44        4.42   41.1     2450
+squashfs-ra1024             3        2.781     1.44        4.44   41.1     2330
+
+medians                     n               handoff first frame  reads  busy ms
+ext4                        3                  1.35        4.76   43.6     2780
+ext4-preload                3                  2.38        4.37   45.5     1440
+ext4-preload-idle           3                  2.35        4.28   45.5     1430
+ext4-preload-late           3                  1.45        4.45   45.5     2350
+ext4-ra1024                 3                  1.39        4.87   54.4     2720
+squashfs                    3                  1.41        4.18   33.7     2130
+squashfs-preload            3                  1.78        4.43   33.6     1810
+squashfs-ra1024             3                  1.44        4.44   41.1     2430

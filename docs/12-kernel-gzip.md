@@ -190,8 +190,9 @@ controller the build holds back. `h700_late_usb.ko` builds for all eleven
 kernels, and every symbol version it imports matches each of them.
 
 The RG SP is the only device these files have booted on. There, a card running
-release 1.3.0 took the update from a `.bosupd`, migrated on its first boot and
-passed `validate-on-device.sh` except for the two checks that need NextUI. Warm
+release 1.3.0 took the update from a `.bosupd` and migrated on its first boot.
+The updater later installed the final build of this branch the same way, and
+that build passed all 39 checks of `validate-on-device.sh`. Warm
 restarts with USB attached gave these medians, in seconds from the hardware
 counter's origin:
 
