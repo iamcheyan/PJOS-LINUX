@@ -13,6 +13,6 @@ p4 = source.partition(data["layout"], 4)
 with prefix.open("rb") as handle:
     handle.seek(p4["start_sector"] * 512)
     boot = handle.read(p4["sector_count"] * 512)
-identity = dict(expected_boot=boot, profile=dict(package_offset=2048), package=b"")
+identity = dict(expected_boot=boot, profile=dict(package_offset=2048), package=b"", boot0=b"")
 with patch.object(source, "derive_gzip", return_value=identity):
     source.verify_composed(data, prefix, root / "composed.img", root / "logo.bmp")

@@ -4,6 +4,7 @@
   "profiles": {
     "rg28xx": {
       "source_boot_prefix_sha256": "7a6639333e662393125a590f94e3b06887362c391bc7df1a26fb77bd6cb2f155",
+      "boot0_sha256": "8d66e173337cb56efee600c0f840fd59832f2a359c287c7f12b4743d8035888b",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "d91473e42b23b5cc5c99c264d95c6f69669a8d43e65f02344320ad3db717a76f",
@@ -18,6 +19,7 @@
     },
     "rg34xx": {
       "source_boot_prefix_sha256": "fb75bc4c835fa74ff41c0a1fdbe79b8871a960fc249716847fb7be529835c3c3",
+      "boot0_sha256": "b6edbf39af0bf1f35a7e2fd991c8966b04d061e247c81985d2516f695464049b",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "6c380adb6e4f16aa535da25f665706b0a6118b542947859aad5931f4baa9ac28",
@@ -32,6 +34,7 @@
     },
     "rg34xxsp": {
       "source_boot_prefix_sha256": "c67f7389d095cb9a013b197eb1f4ad3c1703809472e14218fd27734509b05c8d",
+      "boot0_sha256": "87f92be2e3b765d0a0e7f3dcc7c2beaf654d5bbad351d19dc371115d760cf0e8",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "a636f02893362a096622c3f5808d8ea438de3c180b28cfe7a6ad406a2b97af68",
@@ -46,6 +49,7 @@
     },
     "rg35xxh": {
       "source_boot_prefix_sha256": "470552ff22954f3ee38a35dea856e66e72c1ae92cd0bd7eb5e3722933e3142dc",
+      "boot0_sha256": "6abc0f9b5a4ec9bfaed1e3c9d4f2b2ea061312790a4ce6b44e1df0dcb36d8272",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "5420b7d1893eb8ee1c1dfbe987a268d64b02d3ef5c3f2dceebbe362454415f0b",
@@ -60,6 +64,7 @@
     },
     "rg35xxplus": {
       "source_boot_prefix_sha256": "9bab9c48f0888a8b9d1dc306d106f93eaf6313dd0b566abd58e24a718b2dbacc",
+      "boot0_sha256": "55301abb278c106e7e18fd668b5afa21b7cfb7170eddefe5a5ed9fe07079ec5e",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "b70e7a48abc54e0785e1715282726f3cd266b0e120ae653d1a8ae5b9b34c9233",
@@ -74,6 +79,7 @@
     },
     "rg35xxpro": {
       "source_boot_prefix_sha256": "596e57cbb9a134328d4bbe7fc0dd69dfaeed413fe8d7747e209a55829d4c4fe2",
+      "boot0_sha256": "a2b01bfec53f3d1fe5543533842a3429c37bf35cac266d4ec502b4336f463e43",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "63d89f45ccff60f9b8ec32f50977a02aa5508ce7177b42e70b6069245d953d86",
@@ -88,6 +94,7 @@
     },
     "rg35xxsp": {
       "source_boot_prefix_sha256": "07e4d9fa0ad10620070072c2893f4f2c0eac19b3bf858915a8456c382a9679ca",
+      "boot0_sha256": "fb0b2228de6a97536f35e40a1b7f996e16b1784d07664dd43751a40fe785f06d",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "429db32ab1fc32ae320d8b05f9ad9e40f1b698a68cbb9f008febd08ee2f5eb8a",
@@ -102,6 +109,7 @@
     },
     "rg40xxh": {
       "source_boot_prefix_sha256": "06aeb355e0f653496933be280d681ecf705e68562247165c4f363ee827bab175",
+      "boot0_sha256": "8edac8c8a692f4a63171ce72e65272f113a0a69cb3936900dfa8ba703092e946",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "cd0df4ec048cd44f124d3d67e587812f3e59cfd387ce7cc873b13b14899fee37",
@@ -116,6 +124,7 @@
     },
     "rg40xxv": {
       "source_boot_prefix_sha256": "072382178fa744702bacee52f69fd082f23e4498413da15af5085980991a7616",
+      "boot0_sha256": "0def1fb66ded253fb1fda8eb3c8e9bfe5323d4afe8e808996731105a92749c74",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "b037232bb6196f84fcecde67c9a70b78ce195f1d425346991e50364735a0d07e",
@@ -130,6 +139,7 @@
     },
     "rgcubexx": {
       "source_boot_prefix_sha256": "7918b33f1af05930ead9de2f992a085ff0249275618239a621bf2a143c200dfe",
+      "boot0_sha256": "875328ff656aadbcc5c7e5059a7c91d44bcb389e0537b200803f38a1ded82325",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "05f1ceaca79707ac33bd00cb4d070981c82027a84cc412688b3bc6dc51a2f7d1",
@@ -144,6 +154,7 @@
     },
     "rgsp": {
       "source_boot_prefix_sha256": "be9ce159433dc8b30582353326e860af97201446d27a82480d7bce99ee2c63c5",
+      "boot0_sha256": "42dfb84e8d2f116ed26af92f60a94a8f010c8120b84c310771a681de333df5d3",
       "package_offset": 16793600,
       "package_size": 1310720,
       "package_sha256": "957929afa2879e18ff758d93eafa98879b21aec70dedcb731d7862a2c20f075c",

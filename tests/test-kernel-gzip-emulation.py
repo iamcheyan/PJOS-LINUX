@@ -70,7 +70,8 @@ for target in sys.argv[1:] or json.loads(CATALOG.read_text())['profiles']:
     result=e.call(0xf43c,[0,0,1,av,flags,images,0]);assert result==0,(flags,result)
    kernel=bytes(u.mem_read(0x40080000,len(d['kernel'])))
    assert (kernel==d['kernel'])==(mode!='gzip-without-patch')
-   assert bytes(u.mem_read(0x42000000,len(d['ramdisk'])))==d['ramdisk']
+   ramdisk=d['original_ramdisk'] if mode=='original' else d['ramdisk']
+   assert bytes(u.mem_read(0x42000000,len(ramdisk)))==ramdisk
    assert bytes(u.mem_read(images+0x5c,1))==(b'\1' if mode=='gzip-with-patch' else b'\0')
    print(target,mode,'PASS',flush=True)
   except Exception:

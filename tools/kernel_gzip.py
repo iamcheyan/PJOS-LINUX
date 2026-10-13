@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Derive gzip boot pairs from pinned prepared firmware; never write a device.
+"""Derive the fast boot set from pinned prepared firmware; never write a device.
 
 The vendor Android handler forces raw Image. Change its compression selector,
-preserving the Android layout and every other TOC1 component. Both boot files
-must be installed together. These are exact-firmware patches, not signatures
-to apply speculatively to another U-Boot build.
+preserving the Android layout and every other TOC1 component. Then drop what
+startup only waits for: the initramfs (an empty archive), kernel serial output
+(`loglevel=1` in the Android header) and U-Boot/boot0 serial output
+(`debug_mode` 3 -> 0 in the TOC1 device tree and the boot0 header). The package
+and boot image must be installed together. The earlier gzip-only pair is still
+derived so cards that carry it can be recognised. These are exact-firmware
+patches, not signatures to apply speculatively to another U-Boot build.
 """
 from __future__ import annotations
 
@@ -16,8 +20,21 @@ import json
 import struct
 from pathlib import Path
 
+import fdt_edit
+
 CATALOG = Path(__file__).resolve().parent.parent / "manifest/kernel-gzip.json"
 STAMP = 0x5F0A6C39
+# First-stage loader: fixed place and length, verbosity byte in its private
+# header. It rewrites its own first sector on the card at every boot; the body
+# after that sector never changes.
+BOOT0_OFFSET, BOOT0_SIZE, BOOT0_DEBUG, BOOT0_BODY = 8192, 65536, 0x34, 512
+# Android header command-line field (offset 0x40, 512 bytes, NUL padded).
+# U-Boot appends it to the kernel arguments; the kernel still prints panics.
+CMDLINE = b"loglevel=1"
+# A newc archive holding only its end marker, padded to one 512-byte block.
+EMPTY_CPIO = (b"070701" + b"%08X" * 13 % (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0)
+              + b"TRAILER!!!\0").ljust(512, b"\0")
+SIZES = (8, 16, 24, 0x660, 0x670)  # kernel, ramdisk, second, recovery DTBO, DTB
 
 
 def sha(blob: bytes) -> str:
@@ -50,18 +67,54 @@ def image_id(parts: list[bytes]) -> bytes:
     return digest.digest() + bytes(12)
 
 
+def changed(old: bytes, new: bytes) -> set[int]:
+    require(len(old) == len(new), "patch changed a length")
+    return {i for i, (a, b) in enumerate(zip(old, new)) if a != b}
+
+
+def split(image: bytes) -> tuple[list[bytes], int]:
+    """Android v2 components in SIZES order, and the padded image length."""
+    parts, pos = [], 2048
+    for at in SIZES:
+        size = word(image, at)
+        require(pos + size <= len(image), "truncated Android component")
+        parts.append(image[pos:pos + size])
+        pos += align(size)
+    require(image[0x240:0x260] == image_id(parts), "Android image ID mismatch")
+    return parts, pos
+
+
+def join(header: bytes, parts: list[bytes], cmdline: bytes = b"") -> bytes:
+    """Rebuild the image around `parts`; only sizes, command line and ID change."""
+    require(len(cmdline) < 512 and b"\0" not in cmdline, "command line does not fit the Android header")
+    head = bytearray(header)
+    for at, part in zip(SIZES, parts):
+        struct.pack_into("<I", head, at, len(part))
+    head[0x40:0x240] = cmdline.ljust(512, b"\0")
+    head[0x240:0x260] = image_id(parts)
+    image = bytes(head) + b"".join(part + bytes(align(len(part)) - len(part)) for part in parts)
+    require(split(image) == (parts, len(image)), "rebuilt Android image does not parse back")
+    return image
+
+
 def derive(target: str, prefix: Path, catalog: Path = CATALOG) -> dict:
     profiles = json.loads(catalog.read_text())
     require(profiles["schema"] == 1, "unsupported gzip profile catalog")
     require(target in profiles["profiles"], f"no audited gzip profile for {target}")
     profile = profiles["profiles"][target]
+    require(BOOT0_OFFSET + BOOT0_SIZE <= profile["package_offset"] and
+            profile["package_offset"] + profile["package_size"] <= profile["boot_partition_start"] * 512,
+            "boot regions overlap")
     with prefix.open("rb") as handle:
+        handle.seek(BOOT0_OFFSET)
+        original_boot0 = handle.read(BOOT0_SIZE)
         handle.seek(profile["package_offset"])
         original_package = handle.read(profile["package_size"])
         handle.seek(profile["boot_partition_start"] * 512)
         original_boot = handle.read(profile["boot_partition_sectors"] * 512)
     require(sha(original_package) == profile["package_sha256"], "unknown original TOC1 package")
     require(sha(original_boot) == profile["boot_partition_sha256"], "unknown original boot partition")
+    require(sha(original_boot0) == profile["boot0_sha256"], "unknown original boot0")
     package = bytearray(original_package)
     require(package[:16] == b"sunxi-package\0\0\0" and word(package, 16) == 0x89119800,
             "not the expected Allwinner TOC1")
@@ -92,43 +145,64 @@ def derive(target: str, prefix: Path, catalog: Path = CATALOG) -> dict:
     package[start:start + size] = uboot
     struct.pack_into("<I", package, 20, checksum(package, 20))
     allowed = set(range(20, 24)) | set(range(start + 12, start + 16)) | set(range(start + selector, start + selector + 4))
-    require(all(i in allowed for i, (a, b) in enumerate(zip(original_package, package)) if a != b),
-            "patch changed bytes outside the instruction and checksums")
+    require(changed(original_package, package) <= allowed, "patch changed bytes outside the instruction and checksums")
+    gzip_package = bytes(package)
+    # U-Boot takes its serial verbosity from the package's own device tree.
+    tree_start, tree_size = items["dtb"]
+    tree = bytearray(package[tree_start:tree_start + tree_size])
+    debug = tree_start + fdt_edit.replace(tree, "platform", "debug_mode", struct.pack(">I", 3), bytes(4))
+    package[tree_start:tree_start + tree_size] = tree
+    struct.pack_into("<I", package, 20, checksum(package, 20))
+    quiet = set(range(debug, debug + 4))
+    require(quiet.isdisjoint(allowed) and changed(gzip_package, package) <= set(range(20, 24)) | quiet and
+            changed(original_package, package) <= allowed | quiet,
+            "patch changed bytes outside the instruction, debug_mode and checksums")
+
+    boot0 = bytearray(original_boot0)
+    require(boot0[4:12] == b"eGON.BT0" and word(boot0, 0x10) == BOOT0_SIZE == len(boot0), "not the expected boot0")
+    require(checksum(boot0, 12) == word(boot0, 12), "invalid original boot0 checksum")
+    require(boot0[BOOT0_DEBUG] == 3, "unexpected boot0 debug_mode")
+    boot0[BOOT0_DEBUG] = 0
+    struct.pack_into("<I", boot0, 12, checksum(boot0, 12))
+    require(changed(original_boot0, boot0) <= {12, 13, 14, 15, BOOT0_DEBUG} and
+            boot0[BOOT0_BODY:] == original_boot0[BOOT0_BODY:],
+            "boot0 patch changed bytes outside debug_mode and its checksum")
 
     require(original_boot[:8] == b"ANDROID!", "not an Android boot image")
     require(word(original_boot, 36) == 2048 and word(original_boot, 40) == 2 and
             word(original_boot, 0x66C) == 1660, "unsupported Android header/page size")
     require([word(original_boot, at) for at in (12, 20, 28, 32)] ==
             [0x40080000, 0x42000000, 0x40F00000, 0x40000100], "unexpected image load addresses")
-    sizes = [word(original_boot, at) for at in (8, 16, 24, 0x660, 0x670)]
+    require(original_boot[0x40:0x240] == bytes(512) and original_boot[0x260:0x660] == bytes(1024),
+            "original Android command line is not empty")
+    sizes = [word(original_boot, at) for at in SIZES]
     require(sizes[2:4] == [0, 0] and 0 < sizes[0] < 32 * 1024 * 1024,
             "unsupported components or kernel decoder output size")
     require(0x40080000 + sizes[0] <= 0x42000000, "kernel output overlaps ramdisk")
-    parts, pos = [], 2048
-    for size in sizes:
-        require(pos + size <= len(original_boot), "truncated Android component")
-        parts.append(original_boot[pos:pos + size])
-        pos += align(size)
-    original_length = pos
-    require(parts[0][0x38:0x3C] == b"ARM\x64", "kernel is not an uncompressed ARM64 Image")
-    require(original_boot[0x240:0x260] == image_id(parts), "original Android image ID mismatch")
-    kernel = parts[0]
+    parts, original_length = split(original_boot)
+    kernel, original_ramdisk, dtb = parts[0], parts[1], parts[4]
+    require(kernel[0x38:0x3C] == b"ARM\x64", "kernel is not an uncompressed ARM64 Image")
     stream = io.BytesIO()
     with gzip.GzipFile(fileobj=stream, mode="wb", compresslevel=9, mtime=0, filename="") as out:
         out.write(kernel)
-    parts[0] = stream.getvalue()
-    require(gzip.decompress(parts[0]) == kernel, "gzip roundtrip failed")
-    header = bytearray(original_boot[:2048])
-    struct.pack_into("<I", header, 8, len(parts[0]))
-    header[0x240:0x260] = image_id(parts)
-    boot = bytes(header) + b"".join(part + bytes(align(len(part)) - len(part)) for part in parts)
-    require(len(boot) < original_length, "compressed image did not shrink")
+    packed = stream.getvalue()
+    require(gzip.decompress(packed) == kernel, "gzip roundtrip failed")
+    header = original_boot[:2048]
+    gzip_boot = join(header, [packed, original_ramdisk, b"", b"", dtb])
+    boot = join(header, [packed, EMPTY_CPIO, b"", b"", dtb], CMDLINE)
+    sizes_id = set(range(8, 12)) | set(range(0x240, 0x260))
+    require(changed(header, gzip_boot[:2048]) <= sizes_id and changed(header, boot[:2048]) <=
+            sizes_id | set(range(16, 20)) | set(range(0x40, 0x40 + len(CMDLINE))),
+            "Android header changed outside sizes, command line and image ID")
+    require(len(boot) < len(gzip_boot) < original_length, "compressed image did not shrink")
     # Preserve unused p4 tail exactly, matching the validated device experiment.
     expected_boot = boot + original_boot[len(boot):]
     return dict(profile=profile, package=bytes(package), uboot=bytes(uboot), boot=boot,
                 original_package=original_package, original_boot=original_boot,
-                expected_boot=expected_boot, kernel=kernel, ramdisk=parts[1], dtb=parts[4],
-                original_image=original_boot[:original_length])
+                expected_boot=expected_boot, kernel=kernel, ramdisk=EMPTY_CPIO, dtb=dtb,
+                original_image=original_boot[:original_length], original_ramdisk=original_ramdisk,
+                gzip_package=gzip_package, gzip_boot=gzip_boot, boot0=bytes(boot0),
+                original_boot0=original_boot0, package_dtb=bytes(tree))
 
 
 def prepare(target: str, prefix: Path, output: Path) -> dict:
@@ -146,6 +220,17 @@ def prepare(target: str, prefix: Path, output: Path) -> dict:
         "package_sha256": sha(change["package"]), "boot_image_sha256": sha(change["boot"]),
         "boot_partition_sha256": sha(change["expected_boot"]),
         "kernel_sha256": sha(change["kernel"]), "kernel_size": len(change["kernel"]),
+        # The pair shipped before this one, and the vendor image, by image bytes
+        # alone: what a card can hold at the start of p4 before migrating.
+        "gzip_package_sha256": sha(change["gzip_package"]),
+        "gzip_boot_image_size": len(change["gzip_boot"]), "gzip_boot_image_sha256": sha(change["gzip_boot"]),
+        "original_boot_image_size": len(change["original_image"]),
+        "original_boot_image_sha256": sha(change["original_image"]),
+        # No boot0 file is shipped: only its body can be pinned on a card, so a
+        # migration edits the debug byte and checksum of the live copy.
+        "boot0_offset": BOOT0_OFFSET, "boot0_size": BOOT0_SIZE, "boot0_debug_offset": BOOT0_DEBUG,
+        "boot0_original_sha256": sha(change["original_boot0"]), "boot0_body_offset": BOOT0_BODY,
+        "boot0_body_sha256": sha(change["original_boot0"][BOOT0_BODY:]),
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     # Trusted rootfs-owned manifest: only fixed keys, target IDs, decimal sizes
@@ -159,11 +244,14 @@ def apply(target: str, prefix: Path, image: Path) -> None:
     require(image.resolve() != prefix.resolve(), "refusing to modify prepared firmware")
     change = derive(target, prefix)
     p = change["profile"]
+    regions = ((BOOT0_OFFSET, change["original_boot0"], change["boot0"]),
+               (p["package_offset"], change["original_package"], change["package"]),
+               (p["boot_partition_start"] * 512, change["original_boot"], change["boot"]))
     with image.open("r+b") as handle:
-        for offset, old, new in ((p["package_offset"], change["original_package"], change["package"]),
-                                 (p["boot_partition_start"] * 512, change["original_boot"], change["boot"])):
+        for offset, old, _ in regions:
             handle.seek(offset)
             require(handle.read(len(old)) == old, "image does not contain the pinned original boot bytes")
+        for offset, _, new in regions:
             handle.seek(offset)
             handle.write(new)
     verify(target, prefix, image)
@@ -173,10 +261,10 @@ def verify(target: str, prefix: Path, image: Path) -> None:
     change = derive(target, prefix)
     p = change["profile"]
     with image.open("rb") as handle:
-        for offset, expected in ((p["package_offset"], change["package"]),
-                                  (p["boot_partition_start"] * 512, change["expected_boot"])):
+        for offset, expected in ((BOOT0_OFFSET, change["boot0"]), (p["package_offset"], change["package"]),
+                                 (p["boot_partition_start"] * 512, change["expected_boot"])):
             handle.seek(offset)
-            require(handle.read(len(expected)) == expected, "composed gzip boot pair differs from derivation")
+            require(handle.read(len(expected)) == expected, "composed boot0, package or boot image differs from derivation")
 
 
 def main() -> None:
@@ -190,7 +278,7 @@ def main() -> None:
         print(json.dumps(prepare(args.target, args.prefix, args.output), indent=2))
     else:
         globals()[args.command](args.target, args.prefix, args.output)
-        print(f"{args.target}: gzip boot pair {args.command} OK")
+        print(f"{args.target}: fast boot set {args.command} OK")
 
 
 if __name__ == "__main__":

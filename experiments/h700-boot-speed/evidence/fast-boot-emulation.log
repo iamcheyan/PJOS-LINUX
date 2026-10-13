@@ -1,0 +1,216 @@
+fast-boot emulation: python 3.12.15 on Linux aarch64, unicorn 2.1.4
+pinned firmware derived by tools/kernel_gzip.py (sha256 21f1b5039eca78c8, catalog 0672584280b1a691)
+modelled instead of run as vendor code:
+  env_get, env_set        environment kept in a Python dict, started from the env
+                          partition (the hash table is set up by earlier boot code
+                          that does not run here); env_set_hex and every string
+                          operation run as vendor code
+  malloc, free            bump allocator with guard bytes after every block
+  update_bootargs         vendor step that runs before the Android handler and writes
+                          the final bootargs; here it stores KNOWN_BOOTARGS
+  block device            sunxi_flash gets a fake card serving the boot partition;
+                          device lookup, partition lookup and sector read are models
+  puts, pr_msg            text is collected instead of going to the serial port;
+                          printf formats it as vendor code
+  flush_cache, interrupts no-ops (processor state only)
+  boot_jump_linux         the jump into the kernel: recorded, then emulation stops
+  hang                    U-Boot's endless loop after a fatal error: reported as a failure
+  starting state          global data holds only the fields this path reads: board
+                          memory bank, device-tree pointer and size, console level,
+                          secure-boot flag 0; working_fdt points at the bootloader
+                          package's device tree as packed (on a device, startup code
+                          at 0xef5c, not run here, first adds 4096 spare bytes)
+how the ramdisk size is used on this path:
+  android_image_get_end      rounds every part up to the 2048-byte page to get the image
+                             length, for the card read and for bootm; 512 bytes take one
+                             page, 0 bytes none
+  android_image_get_ramdisk  size 0: returns -1 with address and length 0. Otherwise the
+                             address after the kernel's pages and the size as it is; no
+                             minimum, no rounding
+  do_bootm                   ignores that return value: always calls memmove_wd(0x42000000,
+                             address, length) and sets initrd_start and initrd_end; calls
+                             fdt_initrd(tree, 0x42000000, 0x42000000 + size) only if the
+                             size is not 0
+  fdt_initrd                 returns at once when start equals end
+items 1-4 are checked twice, with U-Boot's console at the stock level and switched off
+rg28xx  u-boot 677f5631837d00c3, shipped image 9764864 bytes a920f91a8b841d3f, fast image 7159808 bytes 935247a9d6904e56, kernel 17461256 bytes bebac83c075423ed
+rg28xx  the fast image emulated here is byte-identical to the one the build ships
+rg28xx  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg28xx  shipped    PASS  9764864 bytes in 2 reads (64 + 19008 sectors); reached the kernel jump; 17461256 bytes at 0x40080000 are the original kernel; 2606805 bytes copied once, 0x456b1800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b1800..0x4592ded5 (2606805); device tree linux,initrd-start..end 0x42000000..0x4227c6d5 (2606805), 2606805 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg28xx  1 card     PASS  7159808 bytes in 2 reads (64 + 13920 sectors)
+rg28xx  2 kernel   PASS  reached the kernel jump; 17461256 bytes at 0x40080000 are the original kernel
+rg28xx  3 ramdisk  PASS  512 bytes copied once, 0x456b1800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b1800..0x456b1a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg28xx  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg28xx  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg28xx  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg28xx  5 info     header command line is read by: android_image_get_kernel, string routines
+rg28xx  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456b1800, initrd_end=456b1a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg28xx  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg28xx  5 info     zero-length ramdisk (not for shipping): 7157760 bytes in 2 reads (64 + 13916 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17461256 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg28xx  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg34xx  u-boot 0edfa88f7ef990ea, shipped image 9766912 bytes 04374a018bb206aa, fast image 7161856 bytes 5e91bc7699dbf625, kernel 17461256 bytes 39cf8c3eb9a75ff0
+rg34xx  the fast image emulated here is byte-identical to the one the build ships
+rg34xx  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg34xx  shipped    PASS  9766912 bytes in 2 reads (64 + 19012 sectors); reached the kernel jump; 17461256 bytes at 0x40080000 are the original kernel; 2606324 bytes copied once, 0x456b2000 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b2000..0x4592e4f4 (2606324); device tree linux,initrd-start..end 0x42000000..0x4227c4f4 (2606324), 2606324 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg34xx  1 card     PASS  7161856 bytes in 2 reads (64 + 13924 sectors)
+rg34xx  2 kernel   PASS  reached the kernel jump; 17461256 bytes at 0x40080000 are the original kernel
+rg34xx  3 ramdisk  PASS  512 bytes copied once, 0x456b2000 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b2000..0x456b2200 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg34xx  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg34xx  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg34xx  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg34xx  5 info     header command line is read by: android_image_get_kernel, string routines
+rg34xx  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456b2000, initrd_end=456b2200, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg34xx  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg34xx  5 info     zero-length ramdisk (not for shipping): 7159808 bytes in 2 reads (64 + 13920 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17461256 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg34xx  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg34xxsp  u-boot cf493bb84c40c13a, shipped image 9842688 bytes 9985294dd591a627, fast image 7237632 bytes a53956ec80ff974d, kernel 17686536 bytes 1332da28ef5dd078
+rg34xxsp  the fast image emulated here is byte-identical to the one the build ships
+rg34xxsp  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 0 routines placed beyond it and in 2350 address constants pointing beyond it; 36 string uses as expected
+rg34xxsp  shipped    PASS  9842688 bytes in 2 reads (64 + 19160 sectors); reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; 2606339 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x45940d03 (2606339); device tree linux,initrd-start..end 0x42000000..0x4227c503 (2606339), 2606339 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg34xxsp  1 card     PASS  7237632 bytes in 2 reads (64 + 14072 sectors)
+rg34xxsp  2 kernel   PASS  reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel
+rg34xxsp  3 ramdisk  PASS  512 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x456c4a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg34xxsp  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg34xxsp  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg34xxsp  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg34xxsp  5 info     header command line is read by: android_image_get_kernel, string routines
+rg34xxsp  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456c4800, initrd_end=456c4a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg34xxsp  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg34xxsp  5 info     zero-length ramdisk (not for shipping): 7235584 bytes in 2 reads (64 + 14068 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg34xxsp  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg35xxh  u-boot f36d9e44ee000880, shipped image 9773056 bytes 9f833f5cdf01cb90, fast image 7168000 bytes e899c16a1da1154e, kernel 17594376 bytes 71d73e1d7ca4d2de
+rg35xxh  the fast image emulated here is byte-identical to the one the build ships
+rg35xxh  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg35xxh  shipped    PASS  9773056 bytes in 2 reads (64 + 19024 sectors); reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel; 2606744 bytes copied once, 0x456b3800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b3800..0x4592fe98 (2606744); device tree linux,initrd-start..end 0x42000000..0x4227c698 (2606744), 2606744 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg35xxh  1 card     PASS  7168000 bytes in 2 reads (64 + 13936 sectors)
+rg35xxh  2 kernel   PASS  reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel
+rg35xxh  3 ramdisk  PASS  512 bytes copied once, 0x456b3800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b3800..0x456b3a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg35xxh  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg35xxh  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg35xxh  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg35xxh  5 info     header command line is read by: android_image_get_kernel, string routines
+rg35xxh  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456b3800, initrd_end=456b3a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg35xxh  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg35xxh  5 info     zero-length ramdisk (not for shipping): 7165952 bytes in 2 reads (64 + 13932 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg35xxh  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg35xxplus  u-boot 7564f2d95f2398e8, shipped image 9994240 bytes 6fa5738b0df4f775, fast image 7389184 bytes 98ac16a44a47b458, kernel 18067464 bytes d10411bddb1ea1bb
+rg35xxplus  the fast image emulated here is byte-identical to the one the build ships
+rg35xxplus  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg35xxplus  shipped    PASS  9994240 bytes in 2 reads (64 + 19456 sectors); reached the kernel jump; 18067464 bytes at 0x40080000 are the original kernel; 2606325 bytes copied once, 0x456e9800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456e9800..0x45965cf5 (2606325); device tree linux,initrd-start..end 0x42000000..0x4227c4f5 (2606325), 2606325 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg35xxplus  1 card     PASS  7389184 bytes in 2 reads (64 + 14368 sectors)
+rg35xxplus  2 kernel   PASS  reached the kernel jump; 18067464 bytes at 0x40080000 are the original kernel
+rg35xxplus  3 ramdisk  PASS  512 bytes copied once, 0x456e9800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456e9800..0x456e9a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg35xxplus  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg35xxplus  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg35xxplus  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg35xxplus  5 info     header command line is read by: android_image_get_kernel, string routines
+rg35xxplus  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456e9800, initrd_end=456e9a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg35xxplus  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg35xxplus  5 info     zero-length ramdisk (not for shipping): 7387136 bytes in 2 reads (64 + 14364 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 18067464 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg35xxplus  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg35xxpro  u-boot a157998eceb44a5d, shipped image 9773056 bytes b073440f7c312030, fast image 7168000 bytes 63ffb2bbb6afdbda, kernel 17594376 bytes dceb8673671f69e8
+rg35xxpro  the fast image emulated here is byte-identical to the one the build ships
+rg35xxpro  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg35xxpro  shipped    PASS  9773056 bytes in 2 reads (64 + 19024 sectors); reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel; 2606252 bytes copied once, 0x456b3800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b3800..0x4592fcac (2606252); device tree linux,initrd-start..end 0x42000000..0x4227c4ac (2606252), 2606252 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg35xxpro  1 card     PASS  7168000 bytes in 2 reads (64 + 13936 sectors)
+rg35xxpro  2 kernel   PASS  reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel
+rg35xxpro  3 ramdisk  PASS  512 bytes copied once, 0x456b3800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b3800..0x456b3a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg35xxpro  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg35xxpro  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg35xxpro  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg35xxpro  5 info     header command line is read by: android_image_get_kernel, string routines
+rg35xxpro  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456b3800, initrd_end=456b3a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg35xxpro  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg35xxpro  5 info     zero-length ramdisk (not for shipping): 7165952 bytes in 2 reads (64 + 13932 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg35xxpro  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg35xxsp  u-boot cd6665954631edf4, shipped image 9768960 bytes b79b837b00e2da3d, fast image 7163904 bytes 7281f0688a93ede3, kernel 17526792 bytes 302f3f49a9034c54
+rg35xxsp  the fast image emulated here is byte-identical to the one the build ships
+rg35xxsp  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg35xxsp  shipped    PASS  9768960 bytes in 2 reads (64 + 19016 sectors); reached the kernel jump; 17526792 bytes at 0x40080000 are the original kernel; 2606745 bytes copied once, 0x456b2800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b2800..0x4592ee99 (2606745); device tree linux,initrd-start..end 0x42000000..0x4227c699 (2606745), 2606745 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg35xxsp  1 card     PASS  7163904 bytes in 2 reads (64 + 13928 sectors)
+rg35xxsp  2 kernel   PASS  reached the kernel jump; 17526792 bytes at 0x40080000 are the original kernel
+rg35xxsp  3 ramdisk  PASS  512 bytes copied once, 0x456b2800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b2800..0x456b2a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg35xxsp  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg35xxsp  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg35xxsp  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg35xxsp  5 info     header command line is read by: android_image_get_kernel, string routines
+rg35xxsp  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456b2800, initrd_end=456b2a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg35xxsp  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg35xxsp  5 info     zero-length ramdisk (not for shipping): 7161856 bytes in 2 reads (64 + 13924 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17526792 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg35xxsp  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg40xxh  u-boot 89065b15a67cd6b4, shipped image 9842688 bytes 7998b63d174a3e98, fast image 7237632 bytes b92bd7a7e6dc4f7a, kernel 17686536 bytes 74693b084583de5e
+rg40xxh  the fast image emulated here is byte-identical to the one the build ships
+rg40xxh  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg40xxh  shipped    PASS  9842688 bytes in 2 reads (64 + 19160 sectors); reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; 2606813 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x45940edd (2606813); device tree linux,initrd-start..end 0x42000000..0x4227c6dd (2606813), 2606813 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg40xxh  1 card     PASS  7237632 bytes in 2 reads (64 + 14072 sectors)
+rg40xxh  2 kernel   PASS  reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel
+rg40xxh  3 ramdisk  PASS  512 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x456c4a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg40xxh  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg40xxh  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg40xxh  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg40xxh  5 info     header command line is read by: android_image_get_kernel, string routines
+rg40xxh  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456c4800, initrd_end=456c4a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg40xxh  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg40xxh  5 info     zero-length ramdisk (not for shipping): 7235584 bytes in 2 reads (64 + 14068 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg40xxh  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rg40xxv  u-boot 4358634965f5853a, shipped image 9842688 bytes 7203a80c68bc5a8f, fast image 7237632 bytes 0fef97954767757a, kernel 17686536 bytes 8eebdca73a5282dc
+rg40xxv  the fast image emulated here is byte-identical to the one the build ships
+rg40xxv  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rg40xxv  shipped    PASS  9842688 bytes in 2 reads (64 + 19160 sectors); reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; 2606715 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x45940e7b (2606715); device tree linux,initrd-start..end 0x42000000..0x4227c67b (2606715), 2606715 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rg40xxv  1 card     PASS  7237632 bytes in 2 reads (64 + 14072 sectors)
+rg40xxv  2 kernel   PASS  reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel
+rg40xxv  3 ramdisk  PASS  512 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x456c4a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rg40xxv  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rg40xxv  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rg40xxv  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rg40xxv  5 info     header command line is read by: android_image_get_kernel, string routines
+rg40xxv  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456c4800, initrd_end=456c4a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rg40xxv  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rg40xxv  5 info     zero-length ramdisk (not for shipping): 7235584 bytes in 2 reads (64 + 14068 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rg40xxv  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rgcubexx  u-boot be8cf8f3f4a3a56c, shipped image 9773056 bytes 7a4afd8daa3cbe0c, fast image 7168000 bytes b9823455c9f9a30f, kernel 17594376 bytes 097aa5fd60963ab1
+rgcubexx  the fast image emulated here is byte-identical to the one the build ships
+rgcubexx  same code  PASS  same instructions as the RG SP below 0x26000: differs only in the targets of calls to 297 routines placed beyond it and in 3030 address constants pointing beyond it; 36 string uses as expected
+rgcubexx  shipped    PASS  9773056 bytes in 2 reads (64 + 19024 sectors); reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel; 2606333 bytes copied once, 0x456b3800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b3800..0x4592fcfd (2606333); device tree linux,initrd-start..end 0x42000000..0x4227c4fd (2606333), 2606333 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rgcubexx  1 card     PASS  7168000 bytes in 2 reads (64 + 13936 sectors)
+rgcubexx  2 kernel   PASS  reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel
+rgcubexx  3 ramdisk  PASS  512 bytes copied once, 0x456b3800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456b3800..0x456b3a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rgcubexx  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rgcubexx  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rgcubexx  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rgcubexx  5 info     header command line is read by: android_image_get_kernel, string routines
+rgcubexx  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456b3800, initrd_end=456b3a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rgcubexx  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rgcubexx  5 info     zero-length ramdisk (not for shipping): 7165952 bytes in 2 reads (64 + 13932 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17594376 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rgcubexx  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+rgsp  u-boot b33ecbf8f9be8acb, shipped image 9842688 bytes 2b9aeb76ace6c781, fast image 7237632 bytes 0e101c5348a54002, kernel 17686536 bytes 3328c2fab9f19f7e
+rgsp  the fast image emulated here is byte-identical to the one the build ships
+rgsp  the fast image built here is byte-identical to the one that booted on the device
+rgsp  same code  PASS  this is the reference build; 36 string uses as expected
+rgsp  shipped    PASS  9842688 bytes in 2 reads (64 + 19160 sectors); reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; 2606312 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x45940ce8 (2606312); device tree linux,initrd-start..end 0x42000000..0x4227c4e8 (2606312), 2606312 bytes reserved there; bootargs ends 'son=unknow lcd_type=old '
+rgsp  1 card     PASS  7237632 bytes in 2 reads (64 + 14072 sectors)
+rgsp  2 kernel   PASS  reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel
+rgsp  3 ramdisk  PASS  512 bytes copied once, 0x456c4800 -> 0x42000000, nothing else written there; environment initrd_start..initrd_end 0x456c4800..0x456c4a00 (512); device tree linux,initrd-start..end 0x42000000..0x42000200 (512), 512 bytes reserved there
+rgsp  4 cmdline  PASS  bootargs = known string + ' loglevel=1' in the environment and in the device tree's /chosen; written once, by the Android handler, after update_bootargs; 1476 of 2048 spare device-tree bytes left
+rgsp  4 control  PASS  same image with the header field empty: bootargs = known string + ' '. The handler always adds the separating space and only looks at the field's first byte; no 'loglevel=1'
+rgsp  5 info     ramdisk size field is read by: android_image_get_end, android_image_get_ramdisk, do_bootm
+rgsp  5 info     header command line is read by: android_image_get_kernel, string routines
+rgsp  5 info     environment read: boot_from_partion, verify, bootm_low, bootm_size, bootargs, serial#; written: boot_from_partion=boot, initrd_start=456c4800, initrd_end=456c4a00, bootargs=...d loglevel=1, fdtaddr=44000000, fdt_high=0xffffffff
+rgsp  5 info     console text: ["Android's image name: sun50i_arm64\n"]; allocations: [644, 9520] bytes
+rgsp  5 info     zero-length ramdisk (not for shipping): 7235584 bytes in 2 reads (64 + 14068 sectors); android_image_get_ramdisk left by its zero-size exit 1x; copy request [('0x42000000', '0x0', 0)], bytes written near 0x42000000: none; environment initrd_start..initrd_end 0..0; do_bootm's fdt_initrd call ran 0x; device tree linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)]; reached the kernel jump; 17686536 bytes at 0x40080000 are the original kernel; bootargs ends ' lcd_type=old loglevel=1'
+rgsp  5 info     package device tree before boot: linux,initrd-start..end (0, 0), reserved [('0x48000000', 16777216)], 2048 spare bytes
+
+target      same code  shipped    1 card     2 kernel   3 ramdisk  4 cmdline  4 control  
+rg28xx      PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg34xx      PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg34xxsp    PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg35xxh     PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg35xxplus  PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg35xxpro   PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg35xxsp    PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg40xxh     PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rg40xxv     PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rgcubexx    PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+rgsp        PASS       PASS       PASS       PASS       PASS       PASS       PASS       
+
+11 targets, every check passed

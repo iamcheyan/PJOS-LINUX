@@ -10,7 +10,7 @@ import struct
 from pathlib import Path
 
 from prepare_stock import BASEOS_NAMES, EXPECTED_NAMES, parse_gpt, sha256_file, sha256_range
-from kernel_gzip import derive as derive_gzip, sha as blob_sha
+from kernel_gzip import BOOT0_OFFSET, derive as derive_gzip, sha as blob_sha
 
 
 def load(path: Path, expected_target: str) -> dict:
@@ -85,8 +85,9 @@ def verify_composed(data: dict, prefix: Path, image: Path, logo: Path) -> None:
     with prefix.open("rb") as handle:
         handle.seek(raw_offset)
         expected_raw = bytearray(handle.read(raw_size))
-    package_at = gzip_boot["profile"]["package_offset"] - raw_offset
-    expected_raw[package_at:package_at + len(gzip_boot["package"])] = gzip_boot["package"]
+    for offset, blob in ((BOOT0_OFFSET, gzip_boot["boot0"]),
+                         (gzip_boot["profile"]["package_offset"], gzip_boot["package"])):
+        expected_raw[offset - raw_offset:offset - raw_offset + len(blob)] = blob
     if sha256_range(image, raw_offset, raw_size) != blob_sha(expected_raw):
         raise ValueError("raw boot region differs from the exact gzip bootloader derivation")
 
