@@ -36,3 +36,14 @@ Sleep and wake on that build
 
 validate-on-device.sh on that build: 41 passed, 0 failed (validate-on-device.log).
 Repository tests on its files: test-boot-qemu.sh rgsp and test-update-roundtrip.sh rgsp pass.
+
+Three warm restarts on the unmodified build, without the sampler
+  before Linux 2.722  Linux to handoff 1.341  combined 4.063
+  before Linux 2.748  Linux to handoff 1.338  combined 4.086
+  before Linux 2.789  Linux to handoff 1.389  combined 4.178
+
+Other models
+  build-rootfs.sh and build-image.sh also ran for rg40xxv and rgcubexx. Both
+  images passed the build's own checks of the /usr/lib image. Neither has
+  booted on hardware. tests/test-lib-image.py finds the loop driver and LZ4
+  squashfs in all eleven kernels.
