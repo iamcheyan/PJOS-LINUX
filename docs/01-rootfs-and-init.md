@@ -61,8 +61,10 @@ which executes BusyBox init. `/etc/inittab` runs `rcS`, then respawns
    and start Wi-Fi module/interface initialization in the background (with a
    remembered power-off retry for slow-resetting radios; see [runtime notes](05-runtime-power-network.md)).
 5. Restore or generate the machine ID, then run first-boot storage expansion.
-6. Sample MENU through `boot-menu-held`'s GPIO check, or use the marker retained
-   by charger handling. Select USB-storage mode before mounting frontend storage.
+6. Wait for a TF2 card the kernel is still identifying, up to the handoff
+   budget; an empty slot costs one read. Sample MENU through
+   `boot-menu-held`'s GPIO check, or use the marker retained by charger
+   handling. Select USB-storage mode before mounting frontend storage.
 7. For normal startup, mount usable TF2 p1 or fall back to TF1 p7. Apply
    `baseos.conf` from TF1, then scan for system updates. Storage mode uses
    configuration defaults and skips card access and update application.

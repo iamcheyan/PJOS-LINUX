@@ -175,6 +175,44 @@ fi
 # card already fills the disk.
 [ -x /usr/sbin/expand-storage ] && /usr/sbin/expand-storage
 
+# The second card slot (TF2) is powered and identified by the kernel in the
+# background, about 0.4 s after its controller starts, so its card can still be
+# missing when rcS gets here. Without a wait, a quick boot quietly uses TF1 as
+# the frontend card, or exports the wrong disk in USB-storage mode. The kernel
+# keeps the slot powered only while a card is present or still being
+# identified, so follow its verdict rather than a card-detect level whose
+# polarity is board-specific. An empty slot costs one read; the wait ends at
+# the handoff budget whatever happens.
+tf2_ios=
+for tf2_host in /sys/devices/platform/soc/sdc2/mmc_host/mmc*; do
+	[ -d "$tf2_host" ] && tf2_ios="/sys/kernel/debug/${tf2_host##*/}/ios"
+done
+tf2_powered() {
+	[ -r "$tf2_ios" ] || return 1
+	while IFS= read -r tf2_line; do
+		case "$tf2_line" in
+			'power mode:'*'(off)'*) return 1 ;;
+			'power mode:'*) return 0 ;;
+		esac
+	done < "$tf2_ios"
+	return 1
+}
+tf2_grace=0
+while [ ! -b /dev/mmcblk1p1 ]; do
+	if [ -b /dev/mmcblk1 ]; then
+		# The disk is up; its partitions follow within milliseconds.
+		[ "$tf2_grace" -lt 5 ] || break
+		tf2_grace=$((tf2_grace + 1))
+	else
+		tf2_powered || break
+	fi
+	read -r tf2_up _ < /proc/uptime 2>/dev/null || break
+	tf2_up="${tf2_up%.*}${tf2_up#*.}"
+	while [ "${tf2_up#0}" != "$tf2_up" ]; do tf2_up="${tf2_up#0}"; done
+	[ "${tf2_up:-0}" -lt 250 ] || break
+	sleep 0.01 2>/dev/null || break
+done
+
 # MENU held from power-on selects a one-boot USB-storage maintenance mode. Check
 # the current evdev state once: no timing window, input loop, or normal-boot
 # delay. Because no frontend card has been mounted yet, TF2 can be exported as
