@@ -1,0 +1,47 @@
+----------------------------------------
+1 BOOTEVENT (unit:msec)
+----------------------------------------
+        81.578207 : ON
+       409.917622 :    1-swapper/0       : initcall: init_menu    49.071916ms
+       456.272372 :    1-swapper/0       : initcall: of_platform_default_populate_init    42.711000ms
+       510.105747 :    1-swapper/0       : initcall: pm_sysrq_init    38.514666ms
+       566.540830 :    1-swapper/0       : probe: probe=platform_drv_probe drv=disp(ffffff800902b720)    45.504624ms
+       566.964913 :    1-swapper/0       : initcall: disp_module_init    46.445666ms
+       651.398788 :    1-swapper/0       : probe: probe=platform_drv_probe drv=axp2101-regulator(ffffff8009078758)    74.911375ms
+       655.209080 :    1-swapper/0       : probe: probe=i2c_device_probe drv=axp20x-i2c(ffffff8009089740)    86.485416ms
+       655.398288 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-twi(ffffff800909ace0)    87.196666ms
+       655.973830 :    1-swapper/0       : initcall: sunxi_twi_adap_init    88.995916ms
+       672.848330 :    1-swapper/0       : initcall: vin_init    16.247875ms
+       754.586621 :    1-swapper/0       : initcall: inet_init    66.084458ms
+       904.474870 :    1-swapper/0       : initcall: populate_rootfs   149.803249ms
+       998.747453 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-wlan(ffffff8009082a98)    28.862583ms
+       998.895578 :    1-swapper/0       : initcall: sunxi_wlan_driver_init    29.326959ms
+      1045.240620 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ehci(ffffff800908db78)    41.387917ms
+      1075.020328 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ehci(ffffff800908db78)    29.726499ms
+      1105.021828 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ehci(ffffff800908db78)    29.949708ms
+      1105.515495 :    1-swapper/0       : initcall: ehci_hcd_init   102.235416ms
+      1190.046911 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ohci(ffffff800908dd10)    78.628708ms
+      1259.030577 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ohci(ffffff800908dd10)    68.932625ms
+      1329.003452 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-ohci(ffffff800908dd10)    69.923750ms
+      1329.448327 :    1-swapper/0       : initcall: ohci_hcd_mod_init   223.920708ms
+      1367.793035 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-cedar(ffffff80090e0700)    16.259500ms
+      1368.077035 :    1-swapper/0       : initcall: sunxi_cedar_init    16.632042ms
+      1391.989494 :    1-swapper/0       : probe: probe=platform_drv_probe drv=axp2202-usb-power-supply(ffffff80090e13a8)    23.663500ms
+      1392.071119 :    1-swapper/0       : initcall: axp2202_usb_power_driver_init    23.985625ms
+      1416.306493 :    1-swapper/0       : probe: probe=platform_drv_probe drv=axp2202-bat-power-supply(ffffff80090e14d8)    23.988958ms
+      1416.487202 :    1-swapper/0       : initcall: axp2202_bat_power_driver_init    24.407375ms
+      1494.033493 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-mmc(ffffff80090e4830)    70.904333ms
+      1554.732535 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-mmc(ffffff80090e4830)    59.111917ms
+      1613.936451 :    1-swapper/0       : probe: probe=platform_drv_probe drv=sunxi-mmc(ffffff80090e4830)    58.756791ms
+      1614.693368 :    1-swapper/0       : initcall: sunxi_mmc_driver_init   192.543458ms
+      1701.279826 :    3-kworker/0:0     : probe: probe=platform_drv_probe drv=cpufreq-dt(ffffff80090e36a0)    33.927875ms
+      1701.301034 :    3-kworker/0:0     : probe: probe=platform_drv_probe drv=sun50i-cpufreq-nvmem(ffffff80090e3820)    35.080916ms
+      1701.324159 :    1-swapper/0       : initcall: deferred_probe_initcall    36.189334ms
+      1741.270451 :    1-swapper/0       : probe: probe=i2c_device_probe drv=deeplay(ffffff800909a070)    37.453167ms
+      1741.341409 :    1-swapper/0       : initcall: deeplay_encrypt_init    37.700667ms
+      1774.024450 :    1-swapper/0       : initcall: sunxi_soundcard_machine_dev_init    20.809834ms
+      1776.658325 :    1-swapper/0       : Kernel_init_done
+      7363.019304 : 1514-insmod          : probe: probe=sdio_bus_probe drv=rtl8821cs(ffffff8000bdaa88)    59.697374ms
+      7363.955262 : 1514-insmod          : initcall: rtw_drv_entry [8821cs]   161.490833ms
+         0.000000 : OFF
+----------------------------------------

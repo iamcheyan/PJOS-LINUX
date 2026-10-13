@@ -1,0 +1,7 @@
+1.521    +0 ms  VFS: Mounted root (ext4 filesystem) readonly on device 179:5.
+1.523    +1 ms  Freeing unused kernel memory: 2688K
+1.673  +151 ms  EXT4-fs (mmcblk0p6): mounted filesystem with ordered data mode. Opts: 
+1.681    +8 ms  mali gpu: Probed as mali0
+1.734   +54 ms  FAT-fs (mmcblk0p7): Volume was not properly unmounted. Some data may b
+1.739    +5 ms   mmcblk1: p1
+1.767   +27 ms  h700_amp: callbacks attached headphone_pop_fix=0

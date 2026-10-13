@@ -1,0 +1,295 @@
+diff --git a/overlay/etc/init.d/rcS b/overlay/etc/init.d/rcS
+index e881d8c..093d0a7 100644
+--- a/overlay/etc/init.d/rcS
++++ b/overlay/etc/init.d/rcS
+@@ -43,18 +43,15 @@ if [ "$boot_mode" = 1 ]; then
+ 	while ! /usr/sbin/baseos-charger; do /bin/sleep 60; done
+ fi
+ 
++# GPU: the build strips debug data from the vendor module. Load it in the
++# background, first, to overlap the rest of startup; frontend-session waits for
++# /dev/mali0. Charger boots never get here.
++/sbin/insmod /lib/modules/mali_kbase.ko 2>/dev/null &
++
+ # /var skeleton (tmpfs). Persistent pieces live on /data and are linked below.
+ /bin/mkdir -p /var/lib /var/log /var/tmp /var/lib/alsa /var/lib/bluealsa /var/empty
+ /bin/ln -s /run /var/run
+ 
+-# Stock loads the Bluetooth wake-handshake driver during early boot
+-# (/etc/modules); its probe drives BT_WAKE (PG17) high. Keep that state.
+-[ ! -f /lib/modules/rtl_btlpm.ko ] || /sbin/insmod /lib/modules/rtl_btlpm.ko 2>/dev/null
+-
+-# GPU: the build strips debug data from the vendor module. Load it in the
+-# background to overlap startup; frontend-session waits for /dev/mali0.
+-/sbin/insmod /lib/modules/mali_kbase.ko 2>/dev/null &
+-
+ # Persistent state partition (p6, label "userdata"). It survives system
+ # updates: an A/B slot flip only moves the rootfs partition.
+ /bin/mkdir -p /data
+@@ -66,8 +63,10 @@ fi
+ 
+ # A freshly updated slot is on trial until a frontend session starts. Count the
+ # boots that never got that far and restore the previous slot if this one
+-# cannot. No-op unless an update is in its trial window.
+-[ -x /usr/sbin/baseos-update ] && /usr/sbin/baseos-update boot-check
++# cannot. Only an open trial has a state file; an ordinary boot stops at this
++# test instead of starting the updater to find that out.
++[ ! -f /data/update/state ] || [ ! -x /usr/sbin/baseos-update ] \
++	|| /usr/sbin/baseos-update boot-check
+ 
+ # Restore the selected timezone. /etc/localtime is baked as a symlink to
+ # /run/localtime because the root filesystem is read-only; timedatectl keeps
+@@ -85,7 +84,7 @@ fi
+ # busybox looks for it at /var/lib/hwclock/adjtime, and /var is tmpfs.
+ /sbin/hwclock -u -s 2>/dev/null &
+ 
+-# WiFi initialization stays in the background: never delay frontend handoff.
++# Radio initialization stays in the background: never delay frontend handoff.
+ # The vendor kernel can enumerate the bootloader-powered SDIO card, then turn
+ # off its unused WLAN regulator. Discard that stale card while power is still
+ # off, before 8821cs powers it up and registers its driver. Otherwise the driver
+@@ -101,6 +100,10 @@ fi
+ # that on /data so later boots hold the first load instead of failing first.
+ # Units whose first attempt works, the common case, are unaffected.
+ (
++	# Stock loads the Bluetooth wake-handshake driver during early boot
++	# (/etc/modules); its probe drives BT_WAKE (PG17) high. Keep that state,
++	# and keep it ahead of the WiFi driver, without holding up the frontend.
++	[ ! -f /lib/modules/rtl_btlpm.ko ] || /sbin/insmod /lib/modules/rtl_btlpm.ko 2>/dev/null
+ 	wifi_slow=/data/wifi-slow-radio
+ 	wifi_off_cs=500                 # power-off interval, centiseconds (stock: ~380)
+ 	wifi_cut_cs=185                 # kernel disables the WLAN supply about here
+@@ -175,13 +178,77 @@ fi
+ # card already fills the disk.
+ [ -x /usr/sbin/expand-storage ] && /usr/sbin/expand-storage
+ 
++# The second card slot (TF2) is powered and identified by the kernel in the
++# background, about 0.4 s after its controller starts. A quick boot gets here
++# first, and without a wait would quietly use TF1 as the frontend card or
++# export the wrong disk. The kernel keeps the slot powered only while a card is
++# present or still being identified, so follow its own verdict rather than a
++# card-detect level whose polarity is board-specific. The wait ends at the
++# handoff budget whatever happens.
++tf2_ios=
++for tf2_host in /sys/devices/platform/soc/sdc2/mmc_host/mmc*; do
++	[ -d "$tf2_host" ] && tf2_ios="/sys/kernel/debug/${tf2_host##*/}/ios"
++done
++tf2_powered() {
++	[ -r "$tf2_ios" ] || return 1
++	while IFS= read -r tf2_line; do
++		case "$tf2_line" in
++			'power mode:'*'(off)'*) return 1 ;;
++			'power mode:'*) return 0 ;;
++		esac
++	done < "$tf2_ios"
++	return 1
++}
++tf2_settle() {
++	tf2_grace=0
++	while [ ! -b /dev/mmcblk1p1 ]; do
++		if [ -b /dev/mmcblk1 ]; then
++			# The disk is up; its partitions follow within milliseconds.
++			[ "$tf2_grace" -lt 5 ] || break
++			tf2_grace=$((tf2_grace + 1))
++		else
++			tf2_powered || break
++		fi
++		read -r tf2_up _ < /proc/uptime 2>/dev/null || break
++		tf2_up="${tf2_up%.*}${tf2_up#*.}"
++		while [ "${tf2_up#0}" != "$tf2_up" ]; do tf2_up="${tf2_up#0}"; done
++		[ "${tf2_up:-0}" -lt 250 ] || break
++		sleep 0.01 2>/dev/null || break
++	done
++}
++
+ # MENU held from power-on selects a one-boot USB-storage maintenance mode. Check
+ # the current evdev state once: no timing window, input loop, or normal-boot
+-# delay. Because no frontend card has been mounted yet, TF2 can be exported as
+-# a complete disk (partition table included); without TF2, export TF1's p7.
++# delay.
++MENU_HELD=0
++if [ -e /run/boot-menu-held ] || /usr/sbin/boot-menu-held; then
++	MENU_HELD=1
++fi
++
++# BaseOS settings always come from TF1, even when TF2 holds the frontend. When
++# a TF2 card is on its way, read them while it comes up: mount TF1 read-only
++# for the settings and the update scan below. Maintenance boots use defaults
++# without opening or mounting exported storage.
++BASEOS_CONFIG=/dev/null
++TF1_CONFIG_MOUNTED=0
++CONFIG_APPLIED=0
++if [ "$MENU_HELD" -eq 0 ] && { [ -b /dev/mmcblk1p1 ] || tf2_powered; }; then
++	/bin/mkdir -p /mnt/system
++	if /bin/mount -t vfat -o ro /dev/mmcblk0p7 /mnt/system 2>/dev/null; then
++		TF1_CONFIG_MOUNTED=1
++		BASEOS_CONFIG=/mnt/system/baseos.conf
++		[ -x /usr/sbin/baseos-config ] && /usr/sbin/baseos-config "$BASEOS_CONFIG"
++		CONFIG_APPLIED=1
++	fi
++fi
++
++tf2_settle
++
++# Because no frontend card has been mounted yet, TF2 can be exported as a
++# complete disk (partition table included); without TF2, export TF1's p7.
+ USB_STORAGE_MODE=0
+ /bin/mkdir -p /mnt/sdcard
+-if { [ -e /run/boot-menu-held ] || /usr/sbin/boot-menu-held; } \
++if [ "$MENU_HELD" -eq 1 ] \
+ 	&& [ -x /usr/sbin/usb-storage-mode ] \
+ 	&& /usr/sbin/usb-storage-mode prepare; then
+ 	USB_STORAGE_MODE=1
+@@ -192,6 +259,12 @@ fi
+ if [ "$USB_STORAGE_MODE" -eq 0 ]; then
+ 	for dev in /dev/mmcblk1p1 /dev/mmcblk0p7; do
+ 		[ -b "$dev" ] || continue
++		if [ "$dev" = /dev/mmcblk0p7 ] && [ "$TF1_CONFIG_MOUNTED" -eq 1 ]; then
++			# TF2 turned out unusable: TF1 becomes the frontend card, so give
++			# up the read-only settings mount before mounting it writable.
++			/bin/umount /mnt/system 2>/dev/null
++			TF1_CONFIG_MOUNTED=0
++		fi
+ 		if /bin/mount -t vfat -o rw,utf8,noatime,shortname=mixed "$dev" /mnt/sdcard 2>/dev/null \
+ 			|| /bin/mount -t exfat -o rw,noatime "$dev" /mnt/sdcard 2>/dev/null; then
+ 			break
+@@ -216,31 +289,35 @@ if [ "$LOG" = /mnt/sdcard/baseos-boot.log ]; then
+ 	log "rcS reached card mount"
+ fi
+ 
+-# BaseOS settings always come from TF1, even when TF2 holds the frontend. Reuse
+-# TF1 at /mnt/sdcard, or briefly mount it read-only for config and update scans.
+-# Maintenance boots use defaults without opening or mounting exported storage.
+-BASEOS_CONFIG=/dev/null
+-TF1_CONFIG_MOUNTED=0
+-if [ "$USB_STORAGE_MODE" -eq 0 ]; then
+-	if grep -q '^/dev/mmcblk0p7 /mnt/sdcard ' /proc/mounts; then
+-		BASEOS_CONFIG=/mnt/sdcard/baseos.conf
+-	else
+-		/bin/mkdir -p /mnt/system
+-		if /bin/mount -t vfat -o ro /dev/mmcblk0p7 /mnt/system 2>/dev/null; then
+-			TF1_CONFIG_MOUNTED=1
+-			BASEOS_CONFIG=/mnt/system/baseos.conf
++# Settings not read above: TF1 is the frontend card, or briefly mounted here
++# for the settings and update scan after a MENU boot that did not export.
++if [ "$CONFIG_APPLIED" -eq 0 ]; then
++	if [ "$USB_STORAGE_MODE" -eq 0 ]; then
++		if grep -q '^/dev/mmcblk0p7 /mnt/sdcard ' /proc/mounts; then
++			BASEOS_CONFIG=/mnt/sdcard/baseos.conf
++		else
++			/bin/mkdir -p /mnt/system
++			if /bin/mount -t vfat -o ro /dev/mmcblk0p7 /mnt/system 2>/dev/null; then
++				TF1_CONFIG_MOUNTED=1
++				BASEOS_CONFIG=/mnt/system/baseos.conf
++			fi
+ 		fi
+ 	fi
++	[ -x /usr/sbin/baseos-config ] && /usr/sbin/baseos-config "$BASEOS_CONFIG"
+ fi
+-[ -x /usr/sbin/baseos-config ] && /usr/sbin/baseos-config "$BASEOS_CONFIG"
+ 
+-# System update: apply a *.bosupd payload the user copied onto the card. Costs
+-# one failed glob on an ordinary boot; when a payload is present it writes the
+-# inactive rootfs slot, verifies it, flips the GPT and reboots. Storage mode
+-# leaves every card file to the USB host; the update runs on the next normal
+-# boot after the user ejects and restarts without MENU.
+-if [ "$USB_STORAGE_MODE" -eq 0 ]; then
+-	[ -x /usr/sbin/baseos-update ] && /usr/sbin/baseos-update apply
++# System update: apply a *.bosupd payload the user copied onto the card. An
++# ordinary boot has none, and stops at this glob (frontend card, then TF1)
++# instead of starting the updater to repeat it. When a payload is present the
++# updater writes the inactive rootfs slot, verifies it, flips the GPT and
++# reboots. Storage mode leaves every card file to the USB host; the update runs
++# on the next normal boot after the user ejects and restarts without MENU.
++if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-update ]; then
++	for payload in /mnt/sdcard/*.bosupd /mnt/system/*.bosupd; do
++		[ -f "$payload" ] || continue
++		/usr/sbin/baseos-update apply
++		break
++	done
+ fi
+ [ "$TF1_CONFIG_MOUNTED" -eq 0 ] || /bin/umount /mnt/system
+ 
+diff --git a/overlay/usr/sbin/frontend-session b/overlay/usr/sbin/frontend-session
+index 942df3d..475e448 100644
+--- a/overlay/usr/sbin/frontend-session
++++ b/overlay/usr/sbin/frontend-session
+@@ -26,7 +26,9 @@ fi
+ # up far enough to hand off. Keying it here rather than on the frontend exec is
+ # deliberate — a card with no frontend is a perfectly healthy OS, and keying it
+ # later would make that state look like a failed update and roll back forever.
+-[ -x /usr/sbin/baseos-update ] && /usr/sbin/baseos-update confirm 2>/dev/null
++# Only an open trial has a state file; ordinary sessions stop at this test.
++[ ! -f /data/update/state ] || [ ! -x /usr/sbin/baseos-update ] \
++	|| /usr/sbin/baseos-update confirm 2>/dev/null
+ 
+ important_splash() {
+ 	[ -x /usr/bin/baseos-splash ] \
+@@ -158,8 +160,10 @@ if [ "$CARD_MISSING" -eq 0 ] && [ -f "$LAUNCH" ]; then
+ 		sleep 0.1 2>/dev/null || sleep 1
+ 		m=$((m + 1))
+ 	done
+-	log "exec $LAUNCH (mali wait ${m}x)"
+ 	# Keep the first handoff across respawns and record it in the readable log.
++	# The card's filesystem writes through on every close, so this session's
++	# lines are collected and appended once, after the handoff is timed.
++	handoff_lines=
+ 	if [ ! -s /run/boot-frontend-exec ]; then
+ 		# boot-clock validates counter access/frequency at the first handoff.
+ 		# Keep BOOTTIME for the existing marker/budget. The additional split
+@@ -171,15 +175,17 @@ if [ "$CARD_MISSING" -eq 0 ] && [ -f "$LAUNCH" ]; then
+ 			boot_pre= boot_post= boot_total=
+ 			read -r boot_uptime boot_idle < /proc/uptime || boot_uptime=
+ 		fi
+-		{ [ -n "$boot_uptime" ] \
+-			&& printf '%s\n' "$boot_uptime" > /run/boot-frontend-exec \
+-			&& printf '%s BaseOS boot time: %s s (kernel start to frontend handoff)\n' \
+-				"$boot_uptime" "$boot_uptime" >> "$LOG"; } 2>/dev/null || :
+-		if [ -n "$boot_total" ]; then
+-			printf '%s BaseOS boot stages: pre-kernel %s s; post-kernel %s s; combined %s s (counter origin to frontend handoff; raw clock)\n' \
+-				"$boot_uptime" "$boot_pre" "$boot_post" "$boot_total" >> "$LOG" 2>/dev/null || :
++		if [ -n "$boot_uptime" ] \
++			&& printf '%s\n' "$boot_uptime" > /run/boot-frontend-exec 2>/dev/null; then
++			handoff_lines="$boot_uptime BaseOS boot time: $boot_uptime s (kernel start to frontend handoff)"
++			[ -z "$boot_total" ] || handoff_lines="$handoff_lines
++$boot_uptime BaseOS boot stages: pre-kernel $boot_pre s; post-kernel $boot_post s; combined $boot_total s (counter origin to frontend handoff; raw clock)"
+ 		fi
+ 	fi
++	{ read -r log_uptime log_idle < /proc/uptime
++		printf '%s %s\n' "$log_uptime" "exec $LAUNCH (mali wait ${m}x)"
++		[ -z "$handoff_lines" ] || printf '%s\n' "$handoff_lines"
++	} >> "$LOG" 2>/dev/null || :
+ 	if [ "$LAUNCH_TYPE" = binary ]; then
+ 		# Binaries use the glibc AArch64 runtime. Use the system
+ 		# loader so a copied binary needs no executable bit or chmod on the
+diff --git a/tests/test-frontend-session.sh b/tests/test-frontend-session.sh
+index f800b1b..bdee5c8 100755
+--- a/tests/test-frontend-session.sh
++++ b/tests/test-frontend-session.sh
+@@ -130,6 +130,11 @@ chmod 755 /usr/local/bin/* /usr/sbin/baseos-update /usr/bin/baseos-splash \
+   /lib/ld-linux-aarch64.so.1
+ chmod 644 /tmp/nextui-launch /tmp/installer /tmp/spruce-runtime /tmp/generic-launch
+ 
++# The session confirms an open update trial, marked by its state file. Ordinary
++# boots have no such file and must not start the updater (checked at the end).
++mkdir -p /data/update
++: > /data/update/state
++
+ reset() {
+ 	rm -rf /mnt/sdcard
+ 	mkdir -p /mnt/sdcard
+@@ -586,5 +591,14 @@ run_session
+ [ "$status" -eq 143 ]
+ [ ! -e /tmp/update.log ] && [ ! -e /tmp/frontend.log ]
+ echo 'ok: migration precedes confirmation; completion and maintenance skip it; recovery failure blocks startup'
++
++# Without an open trial the updater is never started. The launcher stand-in
++# exits 93 precisely because no confirmation was recorded before it ran.
++reset
++nextui_card
++rm /data/update/state
++run_session
++[ "$status" -eq 93 ] && [ ! -e /tmp/update.log ]
++echo 'ok: ordinary boots hand off without starting the updater'
+ echo 'frontend session tests passed'
+ TEST

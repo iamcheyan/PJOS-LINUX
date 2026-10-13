@@ -1,0 +1,381 @@
+{
+ "baseline": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 3.456,
+   "min": 3.448,
+   "max": 3.465
+  },
+  "post_kernel_s": {
+   "median": 2.262,
+   "min": 2.248,
+   "max": 2.398
+  },
+  "combined_s": {
+   "median": 5.727,
+   "min": 5.696,
+   "max": 5.853
+  },
+  "kernel_init_s": 1.777,
+  "frontend_card": [
+   "(not recorded)",
+   "(not recorded)",
+   "(not recorded)"
+  ],
+  "boot_ids": [
+   "0641f493-dfbd-46c0-81e2-51eefc2dbc45",
+   "07ad27da-e505-4eaf-9616-b4572fe313c9",
+   "ed229f98-41fa-4471-a943-b1a227faec7a"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.465,
+    "post_kernel_s": 2.262,
+    "combined_s": 5.727
+   },
+   {
+    "pre_kernel_s": 3.456,
+    "post_kernel_s": 2.398,
+    "combined_s": 5.853
+   },
+   {
+    "pre_kernel_s": 3.448,
+    "post_kernel_s": 2.248,
+    "combined_s": 5.696
+   }
+  ]
+ },
+ "cmdline-quiet": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 3.446,
+   "min": 3.433,
+   "max": 3.459
+  },
+  "post_kernel_s": {
+   "median": 2.123,
+   "min": 2.097,
+   "max": 2.138
+  },
+  "combined_s": {
+   "median": 5.571,
+   "min": 5.543,
+   "max": 5.582
+  },
+  "kernel_init_s": 1.641,
+  "frontend_card": [
+   "(not recorded)",
+   "(not recorded)",
+   "(not recorded)"
+  ],
+  "boot_ids": [
+   "43b2f62c-a9b7-4fb8-9418-48bb7da14c73",
+   "30518e26-595f-4125-bf6f-b167ab89fdab",
+   "babc2c04-cb78-4601-9e03-e9b5ff344813"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.459,
+    "post_kernel_s": 2.123,
+    "combined_s": 5.582
+   },
+   {
+    "pre_kernel_s": 3.446,
+    "post_kernel_s": 2.097,
+    "combined_s": 5.543
+   },
+   {
+    "pre_kernel_s": 3.433,
+    "post_kernel_s": 2.138,
+    "combined_s": 5.571
+   }
+  ]
+ },
+ "noinitrd-quiet": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 3.295,
+   "min": 3.269,
+   "max": 3.296
+  },
+  "post_kernel_s": {
+   "median": 1.8,
+   "min": 1.797,
+   "max": 1.903
+  },
+  "combined_s": {
+   "median": 5.096,
+   "min": 5.066,
+   "max": 5.199
+  },
+  "kernel_init_s": 1.523,
+  "frontend_card": [
+   "(not recorded)",
+   "(not recorded)",
+   "(not recorded)"
+  ],
+  "boot_ids": [
+   "d418f9be-66be-49e1-9f7e-9e9cfbc0ab47",
+   "5565da37-216d-40e7-a39b-1725b4427d05",
+   "e16f9518-08be-4fab-9f95-5e56f8b988a5"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.269,
+    "post_kernel_s": 1.797,
+    "combined_s": 5.066
+   },
+   {
+    "pre_kernel_s": 3.296,
+    "post_kernel_s": 1.8,
+    "combined_s": 5.096
+   },
+   {
+    "pre_kernel_s": 3.295,
+    "post_kernel_s": 1.903,
+    "combined_s": 5.199
+   }
+  ]
+ },
+ "nq-uboot-silent": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 3.035,
+   "min": 3.028,
+   "max": 3.057
+  },
+  "post_kernel_s": {
+   "median": 1.887,
+   "min": 1.887,
+   "max": 1.908
+  },
+  "combined_s": {
+   "median": 4.935,
+   "min": 4.922,
+   "max": 4.944
+  },
+  "kernel_init_s": 1.531,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "6952562d-0a6f-4852-a01c-911fe8e9ebb3",
+   "2f48cc75-3695-4051-ae9e-36ef6243e41b",
+   "9acd6e1b-35c0-4662-b7f0-141ece986e3f"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 3.035,
+    "post_kernel_s": 1.887,
+    "combined_s": 4.922
+   },
+   {
+    "pre_kernel_s": 3.057,
+    "post_kernel_s": 1.887,
+    "combined_s": 4.944
+   },
+   {
+    "pre_kernel_s": 3.028,
+    "post_kernel_s": 1.908,
+    "combined_s": 4.935
+   }
+  ]
+ },
+ "nq-all-silent": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.756,
+   "min": 2.727,
+   "max": 2.765
+  },
+  "post_kernel_s": {
+   "median": 1.857,
+   "min": 1.827,
+   "max": 1.928
+  },
+  "combined_s": {
+   "median": 4.613,
+   "min": 4.592,
+   "max": 4.655
+  },
+  "kernel_init_s": 1.512,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "51dd3286-d156-4a94-aad7-64d2e45e1e4d",
+   "fe6d67cf-9def-4c7b-b50d-d11cbf7ba6a1",
+   "d3b9fd09-5a9f-4320-87df-2c3b2359ed4b"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.727,
+    "post_kernel_s": 1.928,
+    "combined_s": 4.655
+   },
+   {
+    "pre_kernel_s": 2.756,
+    "post_kernel_s": 1.857,
+    "combined_s": 4.613
+   },
+   {
+    "pre_kernel_s": 2.765,
+    "post_kernel_s": 1.827,
+    "combined_s": 4.592
+   }
+  ]
+ },
+ "nqs-usb-b": {
+  "boots": 3,
+  "pre_kernel_s": {
+   "median": 2.734,
+   "min": 2.726,
+   "max": 2.757
+  },
+  "post_kernel_s": {
+   "median": 1.674,
+   "min": 1.567,
+   "max": 1.717
+  },
+  "combined_s": {
+   "median": 4.4,
+   "min": 4.324,
+   "max": 4.451
+  },
+  "kernel_init_s": 1.371,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk0p7 vfat",
+   "/dev/mmcblk0p7 vfat"
+  ],
+  "boot_ids": [
+   "8cde8371-2ccc-4da4-8f64-ef8511cceb39",
+   "2768bf88-49f5-40cb-96a7-3879c33338f1",
+   "06148075-c7bb-4073-a252-df4d2e4ff056"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.734,
+    "post_kernel_s": 1.717,
+    "combined_s": 4.451
+   },
+   {
+    "pre_kernel_s": 2.726,
+    "post_kernel_s": 1.674,
+    "combined_s": 4.4
+   },
+   {
+    "pre_kernel_s": 2.757,
+    "post_kernel_s": 1.567,
+    "combined_s": 4.324
+   }
+  ]
+ },
+ "traced": {
+  "boots": 2,
+  "pre_kernel_s": {
+   "median": 2.728,
+   "min": 2.717,
+   "max": 2.738
+  },
+  "post_kernel_s": {
+   "median": 1.641,
+   "min": 1.636,
+   "max": 1.647
+  },
+  "combined_s": {
+   "median": 4.37,
+   "min": 4.364,
+   "max": 4.375
+  },
+  "kernel_init_s": 1.301,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "5ab3d019-e522-4a97-be4a-ec6d5c160e78",
+   "4aafffdd-eebc-4398-a170-f1aa7dcad3be"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.717,
+    "post_kernel_s": 1.647,
+    "combined_s": 4.364
+   },
+   {
+    "pre_kernel_s": 2.738,
+    "post_kernel_s": 1.636,
+    "combined_s": 4.375
+   }
+  ]
+ },
+ "newrcs-usb-b": {
+  "boots": 4,
+  "pre_kernel_s": {
+   "median": 2.716,
+   "min": 2.703,
+   "max": 2.73
+  },
+  "post_kernel_s": {
+   "median": 1.68,
+   "min": 1.64,
+   "max": 1.7
+  },
+  "combined_s": {
+   "median": 4.388,
+   "min": 4.359,
+   "max": 4.43
+  },
+  "kernel_init_s": 1.341,
+  "frontend_card": [
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat",
+   "/dev/mmcblk1p1 exfat"
+  ],
+  "boot_ids": [
+   "92e086c2-dfcf-4fa8-9768-7ca67cf3650f",
+   "1d1671f1-7474-4eb3-b988-2e20ebf2f2a8",
+   "0eb480fe-ec05-4b87-a6f8-503f0a182bb1",
+   "3eff7d5e-ffaa-452b-beb2-5f81cd1f6491"
+  ],
+  "runs": [
+   {
+    "pre_kernel_s": 2.73,
+    "post_kernel_s": 1.7,
+    "combined_s": 4.43
+   },
+   {
+    "pre_kernel_s": 2.712,
+    "post_kernel_s": 1.69,
+    "combined_s": 4.402
+   },
+   {
+    "pre_kernel_s": 2.703,
+    "post_kernel_s": 1.67,
+    "combined_s": 4.373
+   },
+   {
+    "pre_kernel_s": 2.719,
+    "post_kernel_s": 1.64,
+    "combined_s": 4.359
+   }
+  ]
+ },
+ "nqs-usb23off": {
+  "boots": 1,
+  "note": "read over Wi-Fi; USB device mode (adb) did not work in this boot",
+  "pre_kernel_s": 2.736,
+  "post_kernel_s": 1.647,
+  "combined_s": 4.383,
+  "kernel_init_s": 1.302,
+  "boot_ids": [
+   "bcea004a-f03a-4406-8455-d987f8870ddd"
+  ]
+ }
+}

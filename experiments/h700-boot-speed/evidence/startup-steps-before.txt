@@ -1,0 +1,29 @@
+1.290    +0 ms  VFS: Mounted root (ext4 filesystem) readonly on device 179:5.
+1.292    +1 ms  Freeing unused kernel memory: 2688K
+1.349   +58 ms  bt: devtmpfs
+1.362   +13 ms  bt: tmpfs-mounted
+1.394   +32 ms  bt: btlpm
+1.394    +0 ms  bt: mali-spawned
+1.437   +43 ms  EXT4-fs (mmcblk0p6): mounted filesystem with ordered data mode. Opts: 
+1.440    +3 ms  bt: data-mounted
+1.444    +4 ms  mali gpu: Probed as mali0
+1.457   +13 ms  bt: update-boot-check
+1.474   +17 ms  bt: timedatectl
+1.475    +2 ms  bt: seed-hwclock
+1.479    +4 ms  bt: wifi-spawn+machine-id
+1.480    +1 ms   mmcblk1: p1
+1.491   +11 ms  bt: expand-storage
+1.495    +4 ms  bt: menu-check
+1.533   +38 ms  [EXFAT] mounted successfully
+1.536    +2 ms  bt: card-mounted
+1.540    +5 ms  bt: boot-log
+1.557   +17 ms  bt: baseos-config
+1.615   +57 ms  bt: update-apply
+1.620    +5 ms  h700_amp: callbacks attached headphone_pop_fix=0
+1.620    +0 ms  bt: amp-load
+1.620    +0 ms  bt: rcS-end
+1.622    +2 ms  bt: fs-start
+1.630    +8 ms  bt: fs-update-confirm
+1.631    +1 ms  bt: fs-card-checked
+1.633    +2 ms  bt: fs-installer-checked
+1.652   +18 ms  bt: fs-exec

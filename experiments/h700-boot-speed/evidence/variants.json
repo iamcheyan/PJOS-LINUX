@@ -1,0 +1,114 @@
+{
+ "cmdline-quiet": {
+  "name": "cmdline-quiet",
+  "notes": [
+   "header cmdline 'loglevel=1'"
+  ],
+  "files": {
+   "boot": {
+    "bytes": 9842688,
+    "sha256": "26424edac7fa5d67da70d15e821a0c969b0c60cef3f4cb3f4671e3a7c5162c0f"
+   }
+  }
+ },
+ "noinitrd-quiet": {
+  "name": "noinitrd-quiet",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1'"
+  ],
+  "boot0_debug": 3,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b"
+   }
+  }
+ },
+ "nq-all-silent": {
+  "name": "nq-all-silent",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6"
+   }
+  }
+ },
+ "nq-uboot-silent": {
+  "name": "nq-uboot-silent",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000"
+  ],
+  "boot0_debug": 3,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "e4b432abd32c37e62197f10773ca631e120590d5a99e1b686c67192403151dc6"
+   }
+  }
+ },
+ "nqs-usb-b": {
+  "name": "nqs-usb-b",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "dtb ohci2-controller@0x05310400:status 6f6b617900 -> 6661696c00",
+   "dtb ehci3-controller@0x05311000:status 6f6b617900 -> 6661696c00",
+   "dtb ohci3-controller@0x05311400:status 6f6b617900 -> 6661696c00",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "c3b906adf43e0ac9c6d1f6c75348b8ea807024696eea8d682e91e9db2ed60b20"
+   }
+  }
+ },
+ "nqs-usb23off": {
+  "name": "nqs-usb23off",
+  "notes": [
+   "ramdisk 2606312 -> 512 bytes (empty archive)",
+   "header cmdline 'loglevel=1'",
+   "dtb platform:debug_mode 00000003 -> 00000000",
+   "dtb ehci2-controller@0x05310000:status 6f6b617900 -> 6661696c00",
+   "dtb ohci2-controller@0x05310400:status 6f6b617900 -> 6661696c00",
+   "dtb ehci3-controller@0x05311000:status 6f6b617900 -> 6661696c00",
+   "dtb ohci3-controller@0x05311400:status 6f6b617900 -> 6661696c00",
+   "boot0 debug_mode -> 0"
+  ],
+  "boot0_debug": 0,
+  "files": {
+   "boot": {
+    "bytes": 7237632,
+    "sha256": "0e101c5348a540023b9b86811966605c31152194a94bbdab5f9133e1a0ec7f0b"
+   },
+   "toc1": {
+    "bytes": 1310720,
+    "sha256": "ea309742f5129a6ecb7036cd1712ec9836951d94e384630087dd282e08fa2b64"
+   }
+  }
+ }
+}
