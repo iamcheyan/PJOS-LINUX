@@ -9,26 +9,12 @@ handles the hardware and starts your choice of frontend:
 
 ## Startup time
 
-We've brought BaseOS startup down from about **3 seconds to 1.35 seconds**
-after the kernel starts.
+![Total BaseOS startup time across releases, from about 6.7 seconds to 4.1 seconds](assets/boot-times.svg)
 
-Reported BaseOS startup time after the kernel starts:
+Includes kernel loading. Frontend loading comes on top.
 
-| Release | Time to start the frontend |
-| --- | ---: |
-| v1.0.0 | ~3.0 s |
-| v1.1.0 | ~3.0 s |
-| v1.2.0 | ~2.25 s |
-| v1.2.1 | ~2.25 s |
-| v1.3.0 | ~2.2 s |
-| v1.4.0 | ~1.35 s |
-
-These figures exclude kernel loading and the frontend's own startup. Devices
-and SD cards affect the times.
-
-Version 1.4.0 also cuts kernel-loading and frontend-loading time. Slot's menu
-appeared about **2 seconds sooner** than v1.3.0 in recorded RG40XX V and
-RG34XX SP restart tests.
+v1.4.0 also loads **NextUI about 0.7 seconds faster** and **Slot about
+0.3 seconds faster**.
 
 ## Features
 
