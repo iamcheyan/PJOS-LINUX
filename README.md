@@ -9,16 +9,13 @@ handles the hardware and starts your choice of frontend:
 
 ## Startup time
 
-BaseOS v1.3.0 gets out of the way a little sooner: around **300 ms less time
-loading the kernel**, plus a small improvement after Linux starts — about
-**2.2 seconds**, down from **2.25 seconds in v1.2.0**.
+BaseOS v1.4.0 spends less time starting the system and loading your frontend.
+In recorded RG SP restart tests, it reached the frontend in about **4.1
+seconds**, down from **5.7 seconds in v1.3.0**, including kernel loading.
+Slot's menu appeared about **2 seconds sooner** on RG40XX V and RG34XX SP.
 
-Our latest RG SP restart tests measured about **5.6 seconds including kernel
-loading**, up to the point where your frontend starts. Your frontend adds its
-own time to display the menu, and results vary with the device and SD card.
-
-The boot log now shows more accurate pre- and post-kernel timings, making it
-easier to see where startup time goes.
+These are restart measurements. Your frontend and SD card affect the total
+time until the menu appears.
 
 ## Features
 
@@ -39,7 +36,7 @@ For a fresh install, download your model's `.img.zip`, unzip it and flash the
 for first boot and NextUI setup with one or two cards.
 
 To update, copy your model's `.bosupd` to the root of your frontend card and
-restart. Keep power connected during the v1.3.0 update: it may show a one-time
+restart. Keep power connected during the v1.4.0 update: it may show a one-time
 “optimising startup” message. Let it finish without switching off.
 
 ### Other frontends
