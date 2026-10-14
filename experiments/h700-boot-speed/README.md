@@ -282,7 +282,12 @@ launch about 0.15 s shorter. A port or Pak that takes its input from this SDL
 would have had no controls on such a boot. Nobody tried that case.
 
 `rcS` now gives `/dev/input` the time 1 right after it mounts `/dev`, which
-is the value every 1.3.0 boot had.
+is the value every 1.3.0 boot had. On the RG SP the fixed build registered
+its last input device before the one-second mark in two of four boots, and the
+time was 1 in all four. With the scan back on every boot, every start of
+minarch again takes the 0.15 s the scan costs, as on release 1.3.0. NextUI's
+SDL has no udev support and scans for a gamepad that NextUI then skips, so
+that time could be saved in NextUI.
 
 ## RG40XX V: release 1.3.0 against 1.4.0
 

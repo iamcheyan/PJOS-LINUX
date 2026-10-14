@@ -33,12 +33,22 @@ Seen on the RG SP
     [    1.066393] input: dierct-keys-polled as /devices/platform/dierct-keys-polled/input/input2
     [    1.101979] rtc-pcf8563 5-0051: setting system clock to 2026-10-14 00:40:30 UTC (1791938430)
 
-  Three launches of the same game in that one boot, with the directory time set by hand
+  Four launches of the same game in that one boot, with the directory time set by hand
   (touch -d @N /dev/input). minarch uses NextUI's libSDL2 from the frontend card and
   logs a line for the built-in gamepad it finds and skips:
-    time 1   "Skipping built-in joystick 0: ANBERNIC-keys" logged twice   startup 905 ms
-    time 0   line absent, SDL found no gamepad                            startup 773 ms
-    time 1   line logged twice again                                      startup 948 ms
+    time 1   "Skipping built-in joystick 0: ANBERNIC-keys (handled via evdev)" twice   startup 905 ms
+    time 0   line absent, SDL found no gamepad                                         startup 773 ms
+    time 1   line logged twice again                                                   startup 948 ms
+    time 0   line absent                                                               startup 683 ms
+  NextUI's own log followed the same switch each time nextui.elf started.
+  With the time at 0 the menu, the in-game menu and the game still took button presses:
+  NextUI and minarch read the pad's event node themselves.
+
+  The library: /mnt/sdcard/.system/h700/lib/libSDL2-2.0.so.0, 8,026,720 bytes. It has no
+  reference to libudev, udev_enumerate, udev_new, udev_monitor or SDL_UDEV_Init, and it
+  contains LINUX_FallbackJoystickDetect, last_input_dir_mtime, last_joy_detect_time and
+  LINUX_InotifyJoystickDetect. No udev daemon runs on BaseOS. The library's source was
+  not read; the behaviour above was observed.
 
   In the six timed boots of the game-launch test the line was absent in three (A1, A3,
   B1) and present in three. Those are the two states in game-launch-ext4-vs-image.txt.
@@ -47,3 +57,18 @@ Fix
   rcS runs "/bin/touch -c -d @1 /dev/input" right after it mounts devtmpfs. That is the
   value every 1.3.0 boot had. -c keeps touch from creating a file if the directory is
   missing. tests/test-input-dir-time.sh runs the line under BusyBox.
+
+  With the scan back on every boot, every start of minarch again takes the 0.13 to 0.19 s
+  the scan costs, as it did on release 1.3.0.
+
+The fixed build on the RG SP
+  Build 1.4.0 (v1.3.0-20-g30febbb), installed by the updater. Four restarts:
+    last input device at 0.998 s   /dev/input time 1   combined 4.314 s
+    last input device at 0.975 s   /dev/input time 1   combined 4.102 s
+    last input device at 1.025 s   /dev/input time 1   combined 4.141 s
+    last input device at 1.026 s   /dev/input time 1   combined 4.150 s
+  The first two would have left the time at 0. validate-on-device.sh: 42 passed, 0 failed.
+
+Not tested
+  A port or Pak that takes its input from SDL, a program with its own SDL, and a gamepad
+  connected later over USB or Bluetooth.

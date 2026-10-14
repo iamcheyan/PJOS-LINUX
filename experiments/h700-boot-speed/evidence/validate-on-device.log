@@ -11,13 +11,13 @@ PASS: U-Boot saw the BaseOS names
 PASS: /data is the UDISK partition (p6)
 PASS: gptslot accepts this layout
 PASS: update engine present
-  SLOT_ACTIVE=B
+  SLOT_ACTIVE=A
   SLOT_BASE=434176
   SLOT_SECTORS=1048576
-  SLOT_ACTIVE_START=1482752
-  SLOT_INACTIVE_START=434176
-  version: 1.3.0 (v1.3.0-14-g05f61c0)
-  slot:    B (active LBA 1482752, inactive LBA 434176, 1048576 sectors)
+  SLOT_ACTIVE_START=434176
+  SLOT_INACTIVE_START=1482752
+  version: 1.4.0 (v1.3.0-20-g30febbb)
+  slot:    A (active LBA 434176, inactive LBA 1482752, 1048576 sectors)
   trial:   none (committed)
   payload: none on the card
 === boot speed ===
@@ -52,15 +52,16 @@ PASS: USB host module loaded (h700_late_usb)
 PASS: all six USB host controllers started
 PASS: /usr/lib is the squashfs image
 PASS: dynamic loader is in place
+PASS: /dev/input has a non-zero time
 PASS: adb has no TCP 5555 listener
 PASS: adb gadget bound (g1/UDC)
 PASS: functionfs mounted
 === resources ===
-  processes: 189
-  RAM used: 94/973 MB
+  processes: 158
+  RAM used: 93/973 MB
   rootfs: 89.0M used, ro=
-  thermal_zone0: 48°C
-  thermal_zone1: 49°C
-  thermal_zone3: 48°C
+  thermal_zone0: 49°C
+  thermal_zone1: 51°C
+  thermal_zone3: 49°C
 
-=== RESULT: 41 passed, 0 failed ===
+=== RESULT: 42 passed, 0 failed ===
