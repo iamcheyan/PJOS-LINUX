@@ -2,7 +2,7 @@
 
 BaseOS is a small, fast operating system for Anbernic RG XX handhelds. It
 handles the hardware and starts your choice of frontend:
-[NextUI](https://nextui.loveretro.games), [Slot](https://slot.kowalski.io),
+[NextUI](https://nextui.loveretro.games), [Slot](https://slot-cfw.fyi),
 [spruceOS](https://spruceui.github.io), or your own. It has no menu of its own.
 
 **[Installation guide](https://github.com/pvaibhav/BaseOS/wiki/BaseOS-Install-Guide)**
@@ -29,33 +29,41 @@ v1.4.0 also loads **NextUI about 0.7 seconds faster** and **Slot about
 
 ## Installation and updates
 
-For a fresh install, download your model's `.img.zip`, unzip it and flash the
-`.img` to TF1. Flashing erases the card. Follow the
+For a fresh install, [download your model's BaseOS release](https://github.com/pvaibhav/BaseOS/releases/latest),
+unzip its `.img.zip` and flash the `.img` to TF1. Flashing erases the card.
+Then add a frontend using TF1's visible `BASEOS` volume or a separate TF2 card.
+**Do not reformat TF1 after flashing BaseOS.** A usable TF2 card takes priority.
+
+Use one frontend per card. FAT32 works with all three frontends; NextUI also
+supports exFAT on TF2. Follow the
 [installation guide](https://github.com/pvaibhav/BaseOS/wiki/BaseOS-Install-Guide)
-for first boot and NextUI setup with one or two cards.
+for one-card or two-card setup.
 
-To update, copy your model's `.bosupd` to the root of your frontend card and
-restart. Keep power connected during the v1.4.0 update: it may show a one-time
-“optimising startup” message. Let it finish without switching off.
+To update BaseOS, copy your model's `.bosupd` to the root of your frontend card
+and restart. Keep power connected during the v1.4.0 update's one-time startup
+optimisation, and let it finish without switching off.
 
-### Other frontends
+### Frontends
 
-Use TF1's visible data partition or a FAT32/exFAT card in TF2. A usable TF2 card
-takes priority.
-
-- **Slot:** extract its H700 release and copy the contents of `slot-<version>`
-  to the card root, including `System/slot`, `System/mgba_libretro.so` and
-  `System/gpsp_libretro.so`. Put games in `Games/` and optional BIOS files in
-  `BIOS/`. Update by replacing `System` with the folder from the new release.
-- **spruceOS:** copy its extracted H700 release to the card root, including
-  `spruce/scripts/runtime.sh`.
+- **NextUI:** [official v6.15.0 and later](https://github.com/LoveRetro/NextUI/releases/latest)
+  support H700 natively. Extract the `-base.zip` or `-all.zip` archive and copy
+  its contents to your frontend card's root. Keep `MinUI.zip` zipped; BaseOS
+  installs it automatically. A separate H700 fork and the stock-OS `dmenu.bin`
+  setup are unnecessary. [NextUI installation guide](https://nextui.loveretro.games/getting-started/installation/).
+- **Slot:** extract its [H700 release](https://github.com/BrandonKowalski/slot/releases/latest)
+  and copy the contents of `slot-<version>` to the card root, including the
+  complete `System/` folder. Put unzipped games in `Games/GB/`, `Games/GBC/`
+  or `Games/GBA/`, and optional BIOS files in `BIOS/`. Update by replacing
+  `System/` with the folder from the new release. [Slot guide](https://slot-cfw.fyi).
+- **spruceOS:** extract the full [release archive](https://github.com/spruceUI/spruceOS/releases/latest)
+  and copy all contents, including hidden folders, to the card root. It should
+  contain `spruce/scripts/runtime.sh`. The
+  [spruceOS Installer](https://github.com/spruceUI/spruceOS-Installer/releases/latest)
+  can set up a separate TF2 card; skip its TF1 image step if BaseOS is already
+  installed. [spruceOS installation guide](https://github.com/spruceUI/spruceOS/wiki/01.-Installation-Instructions).
 - **Your own frontend:** add `System/launch_frontend.sh` or a glibc AArch64
   binary at `System/frontend`. The binary takes priority; scripts run through
   `/bin/sh`. Both run from the card root and need no executable bit.
-
-If several are installed, BaseOS chooses your custom frontend first, then
-Slot, NextUI, and spruceOS. Remove higher-priority launchers to select another.
-NextUI's pending `MinUI.zip` and `*.pakz` installers run before this selection.
 
 ## Settings
 
