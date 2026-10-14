@@ -57,6 +57,11 @@ the relevant subsystem document for its acceptance criteria.
 ## 4. Open work
 
 - Read-only rootfs after initialization for power-loss resilience.
+- On an RG40XX V connected to a computer over USB, the plain restart
+  (`reboot`, which the updater also uses) leaves the screen blank until reset.
+  Release 1.3.0 does the same; holding POWER does not help, reset does. Which
+  step of the shutdown triggers it is unknown. See
+  [the restart record](../experiments/h700-boot-speed/evidence/rg40xxv-plain-restart.txt).
 - Complete the remaining hardware checks above across supported H700 models.
 - Define `/data` schema migration before storing state that cannot be regenerated.
 

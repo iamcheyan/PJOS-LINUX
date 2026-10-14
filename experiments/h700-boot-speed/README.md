@@ -320,8 +320,17 @@ ask for NextUI processes, and this device runs Slot.
 [`evidence/rg40xxv-1.3.0-to-1.4.0.txt`](evidence/rg40xxv-1.3.0-to-1.4.0.txt)
 has every boot and the migration log.
 
-Nobody has tried a cold power-on, a power-off from the frontend, a USB device
-on a host port or a 32-bit program on this device.
+Nobody has tried a USB device on a host port or a 32-bit program on this
+device. Its owner powered it off and on from Slot twice without the cable, and
+it came back both times.
+
+The fixed 1.4.0 went on this device the same way. The updater's restart left
+it blank until its owner pressed reset. Plain restarts then hung on the
+original boot files too, and on the published 1.3.0 restored to the other
+slot, every time with a computer attached. The restart path is unchanged since
+1.3.0, and 1.4.0 does not cause the hang.
+[`evidence/rg40xxv-plain-restart.txt`](evidence/rg40xxv-plain-restart.txt)
+has each restart.
 
 ## Not done
 

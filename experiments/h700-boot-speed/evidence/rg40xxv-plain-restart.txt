@@ -1,0 +1,37 @@
+Plain restarts on the RG40XX V, 2026-10-14
+The device was connected to a Mac over USB, with adb in use, throughout.
+
+Two ways of restarting
+  plain   BaseOS's reboot command: the wrapper calls BusyBox reboot, init runs rcK
+          (stops every process, saves entropy, syncs, unmounts everything), then the
+          kernel restarts. The updater restarts the device this way after a slot flip.
+  lab     lab.py: pause the frontend, remount /data and / read-only, then NextUI's
+          reboot_next calls the kernel's restart directly.
+
+Plain restarts
+  system                      boot files   started from                         result
+  published 1.3.0             1.3.0        the updater, after writing 1.4.0     came back
+  1.4.0, build ade8715        new          the updater, after writing 1.4.0     blank until reset
+  1.4.0, build 30febbb        1.3.0        Slot running                         blank until reset
+  1.4.0, build 30febbb        1.3.0        Slot running                         blank until reset
+  1.4.0, build 30febbb        1.3.0        Slot running                         blank; holding POWER did nothing; reset
+  published 1.3.0             1.3.0        Slot running                         blank for over 15 minutes until reset
+
+  "published 1.3.0" is the release's own rootfs image (sha256 55ed601c...), written to
+  the free slot from baseos-rg40xxv-1.3.0.bosupd, with the 1.3.0 boot files restored from
+  the backup taken before the update.
+
+Lab restarts on the same device: about 20, on both sets of boot files, all came back.
+The RG SP came back from all four of its updater restarts today.
+The owner's Slot build has no restart, only power off. Two power-offs and power-ons
+without the cable both worked.
+
+Conclusion
+  On this RG40XX V with a computer attached, the plain restart hangs on release 1.3.0 as
+  it does on 1.4.0, so 1.4.0 does not cause it. The owner had seen blank screens after
+  restarts on 1.3.0 now and then. It matters after an update: the slot is already
+  written and flipped, and a reset starts the new system.
+
+Not investigated
+  Which step of the shutdown triggers the hang, and whether the plain restart also hangs
+  with a charger or with no cable.

@@ -112,6 +112,11 @@ It does not confirm when the dynamic loader is missing, because then the
 [`/usr/lib` image](01-rootfs-and-init.md#the-usrlib-image) did not mount.
 Charging-only sessions do not reach either operation.
 
+If the screen stays blank after the updater's restart, press reset. The new
+slot is already written and flipped at that point, so the reset starts it as a
+normal trial boot. An RG40XX V connected to a computer does this on every
+release so far; see [status](06-status-and-lessons.md#4-open-work).
+
 Rollback requires userspace to reach `boot-check`. It cannot recover a rootfs
 that fails before that point. Manual slot switching is available through
 `gptslot /dev/mmcblk0 flip` when the system can boot.
