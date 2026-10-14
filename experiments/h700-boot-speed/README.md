@@ -209,6 +209,32 @@ sleep. [`evidence/lib-image-update-install.txt`](evidence/lib-image-update-insta
 has the record, and [rootfs and init](../../docs/01-rootfs-and-init.md#the-usrlib-image)
 describes the image. Reading ahead and the larger read-ahead window stay out.
 
+### Game launches
+
+The image does not make games start sooner. On the RG SP two games were
+launched from the NextUI menu, twice per boot, over three boots of the build
+with `/usr/lib` on ext4 and three of the build with the image. Medians in
+seconds from the button press to the first game picture:
+
+| Launch | ext4 | Image | Read from the root partition on ext4 |
+|---|---:|---:|---:|
+| Game Boy Advance game, first launch after a boot | 2.35 | 2.53 | 0.47 MiB |
+| The same game again | 1.53 | 1.59 | none |
+| Mega Drive game, first launch | 2.58 | 2.59 | 0.20 MiB |
+| The same game again | 2.03 | 2.18 | none |
+
+A launch has almost nothing to gain from the image. It reads 11 MiB from the
+frontend card and under half a MiB from the root partition, because NextUI
+has already loaded the libraries the emulator needs.
+
+The image column looks slightly worse for a reason that has nothing to do
+with the image. Each boot was in one of two states that moved every launch of
+that boot by 0.13 to 0.19 s, and the image build drew the slower state in two
+of its three boots. Within the same state the two builds agree to 0.03 s.
+[`evidence/game-launch-ext4-vs-image.txt`](evidence/game-launch-ext4-vs-image.txt)
+has every launch. The two states turned out to be
+[a fault of the faster boot](#the-gamepad-that-sdl-could-not-find).
+
 ### What a squashfs root would need
 
 Three things stand in the way of making the whole root squashfs.
@@ -230,6 +256,33 @@ three, which is why BaseOS ships that form. The root stays ext4 and writable,
 the updater handles the same kind of slot image, and the first boot through
 the initramfs works as before. Every supported kernel has squashfs with LZ4
 and the loop driver built in, and the build checks that.
+
+## The gamepad that SDL could not find
+
+The game-launch test found a fault in the faster boot. In about a third of
+boots, programs that use SDL without udev saw no gamepad.
+
+The kernel clock counts from zero until the RTC driver sets it, and the input
+devices register before that. `/dev/input` therefore has a modification time
+of a second or two after the start of 1970. SDL's gamepad detection without
+udev remembers the last time it saw, starting at zero, and scans the directory
+only when its time differs. A time of zero means it never scans.
+
+On release 1.3.0 the last input device registered between 1.67 and 1.82 s, so
+the time was always 1. Each speed-up moved that point earlier. Since the late
+USB start it lies between 0.98 and 1.09 s, and the time was 0 in 9 of 26
+timed boots on the two devices.
+[`evidence/input-dir-time.txt`](evidence/input-dir-time.txt) has the table.
+
+A test in one boot of the RG SP confirmed the cause. With the directory time
+set to 0 by hand, minarch's SDL found no gamepad. Set back to 1, it found the
+gamepad again. NextUI and minarch read the buttons themselves and skip the
+gamepad SDL offers, so they kept working, and the only visible effect was a
+launch about 0.15 s shorter. A port or Pak that takes its input from this SDL
+would have had no controls on such a boot. Nobody tried that case.
+
+`rcS` now gives `/dev/input` the time 1 right after it mounts `/dev`, which
+is the value every 1.3.0 boot had.
 
 ## RG40XX V: release 1.3.0 against 1.4.0
 

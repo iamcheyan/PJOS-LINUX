@@ -11,6 +11,13 @@
 os_sleep=/sys/class/power_supply/axp2202-battery/os_sleep
 [ -w "$os_sleep" ] && printf '16' > "$os_sleep"
 grep -q ' /dev devtmpfs ' /proc/mounts || /bin/mount -t devtmpfs dev /dev
+# The kernel clock counts from zero until the RTC sets it, and the input devices
+# register before that. A kernel that registers the last of them within its
+# first second leaves /dev/input with a modification time of zero. SDL's
+# gamepad scan without udev starts from that same value, sees no change and
+# never looks. Stock startup registered them in the second second, so give the
+# directory the time it always had. -c: never create a file in its place.
+/bin/touch -c -d @1 /dev/input 2>/dev/null
 
 # Root filesystem. The vendor initramfs used to run e2fsck on it and mount it
 # writable; a boot without that initramfs arrives here with the kernel's own

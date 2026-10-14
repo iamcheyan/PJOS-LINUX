@@ -62,6 +62,6 @@ echo 'ok: a failed mount is reported and startup continues'
 # needs the same property.
 before=$(awk '/^# \/usr\/lib\. A composed image/{exit} {print}' "$RCS" | grep -v '^[[:space:]]*#' \
 	| grep -oE '(^|[[:space:];|&(])/(usr/)?s?bin/[A-Za-z0-9_.-]+' | grep -oE '/.*' | sort -u | tr '\n' ' ')
-[ "$before" = '/bin/mount /usr/sbin/e2fsck ' ] || fail "programs run before the /usr/lib mount: $before"
-echo 'ok: only mount and the static e2fsck run before the mount'
+[ "$before" = '/bin/mount /bin/touch /usr/sbin/e2fsck ' ] || fail "programs run before the /usr/lib mount: $before"
+echo 'ok: only BusyBox mount and touch and the static e2fsck run before the mount'
 echo '/usr/lib image tests passed'

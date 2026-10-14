@@ -97,7 +97,9 @@ regular executable `/init` script, which executes BusyBox init. `/etc/inittab` r
 
 `rcS` performs this sequence:
 
-1. Mount kernel interfaces. If the kernel mounted the root filesystem
+1. Mount kernel interfaces. Give `/dev/input` the modification time 1, which
+   SDL's gamepad scan without udev needs; see
+   [boot files](12-kernel-gzip.md#a-side-effect-on-devinput). If the kernel mounted the root filesystem
    read-only, run `e2fsck` when the filesystem has recorded errors, then
    remount it writable. Mount the `/usr/lib` image. Mount the tmpfs filesystems. Apply SP Super Standby
    where supported. Mount `debugfs` for the HDMI display-control and MENU GPIO

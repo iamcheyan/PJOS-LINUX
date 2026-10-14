@@ -1,0 +1,94 @@
+Game launches from NextUI with /usr/lib on ext4 and as the squashfs image
+RG SP, 2026-10-14, NextUI on TF1, second slot empty, USB attached, Wi-Fi on.
+Boots A1 to A3 ran build v1.3.0-11-ga2ba8c3 (/usr/lib a directory on ext4). Boots B1 to
+B3 ran build v1.3.0-14-g05f61c0 (/usr/lib the squashfs image). The builds are otherwise
+the same. Boot order: B, B, A, A, A, B.
+
+Games: Alien Hominid (GBA, gpsp core, 2.5 MB zip) and Altered Beast (Mega Drive,
+picodrive core, 326 KB zip).
+
+Method
+  Each boot: restart, wait for the menu, move to the game with injected button presses
+  (checked against reference pictures of the menu), press A at 60 s of uptime, quit
+  through the in-game menu, launch again, then the same for the second game.
+  A shell script on the device writes the A press to the pad's event node and samples,
+  about every 27 ms, the uptime, the read counters of the root partition, the loop device,
+  the frontend partition and the whole card, and an MD5 of rows 80 to 399 of the screen.
+  "minarch starts" is the process start time. "first picture" is the first sample after
+  that whose screen is neither a menu frame nor black. Saved frames show it is the same
+  event in all 24 launches: the first frame of the GBA game's fade-in, and the SEGA logo.
+  Times are seconds after the A press, median (lowest to highest) of three boots.
+  Reads and card busy time are counted up to the first picture.
+  "minarch log ms" is the total startup time minarch writes to its own log.
+
+Result
+  No measurable difference. A launch reads 11.2 MiB from the frontend card and at most
+  0.47 MiB from the root partition, because NextUI has already loaded the libraries that
+  minarch needs. On ext4 those root reads take 30 to 50 ms of request time on the first
+  launch after a boot and nothing on later launches.
+
+  Each boot was in one of two states that moved minarch's startup by 0.13 to 0.19 s in
+  all four of its launches. The image build was in the slower state in two of its three
+  boots (B2, B3) and the ext4 build in one (A2), which is why the image medians look
+  slightly worse. Within the same state the builds agree: first GBA launch 2.37 s against
+  2.34 and 2.35 s in the faster state, 2.53 and 2.62 s against 2.52 s in the slower one.
+  The state is whether SDL finds the built-in gamepad; see input-dir-time.txt.
+
+Limits
+  Three boots per build, one launch per case per boot; differences under about 0.2 s
+  cannot be resolved. The first Mega Drive launch of a boot came after the GBA launches,
+  so minarch and the shared libraries were already cached. The sampler keeps one of the
+  four cores busy. RetroAchievements is enabled on this card, so each launch also talks
+  to its server.
+
+GBA, first launch of the boot
+                     minarch starts          first picture        starts->picture         minarch log ms   root MiB  loop MiB   p7 MiB        busy ms root read ms
+  ext4             0.56 (0.53-0.56)       2.35 (2.34-2.52)       1.79 (1.78-1.99)       1513 (1512-1694)      0.469     0.000    11.20  710 (660-750)           40
+     A1-GBA-1   minarch 0.56  picture 2.34  log 1513  root 0.469  loop 0.000  p7 11.20  busy 710  root-ms 40
+     A2-GBA-1   minarch 0.53  picture 2.52  log 1694  root 0.469  loop 0.000  p7 11.20  busy 750  root-ms 30
+     A3-GBA-1   minarch 0.56  picture 2.35  log 1512  root 0.469  loop 0.000  p7 11.23  busy 660  root-ms 50
+  image            0.57 (0.54-0.67)       2.53 (2.37-2.62)       1.95 (1.80-1.99)       1646 (1490-1681)      0.004     0.143    11.20  710 (670-720)            0
+     B1-GBA-1   minarch 0.57  picture 2.37  log 1490  root 0.004  loop 0.143  p7 11.20  busy 720  root-ms 0
+     B2-GBA-1   minarch 0.54  picture 2.53  log 1681  root 0.004  loop 0.143  p7 11.23  busy 670  root-ms 0
+     B3-GBA-1   minarch 0.67  picture 2.62  log 1646  root 0.004  loop 0.143  p7 11.20  busy 710  root-ms 0
+
+GBA, second launch (warm)
+                     minarch starts          first picture        starts->picture         minarch log ms   root MiB  loop MiB   p7 MiB        busy ms root read ms
+  ext4             0.53 (0.53-0.62)       1.53 (1.40-1.62)       0.91 (0.87-1.09)          740 (713-930)      0.000     0.000     0.00     60 (60-70)            0
+     A1-GBA-2   minarch 0.53  picture 1.40  log 713  root 0.000  loop 0.000  p7 0.00  busy 60  root-ms 0
+     A2-GBA-2   minarch 0.53  picture 1.62  log 930  root 0.000  loop 0.000  p7 0.00  busy 70  root-ms 0
+     A3-GBA-2   minarch 0.62  picture 1.53  log 740  root 0.000  loop 0.000  p7 0.00  busy 60  root-ms 0
+  image            0.60 (0.52-0.61)       1.59 (1.55-1.63)       1.03 (0.94-1.07)          862 (734-870)      0.000     0.000     0.00     60 (60-70)            0
+     B1-GBA-2   minarch 0.61  picture 1.55  log 734  root 0.000  loop 0.000  p7 0.00  busy 70  root-ms 0
+     B2-GBA-2   minarch 0.52  picture 1.59  log 870  root 0.000  loop 0.000  p7 0.00  busy 60  root-ms 0
+     B3-GBA-2   minarch 0.60  picture 1.63  log 862  root 0.000  loop 0.000  p7 0.00  busy 60  root-ms 0
+
+MD, first MD launch (minarch already cached)
+                     minarch starts          first picture        starts->picture         minarch log ms   root MiB  loop MiB   p7 MiB        busy ms root read ms
+  ext4             0.57 (0.52-0.67)       2.58 (2.20-2.65)       1.91 (1.68-2.08)         888 (878-1042)      0.199     0.000     1.76  180 (170-210)           10
+     A1-MD-1    minarch 0.52  picture 2.20  log 878  root 0.199  loop 0.000  p7 1.76  busy 180  root-ms 20
+     A2-MD-1    minarch 0.57  picture 2.65  log 1042  root 0.199  loop 0.000  p7 1.79  busy 210  root-ms 10
+     A3-MD-1    minarch 0.67  picture 2.58  log 888  root 0.199  loop 0.000  p7 1.76  busy 170  root-ms 0
+  image            0.55 (0.54-0.66)       2.59 (2.58-2.61)       2.05 (1.92-2.06)        1002 (872-1020)      0.000     0.071     1.76  180 (180-210)            0
+     B1-MD-1    minarch 0.66  picture 2.58  log 872  root 0.000  loop 0.071  p7 1.76  busy 180  root-ms 0
+     B2-MD-1    minarch 0.54  picture 2.59  log 1002  root 0.000  loop 0.071  p7 1.76  busy 180  root-ms 0
+     B3-MD-1    minarch 0.55  picture 2.61  log 1020  root 0.000  loop 0.071  p7 1.76  busy 210  root-ms 0
+
+MD, second launch (warm)
+                     minarch starts          first picture        starts->picture         minarch log ms   root MiB  loop MiB   p7 MiB        busy ms root read ms
+  ext4             0.53 (0.51-0.63)       2.03 (1.99-2.30)       1.50 (1.48-1.67)          691 (665-858)      0.000     0.000     0.00   100 (70-100)            0
+     A1-MD-2    minarch 0.51  picture 1.99  log 665  root 0.000  loop 0.000  p7 0.00  busy 70  root-ms 0
+     A2-MD-2    minarch 0.63  picture 2.30  log 858  root 0.000  loop 0.000  p7 0.00  busy 100  root-ms 0
+     A3-MD-2    minarch 0.53  picture 2.03  log 691  root 0.000  loop 0.000  p7 0.00  busy 100  root-ms 0
+  image            0.64 (0.53-0.64)       2.18 (2.17-2.24)       1.60 (1.54-1.64)          822 (684-871)      0.000     0.000     0.00     80 (70-80)            0
+     B1-MD-2    minarch 0.64  picture 2.18  log 684  root 0.000  loop 0.000  p7 0.00  busy 80  root-ms 0
+     B2-MD-2    minarch 0.64  picture 2.24  log 871  root 0.000  loop 0.000  p7 0.00  busy 70  root-ms 0
+     B3-MD-2    minarch 0.53  picture 2.17  log 822  root 0.000  loop 0.000  p7 0.00  busy 80  root-ms 0
+
+minarch's own startup time per boot (ms): GBA first, GBA warm, MD first, MD warm
+  B1: 1490  734  872  684
+  B2: 1681  870  1002  871
+  B3: 1646  862  1020  822
+  A1: 1513  713  878  665
+  A2: 1694  930  1042  858
+  A3: 1512  740  888  691

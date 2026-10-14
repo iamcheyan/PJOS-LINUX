@@ -70,6 +70,20 @@ The module calls only exported kernel functions. The build compiles it for
 each target's kernel and checks every imported symbol version against that
 kernel, as it does for the speaker module.
 
+### A side effect on `/dev/input`
+
+The kernel clock counts from zero until the RTC driver sets it, and the input
+devices register before that. With the vendor boot files the last of them
+registered in the second second, so `/dev/input` had a modification time of 1.
+With the new files it registers around the one-second mark, and in about a
+third of boots the time is 0. SDL's gamepad detection without udev starts from
+0 and scans the directory only when its time differs, so a program using it
+found no gamepad on those boots.
+
+`rcS` sets the time to 1 right after it mounts `/dev`, whichever boot files
+are installed. [The experiment notes](../experiments/h700-boot-speed/README.md#the-gamepad-that-sdl-could-not-find)
+have the measurements.
+
 ## Build contract
 
 `tools/kernel_gzip.py` derives three pieces from the prepared inputs. For each

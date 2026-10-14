@@ -222,6 +222,7 @@ python3 tests/test-audio-module.py
 ./tests/test-boot-migration.sh
 ./tests/test-root-mount.sh
 ./tests/test-usr-lib-image.sh
+./tests/test-input-dir-time.sh
 python3 tests/test-kernel-gzip.py  # requires all prepared firmware inputs
 python3 tests/test-late-usb.py     # requires all prepared firmware inputs
 python3 tests/test-lib-image.py    # requires all prepared firmware inputs

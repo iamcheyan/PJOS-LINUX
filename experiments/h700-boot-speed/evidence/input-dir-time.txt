@@ -1,0 +1,49 @@
+/dev/input's modification time and SDL's gamepad scan, 2026-10-14
+
+What happens
+  The kernel clock counts from zero until the RTC driver sets it, late in kernel
+  start-up. The input devices register before that, so /dev/input and its nodes carry
+  times of a second or two after 1970-01-01 00:00:00. The directory's modification time
+  is the second in which its last node appeared: 1 when that was between 1.000 and
+  1.999 s of kernel time, 0 when it was earlier.
+
+  SDL's gamepad detection without udev keeps the last modification time it saw, starting
+  at 0, and scans /dev/input only when the directory's time differs. A directory time of
+  0 therefore means it never scans, and the program sees no gamepad.
+
+When the last input device registers, from the kernel logs of the timed boots
+  boot files                                   boots   last input device registers  before 1.000 s  clock set from the RTC
+  RG SP, release 1.3.0 boot files                  4   1.674 to 1.812 s           0 of 4          1.712 to 1.862 s
+  RG SP, serial output off and no initramfs        6   1.417 to 1.505 s           0 of 6          1.462 to 1.542 s
+  RG SP, plus fast RCU grace periods              14   1.264 to 1.372 s           0 of 14         1.302 to 1.412 s
+  RG SP, plus the late USB start                  12   0.986 to 1.080 s           4 of 12         1.022 to 1.122 s
+  RG SP, plus the /usr/lib image                   7   0.975 to 1.047 s           4 of 7          1.022 to 1.082 s
+  RG40XX V, release 1.3.0                          3   1.742 to 1.821 s           0 of 3          1.792 to 1.872 s
+  RG40XX V, build 1.4.0                            7   0.996 to 1.090 s           1 of 7          1.032 to 1.132 s
+
+  On release 1.3.0 the directory time was always 1. Since the late USB start the last
+  device registers around the one-second mark, and the time was 0 in 9 of 26 boots.
+
+Seen on the RG SP
+  A normal boot of build v1.3.0-14-g05f61c0:
+    drwxr-xr-x  root root  120  1970-01-01 00:00:01  /dev/input
+    crw-------  root root  13, 64  1970-01-01 00:00:00  event0
+    crw-------  root root  13, 65  1970-01-01 00:00:01  event1
+    [    1.065557] input: ANBERNIC-keys as /devices/platform/soc/soc@03000000:gpio_keys/input/input1
+    [    1.066393] input: dierct-keys-polled as /devices/platform/dierct-keys-polled/input/input2
+    [    1.101979] rtc-pcf8563 5-0051: setting system clock to 2026-10-14 00:40:30 UTC (1791938430)
+
+  Three launches of the same game in that one boot, with the directory time set by hand
+  (touch -d @N /dev/input). minarch uses NextUI's libSDL2 from the frontend card and
+  logs a line for the built-in gamepad it finds and skips:
+    time 1   "Skipping built-in joystick 0: ANBERNIC-keys" logged twice   startup 905 ms
+    time 0   line absent, SDL found no gamepad                            startup 773 ms
+    time 1   line logged twice again                                      startup 948 ms
+
+  In the six timed boots of the game-launch test the line was absent in three (A1, A3,
+  B1) and present in three. Those are the two states in game-launch-ext4-vs-image.txt.
+
+Fix
+  rcS runs "/bin/touch -c -d @1 /dev/input" right after it mounts devtmpfs. That is the
+  value every 1.3.0 boot had. -c keeps touch from creating a file if the directory is
+  missing. tests/test-input-dir-time.sh runs the line under BusyBox.

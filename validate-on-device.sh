@@ -90,6 +90,8 @@ chk "all six USB host controllers started"   "test \"\$(ls -d /sys/bus/usb/devic
 # Images keep /usr/lib in a squashfs file that rcS mounts over the directory.
 chk "/usr/lib is the squashfs image"         "grep -q ' /usr/lib squashfs ro' /proc/mounts"
 chk "dynamic loader is in place"             "test -x /lib/ld-linux-aarch64.so.1"
+# SDL without udev scans for gamepads only when this time is not zero.
+chk "/dev/input has a non-zero time"         "test \"\$(stat -c %Y /dev/input)\" -ne 0"
 chk "adb has no TCP 5555 listener"       "! netstat -lnt 2>/dev/null | grep -q ':5555 '"
 # The adb gadget is bound to the always-present UDC; device (peripheral) mode is
 # auto-selected by the sunxi manager on cable attach. We deliberately do NOT

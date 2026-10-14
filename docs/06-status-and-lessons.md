@@ -32,6 +32,10 @@ test does not establish hardware support on every target.
   [boot chain](00-boot-chain-and-partitions.md).
 - Boot-critical scripts must be executable. Tool source hashes must match the
   build stamp before packaging. See [image build](02-image-build-and-flash.md).
+- `/dev/input` must not have a modification time of zero, or SDL without udev
+  finds no gamepad. A kernel that registers its input devices within the first
+  second leaves it at zero, so `rcS` sets it. See
+  [boot files](12-kernel-gzip.md#a-side-effect-on-devinput).
 - HDMI switching requires the `debugfs` display interface mounted by `rcS`.
   See [rootfs and init](01-rootfs-and-init.md).
 - Framebuffer draws must finish before frontend handoff. Panel rotation comes
