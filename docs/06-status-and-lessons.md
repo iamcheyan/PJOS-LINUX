@@ -21,9 +21,9 @@ test does not establish hardware support on every target.
 | GPT visibility attributes | RG40XX V boot | Windows drive-letter and format-prompt behavior |
 | Charger-only boot and PMIC shutdown | RG SP; POWER-hold startup on RG34XX SP | Per-target charging and power behavior |
 | Hostname and mDNS | RG34XX SP network validation | Per-target and host-network compatibility |
-| Boot files without the initramfs, and their migration | RG SP: update from 1.3.0, migration on first boot, warm restarts, a cold power-on, an empty TF2 slot, sleep and wake. RG40XX V: update from 1.3.0, migration on first boot, warm restarts with Slot on TF2, sleep and wake | The other nine targets |
-| USB host controllers started by `h700_late_usb.ko` | RG SP: six root hubs present, adb over USB, sleep and wake, a USB audio adapter on the OTG port. RG40XX V: six root hubs present, adb over USB, sleep and wake | A device on one of the five controllers the module starts; the other nine targets |
-| `/usr/lib` served from a squashfs image | RG SP: update from the previous build through the updater, warm restarts, sleep and wake, all on-device checks. RG40XX V: update from 1.3.0, warm restarts, sleep and wake | The other nine targets; a normal power-off and power-on; a 32-bit program |
+| Boot files without the initramfs, and their migration | RG SP: update from 1.3.0, migration on first boot, warm restarts, a cold power-on, an empty TF2 slot, sleep and wake. RG40XX V: update from 1.3.0, migration on first boot, warm restarts with Slot on TF2, sleep and wake. RG34XX SP: the same | The other eight targets |
+| USB host controllers started by `h700_late_usb.ko` | RG SP: six root hubs present, adb over USB, sleep and wake, a USB audio adapter on the OTG port. RG40XX V and RG34XX SP: six root hubs present, adb over USB, sleep and wake | A device on one of the five controllers the module starts; the other eight targets |
+| `/usr/lib` served from a squashfs image | RG SP: update from the previous build through the updater, warm restarts, sleep and wake, all on-device checks. RG40XX V and RG34XX SP: update from 1.3.0, warm restarts, sleep and wake | The other eight targets; a normal power-off and power-on; a 32-bit program |
 
 ## 2. Boot and build constraints
 

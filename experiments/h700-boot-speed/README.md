@@ -8,10 +8,12 @@ patched.
 
 Most timings come from one RG SP, restarted warm with USB attached and the Slot
 frontend on TF2. The build derives the same changes for all eleven targets, and
-each target's U-Boot passes the emulation tests. An RG40XX V later took the
-finished build as an ordinary update, and
-[its before and after timings](#rg40xx-v-release-130-against-140) are below.
-The other nine targets have not booted these files.
+each target's U-Boot passes the emulation tests. An RG40XX V and an RG34XX SP
+later took the finished build as an ordinary update, and
+[their before and after timings](#rg40xx-v-release-130-against-140) are below.
+The other eight targets have not booted these files. An RG28XX was connected
+too, but its USB link dropped every minute, so it was left on release 1.2.1
+untouched.
 
 ## Results
 
@@ -331,6 +333,26 @@ slot, every time with a computer attached. The restart path is unchanged since
 1.3.0, and 1.4.0 does not cause the hang.
 [`evidence/rg40xxv-plain-restart.txt`](evidence/rg40xxv-plain-restart.txt)
 has each restart.
+
+## RG34XX SP: release 1.3.0 against 1.4.0
+
+An RG34XX SP with the published 1.3.0 and Slot on TF2 went through the same
+steps. Its updater restarted the device by itself.
+
+| | Boots | Before Linux | To the handoff | To Slot's first frame |
+|---|---:|---:|---:|---:|
+| Release 1.3.0 | 3 | 4.98 | 7.44 | 10.18 |
+| Build 1.4.0 | 4 | 4.34 | 5.79 | 8.13 |
+
+The handoff comes 1.65 s earlier and Slot's first frame 2.04 s earlier. This
+model spends 1.5 s longer before Linux than the RG SP and the RG40XX V, on
+both releases. On its first boot with the new files the last input device
+registered at 0.987 s, and `/dev/input` still had the time 1. The device half
+of `validate-on-device.sh` passed 40 checks; the two that failed ask for
+NextUI. It slept for 24 seconds and resumed with all six USB controllers,
+Wi-Fi, the GPU and Slot.
+[`evidence/rg34xxsp-1.3.0-to-1.4.0.txt`](evidence/rg34xxsp-1.3.0-to-1.4.0.txt)
+has every boot.
 
 ## Not done
 

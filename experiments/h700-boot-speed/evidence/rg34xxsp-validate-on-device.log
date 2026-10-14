@@ -1,0 +1,69 @@
+=== identity ===
+PASS: running the base OS (/etc/baseos-release)
+PASS: exact BaseOS target (rg34xxsp)
+PASS: no systemd running
+PASS: busybox is init (PID 1)
+PASS: release version recorded
+PASS: os-release agrees with baseos-release
+=== partition layout & update slots ===
+PASS: seven partitions, not eight
+PASS: U-Boot saw the BaseOS names
+PASS: /data is the UDISK partition (p6)
+PASS: gptslot accepts this layout
+PASS: update engine present
+  SLOT_ACTIVE=B
+  SLOT_BASE=434176
+  SLOT_SECTORS=1048576
+  SLOT_ACTIVE_START=1482752
+  SLOT_INACTIVE_START=434176
+  version: 1.4.0 (v1.3.0-21-g542f20c)
+  slot:    B (active LBA 1482752, inactive LBA 434176, 1048576 sectors)
+  trial:   none (committed)
+  payload: /tmp/.baseos-own/baseos-rg34xxsp-1.2.0.bosupd
+           rg34xxsp 1.2.0 (v1.2.0)
+           skipped: not newer than the running 1.4.0
+=== boot speed ===
+  boot-frontend-exec: 1.46s
+PASS: frontend exec marker exists
+PASS: regular boot stays within the 2.50s frontend-exec budget
+=== hardware ===
+PASS: GPU module loaded (mali_kbase)
+PASS: GPU device node (/dev/mali0)
+PASS: display (/dev/disp + fb0)
+PASS: panel width matches the profile (720)
+PASS: panel height is a whole number of 480-row buffers
+PASS: splash knows the panel rotation (0 ccw)
+PASS: HDMI hotplug state readable
+PASS: display output switch (dispdbg)
+PASS: input devices (event0-2)
+PASS: audio card 0 (audiocodec)
+PASS: battery sysfs (AXP2202)
+PASS: thermal zones
+PASS: deep sleep available (mem)
+PASS: rumble sysfs (moto)
+PASS: wifi module loaded (8821cs)
+PASS: wifi interface (wlan0)
+=== NextUI ===
+PASS: SD card mounted (/mnt/sdcard)
+FAIL: nextui.elf running
+FAIL: keymon running
+=== dev services ===
+PASS: sftp-server present + executable
+PASS: adbd running
+PASS: USB host module loaded (h700_late_usb)
+PASS: all six USB host controllers started
+PASS: /usr/lib is the squashfs image
+PASS: dynamic loader is in place
+PASS: /dev/input has a non-zero time
+PASS: adb has no TCP 5555 listener
+PASS: adb gadget bound (g1/UDC)
+PASS: functionfs mounted
+=== resources ===
+  processes: 147
+  RAM used: 142/1979 MB
+  rootfs: 89.0M used, ro=
+  thermal_zone0: 46°C
+  thermal_zone1: 46°C
+  thermal_zone3: 46°C
+
+=== RESULT: 40 passed, 2 failed ===

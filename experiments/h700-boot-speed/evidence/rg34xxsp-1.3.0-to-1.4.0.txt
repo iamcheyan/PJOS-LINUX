@@ -1,0 +1,69 @@
+RG34XX SP: release 1.3.0 against build 1.4.0, 2026-10-14
+Device: Anbernic RG34XX SP, BaseOS target rg34xxsp, Slot frontend on TF2 (exFAT).
+Warm restarts with USB attached. Times are seconds from the hardware counter's origin;
+the first frame is the first change of the framebuffer from the boot logo.
+
+Before: release 1.3.0 as published (build v1.3.0), three restarts
+  before Linux 4.944  Linux to handoff 2.443  combined 7.388  first frame 10.064
+  before Linux 4.975  Linux to handoff 2.469  combined 7.444  first frame 10.175
+  before Linux 5.000  Linux to handoff 2.604  combined 7.604  first frame 10.370
+
+Update
+  baseos-rg34xxsp-1.4.0.bosupd (build v1.3.0-21-g542f20c) was copied to the frontend card
+  and the device restarted. The 1.3.0 updater wrote slot B and restarted the device by
+  itself, the new build replaced the boot files on its first boot and confirmed itself.
+  106 s from the restart command to 17 s of uptime on the new build. The updater also
+  listed an older 1.2.0 file on the card and skipped it as not newer.
+  boot-pair: boot0 patch verified by direct readback
+  boot-pair: continuing startup; changes take effect at the next ordinary boot
+
+First restart on the new boot files
+  before Linux 4.343  Linux to handoff 1.413  combined 5.755
+  rcupdate.rcu_expedited=1
+  [    1.500072] h700_late_usb: started 5 held-back host controllers, 0 failed
+  [    1.040755] VFS: Mounted root (ext4 filesystem) readonly on device 179:5.
+  /dev/mmcblk1p1 exfat
+  dev-input-time 1
+  The last input device registered at 0.987 s in that boot, before the one-second mark,
+  and /dev/input still had the time 1.
+
+After: build 1.4.0, four restarts
+  before Linux 4.339  Linux to handoff 1.468  combined 5.806  first frame 8.179
+  before Linux 4.341  Linux to handoff 1.437  combined 5.778  first frame 8.131
+  before Linux 4.343  Linux to handoff 1.440  combined 5.783  first frame 8.133
+  before Linux 4.335  Linux to handoff 1.469  combined 5.804  first frame 8.135
+
+Medians
+  release 1.3.0   before Linux 4.975  combined 7.444  first frame 10.175
+  build 1.4.0     before Linux 4.340  combined 5.793  first frame 8.134
+  difference      before Linux 0.635  combined 1.651  first frame 2.041
+
+The sampler of first-frame.py was in the startup script for the before and after restarts
+and was removed afterwards; both scripts were checked by hash.
+
+Uptime view with card reads (first-frame.py summary)
+Seconds are kernel uptime. Reads are in MiB up to the first frame: from the root
+partition, from the frontend card's partition, and from both cards together.
+Busy is the time the internal card spent on requests between the handoff and the first frame.
+
+build or variant         boot before Linux  handoff first frame   root frontend    all  busy ms
+build-1.4.0                 1        4.339     1.46        3.84   18.0     11.5   29.8      800
+build-1.4.0                 2        4.341     1.43        3.79   18.0     11.5   29.8      780
+build-1.4.0                 3        4.343     1.43        3.79   18.0     11.4   29.7      810
+build-1.4.0                 4        4.335     1.46        3.80   18.0     11.4   29.7      780
+release-1.3.0               1        4.944     2.44        5.12   29.7     11.4   41.4     1190
+release-1.3.0               2        4.975     2.46        5.20   29.7     11.6   41.6     1190
+release-1.3.0               3        5.000     2.60        5.37   29.7     11.7   41.7     1210
+
+medians                     n before Linux  handoff first frame   root frontend    all  busy ms
+build-1.4.0                 4        4.340     1.44        3.79   18.0     11.5   29.8      790
+release-1.3.0               3        4.975     2.46        5.20   29.7     11.6   41.6     1190
+
+Checks on build 1.4.0
+  validate-on-device.sh, its device half run over adb: result: 40 passed, 2 failed.
+  FAIL: nextui.elf running
+  FAIL: keymon running
+  Both failures ask for NextUI processes; this device runs Slot.
+  Sleep with a 25 s RTC alarm: [   17.415273] Suspended for 23.880 seconds; [   18.102152] PM: suspend exit 2026-10-14 19:01:38.687579959 UTC
+  Afterwards /usr/lib was still the squashfs mount, six USB root hubs, wlan0 and /dev/mali0
+  were present and Slot was running.

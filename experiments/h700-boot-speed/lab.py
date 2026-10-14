@@ -296,18 +296,22 @@ def restore(_args) -> None:
 
 # ---------------------------------------------------------------- measure
 
-BOOT_CRITICAL = ("/init", "/etc/init.d/rcS", "/etc/init.d/rcK", "/usr/sbin/frontend-session", "/usr/bin/busybox")
+BOOT_CRITICAL = ("/init", "/etc/init.d/rcS", "/etc/init.d/rcK", "/usr/bin/busybox")
 
 
 def boot_critical_ok() -> None:
     # init runs these directly. One without its execute bit leaves the device
     # at the boot logo with no adb and no network: this is what froze the RG SP
     # on 2026-10-13, after a copy of an adb-pushed file (mode 0666) replaced
-    # rcS and frontend-session without a chmod.
-    for path in BOOT_CRITICAL:
+    # rcS and frontend-session without a chmod. The session script's name
+    # depends on the release (nextui-session before 1.3.0), so take it from
+    # inittab.
+    sessions = sh("sed -n 's/^::respawn:\\(\\/[^ ]*\\).*/\\1/p' /etc/inittab").split()
+    require(sessions, "inittab names no session to respawn")
+    for path in BOOT_CRITICAL + tuple(sessions):
         state = sh(f"if [ -f {path} ] && [ -x {path} ] && [ -s {path} ]; then echo ok; else ls -l {path} 2>&1; fi")
         require(state == "ok", f"refusing to restart: {path} is not a non-empty executable file ({state})")
-    require(sh("sh -n /etc/init.d/rcS && sh -n /usr/sbin/frontend-session && echo ok") == "ok",
+    require(sh("sh -n /etc/init.d/rcS && " + " && ".join(f"sh -n {s}" for s in sessions) + " && echo ok") == "ok",
             "refusing to restart: a startup script does not parse")
 
 
@@ -387,7 +391,15 @@ def collect(label: str) -> dict:
     early = sh("cat /proc/uptime; dmesg -r", 20)
     while float(sh("cat /proc/uptime").split()[0]) < 14:
         time.sleep(1)
-    handoff = list(map(float, sh("cat /run/boot-clock-handoff").split()))
+    handoff = list(map(float, sh("cat /run/boot-clock-handoff 2>/dev/null").split()))
+    if not handoff:
+        # Releases before 1.3.0 have no boot-clock. Its pre-kernel figure, the
+        # hardware counter minus the kernel's raw uptime, is the same at any
+        # moment of a boot, so run the tool now and add the handoff uptime.
+        subprocess.run(ADB + ["push", str(ROOT / "work/tools/boot-clock"), "/tmp/boot-clock"], check=True, capture_output=True)
+        legacy = float(sh("cat /run/boot-frontend-exec"))
+        pre = float(sh("chmod 755 /tmp/boot-clock; /tmp/boot-clock").split()[1])
+        handoff = [legacy, pre, legacy, round(pre + legacy, 3)]
     require(len(handoff) == 4, "no boot-clock record")
     events = sh("cat /proc/bootevent")
     health = sh("test -e /dev/mali0 && echo GPU_OK; test -d /sys/class/net/wlan0 && echo WIFI_OK;"

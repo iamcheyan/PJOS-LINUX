@@ -29,6 +29,7 @@ lab.py's environment variables select the device.
 from __future__ import annotations
 
 import json
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -38,7 +39,7 @@ sys.path.insert(0, str(HERE))
 import lab  # noqa: E402
 
 RUNS = lab.WORK / "runs"
-LAST_LINE = "\n: # rcS must succeed; init proceeds to respawn frontend-session\n"
+LAST_LINE = re.compile(r"\n: # rcS must succeed; init proceeds to respawn \S+\n")
 SAMPLER = r'''
 # LAB: sample card reads and the screen for about 11 s.
 (
@@ -67,8 +68,9 @@ SAMPLER = r'''
 
 def hook(source: str, output: str) -> None:
     script = Path(source).read_text()
-    lab.require(script.count(LAST_LINE) == 1 and "LAB:" not in script, "not a plain BaseOS rcS")
-    Path(output).write_text(script.replace(LAST_LINE, SAMPLER + LAST_LINE))
+    last = LAST_LINE.findall(script)
+    lab.require(len(last) == 1 and "LAB:" not in script, "not a plain BaseOS rcS")
+    Path(output).write_text(script.replace(last[0], SAMPLER + last[0]))
 
 
 def run(rounds: int, labels: list[str]) -> None:
