@@ -15,6 +15,11 @@ backup of the device's own bytes, taken once with `backup`.
 VALUE for --dtb is u32:<number> or str:<text>; the replacement must be the
 same size as the property it replaces, so no offset in the tree moves.
 Artifacts go to $BOOT_LAB_WORK (default: work/lab in this checkout).
+
+The defaults address the RG SP this was written on. For another device set
+$BOOT_LAB_SERIAL (adb serial), $BOOT_LAB_TARGET (BaseOS target name), a
+separate $BOOT_LAB_WORK, and $BOOT_LAB_REBOOT_NEXT (a local copy of NextUI's
+reboot_next, for a device whose own card has no NextUI).
 """
 from __future__ import annotations
 
@@ -38,7 +43,8 @@ import fdt  # noqa: E402
 from kernel_gzip import align, checksum, image_id, word  # noqa: E402
 
 WORK = Path(os.environ.get("BOOT_LAB_WORK", ROOT / "work/lab")).resolve()
-SERIAL = "ac001089c89588720d2"
+SERIAL = os.environ.get("BOOT_LAB_SERIAL", "ac001089c89588720d2")
+TARGET = os.environ.get("BOOT_LAB_TARGET", "rgsp")
 ADB = ["adb", "-s", SERIAL]
 REBOOT_NEXT_SHA = "3f1b76894b84da54d2a2df14f8982f146bc43d4ab61e2e81edc1b0749e78c4b1"
 
@@ -81,9 +87,9 @@ def sh(command: str, timeout: float = 30) -> str:
 
 
 def identity() -> None:
-    out = sh("grep -c '^BASEOS_TARGET=rgsp$' /etc/baseos-release; grep -c androidboot.serialno=%s /proc/cmdline;"
-             " cat /sys/class/block/mmcblk0p4/start /sys/class/block/mmcblk0p4/size" % SERIAL).split()
-    require(out == ["1", "1", "303104", "131072"], f"not the expected RG SP layout: {out}")
+    out = sh("grep -c '^BASEOS_TARGET=%s$' /etc/baseos-release; grep -c androidboot.serialno=%s /proc/cmdline;"
+             " cat /sys/class/block/mmcblk0p4/start /sys/class/block/mmcblk0p4/size" % (TARGET, SERIAL)).split()
+    require(out == ["1", "1", "303104", "131072"], f"not the expected {TARGET} device and layout: {out}")
 
 
 def read_region(name: str) -> bytes:
@@ -131,9 +137,12 @@ def backup(_args) -> None:
         (dest / f"{name}.bin").write_bytes(blob)
         manifest[name] = {"bytes": len(blob), "sha256": sha(blob)}
         print(f"  {name}: {len(blob)} bytes {sha(blob)[:16]}")
-    sh("mkdir -p /tmp/tf1 && mount -t vfat -o ro /dev/mmcblk0p7 /tmp/tf1 && cp /tmp/tf1/.system/h700/bin/reboot_next /tmp/reboot_next;"
-       " umount /tmp/tf1; rmdir /tmp/tf1")
-    subprocess.run(ADB + ["pull", "/tmp/reboot_next", str(dest / "reboot_next")], check=True, capture_output=True)
+    if os.environ.get("BOOT_LAB_REBOOT_NEXT"):
+        (dest / "reboot_next").write_bytes(Path(os.environ["BOOT_LAB_REBOOT_NEXT"]).read_bytes())
+    else:
+        sh("mkdir -p /tmp/tf1 && mount -t vfat -o ro /dev/mmcblk0p7 /tmp/tf1 && cp /tmp/tf1/.system/h700/bin/reboot_next /tmp/reboot_next;"
+           " umount /tmp/tf1; rmdir /tmp/tf1")
+        subprocess.run(ADB + ["pull", "/tmp/reboot_next", str(dest / "reboot_next")], check=True, capture_output=True)
     require(sha((dest / "reboot_next").read_bytes()) == REBOOT_NEXT_SHA, "unexpected reboot_next")
     manifest["release"] = sh("cat /etc/baseos-release")
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
