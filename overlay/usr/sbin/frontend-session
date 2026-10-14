@@ -3,6 +3,13 @@
 # chain (launcher.service -> launcher.sh -> loadapp.sh -> dmenu_ln -> boot
 # shim). Runs NextUI, Slot, spruceOS or a generic frontend from the card.
 
+# Export release metadata for installers and every frontend entry point.
+if [ -r /etc/baseos-release ]; then
+	set -a
+	. /etc/baseos-release
+	set +a
+fi
+
 SD=/mnt/sdcard
 . /usr/share/baseos/boot-log.sh
 select_boot_log

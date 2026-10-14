@@ -150,6 +150,9 @@ Only regular files on the mounted card qualify. Spruce's runtime owns its
 startup and uses its own helpers from the extracted release; BaseOS does not
 unpack spruceOS archives. Shell entry points do not need an executable bit.
 
+The session exports every variable from `/etc/baseos-release` to installers and
+all frontend entry points, including `BASEOS`, version, build, and device metadata.
+
 Slot uses `SLOT_ROOT=/mnt/sdcard` and that working directory. Its release is
 extracted on a computer; BaseOS does not unpack Slot archives. Invoking the
 loader supports copied binaries without an executable bit. Its optional

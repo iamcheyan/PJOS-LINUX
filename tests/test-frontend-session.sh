@@ -57,6 +57,7 @@ EOF
 # passing this file to /bin/sh or executing it directly cannot pass the test.
 cat > /lib/ld-linux-aarch64.so.1 <<'EOF'
 #!/bin/sh
+env > /tmp/frontend-env.log
 [ "$#" -eq 1 ] || exit 90
 case "$1" in
 /mnt/sdcard/System/frontend)
@@ -77,12 +78,14 @@ if [ -f /tmp/slot-exit ]; then exit "$(cat /tmp/slot-exit)"; fi
 EOF
 cat > /tmp/nextui-launch <<'EOF'
 #!/bin/sh
+env > /tmp/frontend-env.log
 [ -s /run/boot-frontend-exec ] || exit 92
 [ "$(cat /tmp/update.log)" = confirm ] || exit 93
 printf 'nextui\nroot=%s\n' "${SLOT_ROOT-unset}" > /tmp/frontend.log
 EOF
 cat > /tmp/spruce-runtime <<'EOF'
 #!/bin/sh
+env > /tmp/frontend-env.log
 [ "$0" = /mnt/SDCARD/spruce/scripts/runtime.sh ] || exit 90
 [ -s /run/boot-frontend-exec ] || exit 92
 [ "$(cat /tmp/update.log)" = confirm ] || exit 93
@@ -91,6 +94,7 @@ printf 'spruce\nroot=%s\nhelper=%s\n' "${SLOT_ROOT-unset}" "$SPRUCE_HELPER" > /t
 if [ -f /tmp/spruce-exit ]; then exit "$(cat /tmp/spruce-exit)"; fi
 EOF
 cat > /tmp/generic-checks <<'EOF'
+env > /tmp/frontend-env.log
 [ -s /run/boot-frontend-exec ] || exit 92
 [ "$(cat /tmp/update.log)" = confirm ] || exit 93
 [ "$PWD" = /mnt/sdcard ] || exit 94
@@ -617,5 +621,58 @@ nextui_card
 run_session
 [ "$status" -eq 0 ] && [ "$(cat /tmp/update.log)" = confirm ]
 echo 'ok: a boot without the dynamic loader does not confirm an update trial'
+
+# Earlier cases run without a release file. When present, all launch methods
+# inherit its values, including quoted, empty and future metadata fields.
+cat > /etc/baseos-release <<'EOF'
+# Generated release metadata fixture.
+BASEOS=1
+BASEOS_PLATFORM=h700
+BASEOS_VERSION=0.1.0
+BASEOS_BUILD=test-build
+BASEOS_TARGET=rg34xxsp
+BASEOS_DEVICE=rg34xx
+BASEOS_MODEL="Anbernic RG34XX SP"
+BASEOS_MODEL_STRING=RG34xxSP
+BASEOS_PANEL_ROTATION_CCW=90
+BASEOS_WIFI=1
+BASEOS_BLUETOOTH=1
+BASEOS_FUTURE_FIELD="future value with spaces"
+BASEOS_OPTIONAL=
+EOF
+cat > /tmp/expected-release-env <<'EOF'
+BASEOS=1
+BASEOS_PLATFORM=h700
+BASEOS_VERSION=0.1.0
+BASEOS_BUILD=test-build
+BASEOS_TARGET=rg34xxsp
+BASEOS_DEVICE=rg34xx
+BASEOS_MODEL=Anbernic RG34XX SP
+BASEOS_MODEL_STRING=RG34xxSP
+BASEOS_PANEL_ROTATION_CCW=90
+BASEOS_WIFI=1
+BASEOS_BLUETOOTH=1
+BASEOS_FUTURE_FIELD=future value with spaces
+BASEOS_OPTIONAL=
+EOF
+LC_ALL=C sort /tmp/expected-release-env > /tmp/expected-release-env.sorted
+for frontend in slot nextui spruce generic-binary generic-script; do
+	reset
+	case "$frontend" in
+		slot) slot_card ;;
+		nextui) nextui_card ;;
+		spruce) spruce_card ;;
+		generic-binary) generic_card binary ;;
+		generic-script) generic_card script ;;
+	esac
+	BASEOS_TARGET=stale BASEOS_MODEL=stale run_session
+	[ "$status" -eq 0 ]
+	grep -E '^BASEOS(_[A-Z0-9_]+)?=' /tmp/frontend-env.log \
+		| LC_ALL=C sort > /tmp/actual-release-env
+	diff -u /tmp/expected-release-env.sorted /tmp/actual-release-env
+	! grep -Eq '^(SD|LAUNCH|FRONTEND|LAUNCH_TYPE|INSTALL_FAILED|CARD_MISSING|LOG)=' \
+		/tmp/frontend-env.log
+	echo "ok: $frontend inherits all release metadata without session-local variables"
+done
 echo 'frontend session tests passed'
 TEST
