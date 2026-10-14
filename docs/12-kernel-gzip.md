@@ -189,7 +189,7 @@ arithmetic, and one run with the files the build produces for the RG SP.
 controller the build holds back. `h700_late_usb.ko` builds for all eleven
 kernels, and every symbol version it imports matches each of them.
 
-The RG SP is the only device these files have booted on. There, a card running
+An RG SP and an RG40XX V have booted these files. On the RG SP, a card running
 release 1.3.0 took the update from a `.bosupd` and migrated on its first boot.
 The updater later installed the final build of this branch the same way, and
 that build passed all 39 checks of `validate-on-device.sh`. Warm
@@ -223,7 +223,14 @@ and used TF1 without waiting for the empty slot. A USB audio adapter on the
 OTG port worked as a host device after the USB change. The OTG port uses host
 controllers of its own, which the kernel starts on demand, so that test does
 not cover the five controllers the module starts. The RG SP has no known
-connector for those. The other ten models have not booted these files at all.
+connector for those.
+
+An RG40XX V with release 1.3.0 and the Slot frontend on TF2 took the same kind
+of update. It migrated on its first boot and started on the new files at the
+next restart, with all five held-back controllers running and TF2 chosen as
+the frontend card. Its time to the handoff fell from 5.93 s to 4.22 s. It also
+passed a 25-second sleep. The other nine models have not booted these files at
+all.
 [The experiment notes](../experiments/h700-boot-speed/README.md) list each
 measurement, and [boot profiling](09-boot-profiling.md) explains how the stages
 are measured.

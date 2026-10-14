@@ -62,7 +62,9 @@ The image exists because the card is slow. It reads about 20 MB/s, and a
 frontend loads most of the 19 MB GPU library before it can draw. The image
 uses LZ4 HC with 128 KiB blocks. That halves the bytes, and the processor
 unpacks LZ4 faster than the card delivers. On the RG SP NextUI drew its first
-frame about 0.7 s earlier, and the time to the handoff did not change. gzip
+frame about 0.7 s earlier, and the time to the handoff did not change. On an
+RG40XX V, Slot read 18 MiB from the root partition before its first frame
+where release 1.3.0 read 32 MiB. gzip
 and xz images are smaller, but unpacking them takes longer than the read they
 save. [The experiment notes](../experiments/h700-boot-speed/README.md) have
 the measurements.

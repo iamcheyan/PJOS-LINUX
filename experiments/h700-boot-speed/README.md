@@ -6,10 +6,12 @@ input that the vendor boot0, U-Boot or kernel already reads. None changes
 their code beyond the one U-Boot instruction that release 1.3.0 already
 patched.
 
-All timings come from one RG SP, restarted warm with USB attached and the Slot
+Most timings come from one RG SP, restarted warm with USB attached and the Slot
 frontend on TF2. The build derives the same changes for all eleven targets, and
-each target's U-Boot passes the emulation tests, but only the RG SP has booted
-them.
+each target's U-Boot passes the emulation tests. An RG40XX V later took the
+finished build as an ordinary update, and
+[its before and after timings](#rg40xx-v-release-130-against-140) are below.
+The other nine targets have not booted these files.
 
 ## Results
 
@@ -228,6 +230,40 @@ three, which is why BaseOS ships that form. The root stays ext4 and writable,
 the updater handles the same kind of slot image, and the first boot through
 the initramfs works as before. Every supported kernel has squashfs with LZ4
 and the loop driver built in, and the build checks that.
+
+## RG40XX V: release 1.3.0 against 1.4.0
+
+An RG40XX V with the published release 1.3.0 and the Slot frontend on TF2 was
+timed, updated and timed again. The update was the ordinary
+`baseos-rg40xxv-1.4.0.bosupd`, copied to the frontend card. The 1.3.0 updater
+installed it. The new build started once through the old boot files, replaced
+them and confirmed itself, and the next restart used the new ones.
+
+Medians in seconds from the hardware counter's origin, warm restarts with USB
+attached:
+
+| | Boots | Before Linux | To the handoff | To Slot's first frame |
+|---|---:|---:|---:|---:|
+| Release 1.3.0 | 3 | 3.49 | 5.93 | 7.85 |
+| Build 1.4.0 | 4 | 2.83 | 4.22 | 5.81 |
+
+The handoff comes 1.7 s earlier and Slot's first frame 2.0 s earlier. The
+runs of each build lie within 0.1 s of each other. Between the handoff and the
+first frame, Slot's start fell from 1.92 s to 1.59 s, and the reads from the
+root partition up to that frame fell from 31.7 MiB to 18.0 MiB. Slot loads the
+same 19 MB GPU library as NextUI.
+
+On the new boot files the kernel mounted the root itself, the module started
+all five held-back USB host controllers, and `rcS` waited for TF2 and chose it.
+The device slept for 25 seconds, woke on an RTC alarm and resumed with all six
+controllers, Wi-Fi, the GPU and Slot. The device half of
+`validate-on-device.sh`, run over adb, passed 39 checks. The two that failed
+ask for NextUI processes, and this device runs Slot.
+[`evidence/rg40xxv-1.3.0-to-1.4.0.txt`](evidence/rg40xxv-1.3.0-to-1.4.0.txt)
+has every boot and the migration log.
+
+Nobody has tried a cold power-on, a power-off from the frontend, a USB device
+on a host port or a 32-bit program on this device.
 
 ## Not done
 

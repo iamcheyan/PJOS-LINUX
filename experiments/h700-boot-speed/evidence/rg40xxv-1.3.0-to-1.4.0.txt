@@ -1,0 +1,76 @@
+RG40XX V: release 1.3.0 against build 1.4.0, 2026-10-14
+Device: Anbernic RG40XX V, BaseOS target rg40xxv, Slot frontend on TF2 (exFAT), no
+frontend on TF1. Warm restarts with USB attached. Times are seconds from the hardware
+counter's origin; the first frame is the first change of the framebuffer from the boot logo.
+
+Before: release 1.3.0 as published (build v1.3.0), three restarts
+  before Linux 3.494  Linux to handoff 2.416  combined 5.910  first frame 7.804
+  before Linux 3.488  Linux to handoff 2.495  combined 5.983  first frame 7.888
+  before Linux 3.483  Linux to handoff 2.450  combined 5.933  first frame 7.853
+
+Update
+  baseos-rg40xxv-1.4.0.bosupd (build v1.3.0-18-gade8715, 54,917,120 bytes) was copied to
+  the frontend card and the device restarted. The 1.3.0 updater wrote slot A and restarted.
+  The new build started through the 1.3.0 boot files and the vendor initramfs, mounted the
+  /usr/lib image, replaced the boot files and confirmed itself. From the restart command to
+  the confirmed new build took 116 s. The handoff of that boot came at 10.5 s of uptime
+  because the migration ran first.
+  boot-pair: fast pair verified by direct readback
+  boot-pair: boot0: debug 3 -> 0, checksum 163195878 -> 163195875; writing one sector
+  boot-pair: boot0 patch verified by direct readback
+  boot-pair: continuing startup; changes take effect at the next ordinary boot
+
+First restart on the new boot files
+  before Linux 2.823  Linux to handoff 1.385  combined 4.208
+  kernel arguments end in loglevel=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1
+  root mounted by the kernel and remounted by rcS; /usr/lib is the squashfs image
+  [    1.520275] h700_late_usb: started 5 held-back host controllers, 0 failed
+  six USB root hubs, GPU, Wi-Fi and Slot present; TF2 chosen as the frontend card
+
+After: build 1.4.0, four restarts
+  before Linux 2.828  Linux to handoff 1.375  combined 4.203  first frame 5.838
+  before Linux 2.831  Linux to handoff 1.400  combined 4.231  first frame 5.891
+  before Linux 2.838  Linux to handoff 1.370  combined 4.207  first frame 5.718
+  before Linux 2.836  Linux to handoff 1.401  combined 4.237  first frame 5.776
+
+Medians
+  release 1.3.0   before Linux 3.488  combined 5.933  first frame 7.853
+  build 1.4.0     before Linux 2.833  combined 4.219  first frame 5.807
+  difference      before Linux 0.655  combined 1.714  first frame 2.046
+
+The sampler of first-frame.py was in the startup script for the before and after restarts
+and was removed afterwards. Two more restarts of the unmodified 1.4.0 build:
+  before Linux 2.833  Linux to handoff 1.474  combined 4.307
+  before Linux 2.829  Linux to handoff 1.362  combined 4.191
+
+Uptime view with card reads (first-frame.py summary)
+Seconds are kernel uptime. Reads are in MiB up to the first frame: from the root
+partition, from the frontend card's partition, and from both cards together.
+Busy is the time the internal card spent on requests between the handoff and the first frame.
+
+build or variant         boot before Linux  handoff first frame   root frontend    all  busy ms
+build-1.4.0                 1        2.828     1.37        3.01   18.0      8.1   26.3      740
+build-1.4.0                 2        2.831     1.39        3.06   18.0      9.6   27.8      700
+build-1.4.0                 3        2.838     1.36        2.88   18.0      8.4   26.6      730
+build-1.4.0                 4        2.836     1.40        2.94   18.0      9.4   27.6      750
+release-1.3.0               1        3.494     2.41        4.31   31.7      8.4   40.4     1240
+release-1.3.0               2        3.488     2.49        4.40   31.0      8.1   39.3     1240
+release-1.3.0               3        3.483     2.45        4.37   32.0      9.5   41.8     1260
+
+medians                     n before Linux  handoff first frame   root frontend    all  busy ms
+build-1.4.0                 4        2.833     1.38        2.97   18.0      8.9   27.1      735
+release-1.3.0               3        3.488     2.45        4.37   31.7      8.4   40.4     1240
+
+Checks on build 1.4.0
+  validate-on-device.sh, its device half run over adb: 39 passed, 2 failed. The two are
+  "nextui.elf running" and "keymon running", which need NextUI; this device runs Slot.
+  Sleep with a 25 s RTC alarm:
+  [   47.583433] PM: early resume of devices complete after 4.249 msecs
+  [   47.633830] Suspended for 23.413 seconds
+  [   48.380415] PM: resume of devices complete after 797.281 msecs
+  [   48.408737] PM: suspend exit 2026-10-14 00:20:43.775836813 UTC
+  Afterwards /usr/lib was still the squashfs mount, six USB root hubs, wlan0 and /dev/mali0
+  were present and Slot was running.
+
+Not done on this device: a cold power-on, a normal power-off from the frontend, a USB
+device on a host port, a 32-bit program.

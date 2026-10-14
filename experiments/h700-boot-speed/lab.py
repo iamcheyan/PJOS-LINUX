@@ -341,15 +341,19 @@ def reboot() -> None:
     require(sh("chmod 755 /tmp/reboot_next; sha256sum /tmp/reboot_next").split()[0] == REBOOT_NEXT_SHA, "reboot_next differs")
     # Pause the frontend first so nothing is still writing to the card when it
     # is detached. Paused, never killed: init would respawn it.
+    # A restart that does not go through resumes the frontend: left paused, it
+    # is a frozen screen that only a manual restart clears.
     command = """cd /;
-for pid in $(ps | grep -E '[S]ystem/slot|[n]extui.elf|[m]inarch.elf' | awk '{print $1}'); do kill -STOP "$pid" 2>/dev/null; done;
-/bin/dd if=/dev/urandom of=/data/random-seed bs=512 count=1 2>/dev/null || exit 1;
+paused=$(ps | grep -E '[S]ystem/slot|[n]extui.elf|[m]inarch.elf' | awk '{print $1}');
+resume() { for pid in $paused; do kill -CONT "$pid" 2>/dev/null; done; };
+for pid in $paused; do kill -STOP "$pid" 2>/dev/null; done;
+/bin/dd if=/dev/urandom of=/data/random-seed bs=512 count=1 2>/dev/null || { resume; exit 1; };
 /bin/sync;
-if ! /bin/mount -o remount,ro /data; then echo RESTART_FAILED_DATA; exit 1; fi;
-if ! /bin/mount -o remount,ro /; then /bin/mount -o remount,rw /data; echo RESTART_FAILED_ROOT; exit 1; fi;
+if ! /bin/mount -o remount,ro /data; then resume; echo RESTART_FAILED_DATA; exit 1; fi;
+if ! /bin/mount -o remount,ro /; then /bin/mount -o remount,rw /data; resume; echo RESTART_FAILED_ROOT; exit 1; fi;
 unset SHARED_USERDATA_PATH;
 LD_LIBRARY_PATH=/usr/lib:/usr/lib/aarch64-linux-gnu /tmp/reboot_next;
-/bin/mount -o remount,rw /data; echo RESTART_FAILED"""
+/bin/mount -o remount,rw /data; resume; echo RESTART_FAILED"""
     try:
         result = raw_shell(command, 15).stdout
         require("RESTART_FAILED" not in result and "every shutdown method failed" not in result, result)
