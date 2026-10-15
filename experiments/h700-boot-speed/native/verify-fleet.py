@@ -22,10 +22,12 @@ FIRMWARE_INPUTS = [
                             "kernel-trace64.S", "check-entry64.c", "kernel-fault64.S",
                             "monitor-probe64.S", "initcall64.S", "panel-probe.h", "panel-contract.json",
                             "boot-logo-file.h", "boot-logo-pixels.h", "build-display.py", "early-display.c",
-                            "display-engine.json", "display-handoff.json", "panel-init.json", "panel-spi9.h")
-] + [HERE.parent / "fastboot/unpack.c"] + [
+                            "display-engine.json", "display-handoff.json", "panel-init.json", "panel-spi9.h",
+                            "lz4-stream.c", "lz4-stream.h")
+] + [
     HERE.parent / "spl" / name for name in
-    ("native-handoff.h", "native-logo.h", "native-display.h", "native-boot.c", "native-cache.c", "native-cache-off.S", "dram-select.c")
+    ("native-handoff.h", "native-logo.h", "native-display.h", "native-panel.h", "native-boot.c", "native-cache.c",
+     "native-cache-off.S", "dram-select.c")
 ] + [ROOT / "devices.json", ROOT / "tools/device_profile.py"]
 
 

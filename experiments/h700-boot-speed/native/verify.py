@@ -335,10 +335,10 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks):
         for name, offset in (("magic", 0), ("bytes", 4), ("hash", 8), ("reserved", 12)):
             damaged = bytearray(descriptor); damaged[offset] ^= 1
             execute("descriptor-" + name, desc=bytes(damaged))
+        # v151: the ready record already carries the hashes taken by the display program in
+        # this same loader run; the BMP and pixels are not hashed a second time.
         damaged = bytearray(bmp); damaged[-1] ^= 1
-        execute("source-hash", payload=bytes(damaged))
-        damaged = bytearray(pixels); damaged[-1] ^= 1
-        execute("pixel-hash", source_pixels=bytes(damaged))
+        execute("source-not-rehashed", payload=bytes(damaged), expected=1)
         for panel in (0, 1):
             execute("ready-" + ("boe" if panel else "old"), raw=status(panel), expected=1 if rule == 2 or panel == rule else -1)
         for tick, name in ((loaded, "loaded-end"), (ticks[0], "current-counter")):
@@ -393,6 +393,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
     if record_version == 2:
         record += struct.pack("<2I", 5, 0)
     struct.pack_into("<I", record, 196, fnv(record))
+    spl_panel, spl_pio = None, {}
     if spl:
         spl_manifest = json.loads((spl / "manifest.json").read_text())
         assert spl_manifest["native_loader"] == manifest
@@ -400,6 +401,10 @@ def verify(directory, inventory, spl=None, prepared_source=False):
         assert len(record) == record_bytes
         words = list(struct.unpack_from("<32I", record, 52))
         ram_bytes = struct.unpack_from("<Q", record, 16)[0]
+        # v151: the SPL ran the panel steps; replay its record and the pins it left.
+        if (spl / "native-panel.bin").exists():
+            spl_panel = (spl / "native-panel.bin").read_bytes()
+            spl_pio = {int(k, 16): v for k, v in json.loads((spl / "pio-state.json").read_text()).items()}
     decoder = c.Cs(c.CS_ARCH_ARM, c.CS_MODE_ARM)
     cp_instructions = {}
     for instruction in decoder.disasm(code[0x1000:sym["baseos_prepare_kernel"] - 0x4a000000], 0x4a001000):
@@ -414,6 +419,10 @@ def verify(directory, inventory, spl=None, prepared_source=False):
     m.mem_write(0x4a000000, code)
     m.mem_write(0x45000000, image)
     m.mem_write(0x4a300000, bytes(record))
+    if spl_panel:
+        m.mem_write(0x4a300280, spl_panel)
+        for address, value in spl_pio.items():
+            m.mem_write(address, struct.pack("<I", value))
     m.mem_write(sym["__bss_start"], b"\xa5" * (sym["__bss_end"] - sym["__bss_start"]))
     sid = (int(serial[:3], 16) << 20, int(serial[3:11], 16), int(serial[11:], 16))
     for offset, value in zip((0x204, 0x208, 0x20c), sid):
@@ -423,6 +432,8 @@ def verify(directory, inventory, spl=None, prepared_source=False):
     cp = {(0, 1, 0, 0): 0x30c00820, (1, 0, 0, 1): 0x02000023,
           (1, 0, 0, 0): 2 | (3 << 3) | (7 << 13)}
     events, calls, ticks, translations = [], [], [4000], []
+    if spl_panel:
+        ticks[0] = max(4000, struct.unpack_from("<Q", spl_panel, 56)[0], struct.unpack_from("<Q", record, 40)[0]) + 1000
     dirty_guard = [None]
     sram_initial = {0x03000000: 0xffffffff, 0x03000004: 0xa5ffffff}
     for address, value in sram_initial.items():
@@ -463,7 +474,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
             assert prepare_completed[0], "SRAM release preceded successful kernel preparation"
             sram_writes.append((address, value))
         else:
-            assert manifest["panel_rule"] == 2 and len(panel_writes) < len(panel_sequence), \
+            assert manifest["panel_rule"] == 2 and len(panel_writes) < len(panel_sequence) and not spl_panel, \
                 ("unexpected loader MMIO write", hex(address), hex(value))
             expected_address, mask, owned = panel_sequence[len(panel_writes)]
             before = struct.unpack("<I", machine.mem_read(address, 4))[0]
@@ -473,6 +484,10 @@ def verify(directory, inventory, spl=None, prepared_source=False):
 
     def panel_sample(machine, access, address, size, value, data):
         assert manifest["panel_rule"] == 2 and size == 4
+        if spl_panel:
+            # Cross-check read of the strap the SPL already configured and sampled.
+            panel_samples.append(ticks[0])
+            return
         assert len(panel_writes) == len(panel_sequence), "panel sampled before prerequisite GPIO writes"
         for previous, following, minimum in ((1, 2, 720000), (2, 3, 360000),
                                               (3, 4, 1200000)):
@@ -540,7 +555,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
     assert sram_writes == expected_sram_writes, sram_writes
     assert len(panel_samples) == (1 if manifest["panel_rule"] == 2 else 0)
     assert logo_calls == [0x44000000], "kernel preparation did not call the linked logo producer once"
-    assert len(panel_writes) == (len(panel_sequence) if manifest["panel_rule"] == 2 else 0)
+    assert len(panel_writes) == (len(panel_sequence) if manifest["panel_rule"] == 2 and not spl_panel else 0)
     for hook in display_hooks + prepare_hooks:
         m.hook_del(hook)
     assert not cp[0, 1, 0, 0] & 0x1005
@@ -721,6 +736,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
               "translation_checks": translations, "modeled_cp15": events, "bootargs": command,
               "panel_results": panels, "refusals": refusals, "hardware_boot": False,
               "panel_gpio_writes": panel_writes, "panel_sample_ticks": panel_samples,
+              "spl_panel_record_used": bool(spl_panel),
               "native_record_version": record_version, "native_record_bytes": record_bytes,
               "boot_reason": reasons[boot_reason], "boot_reason_source": boot_reason_source,
               "bootreason_render_cases": bootreason_cases,

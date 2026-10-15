@@ -7,16 +7,19 @@
 #include "panel-probe.h"
 #include "native-logo.h"
 #include "native-display.h"
+#include "native-panel.h"
+#include "lz4-stream.h"
 #include "boot-logo-pixels.h"
 #ifdef BASEOS_NATIVE_DIAGNOSTIC
 #include "native-trace-constants.h"
 #endif
 
-extern int custom_unpack(unsigned char *, unsigned long, const unsigned char *, unsigned long *);
 extern void native_enable_mmu(void);
 extern uint64_t native_ticks(void);
 extern void native_kernel_enter(void) __attribute__((noreturn));
-extern int baseos_early_display(const struct baseos_native_logo *logo);
+extern int baseos_early_display_start(const struct baseos_native_logo *logo);
+extern int baseos_early_display_poll(void);
+extern int baseos_early_display_finish(void);
 
 static char command_line[2048];
 static uint64_t times[7];
@@ -85,6 +88,32 @@ static void hex_digits(char *out, uint32_t word, unsigned digits)
         out[i] = "0123456789abcdef"[(word >> ((digits - 1 - i) * 4)) & 15];
 }
 
+/* The SPL ran the vendor panel power, reset and strap steps while it read the card.
+ * Use its panel only if the record proves each minimum wait finished in the past and
+ * the pins still hold the state it left; otherwise return -1 and redo the steps. */
+__attribute__((noinline)) int baseos_spl_panel(void)
+{
+    static const uint32_t wait_ms[4] = BASEOS_PANEL_WAITS_MS;
+    const struct baseos_native_panel *panel = (void *)BASEOS_NATIVE_PANEL_ADDRESS;
+    const struct baseos_native_record *record = (void *)BASEOS_NATIVE_RECORD_ADDRESS;
+    if (panel->magic != BASEOS_NATIVE_PANEL_MAGIC || panel->version != BASEOS_NATIVE_PANEL_VERSION ||
+        panel->bytes != sizeof(*panel) || panel->rule != BASEOS_PANEL_RULE || panel->panel > 1 ||
+        (BASEOS_PANEL_RULE < 2 && panel->panel != BASEOS_PANEL_RULE) ||
+        baseos_panel_hash(panel) != panel->fnv || memcmp(panel->generation, baseos_generation, 32) ||
+        panel->ticks[0] < record->started_ticks || panel->ticks[4] > native_ticks()) return -1;
+    for (unsigned i = 0; i < 4; i++)
+        if (panel->ticks[i + 1] < panel->ticks[i] ||
+            panel->ticks[i + 1] - panel->ticks[i] < (uint64_t)wait_ms[i] * BASEOS_PANEL_TICKS_PER_MS) return -1;
+    /* PI14/PI15 outputs, power on, reset released; PE6 still configured and strapped alike. */
+    if ((panel_read32(0x0300b124u) & 0xff000000u) != 0x11000000u ||
+        (panel_read32(0x0300b130u) & 0xc000u) != 0xc000u) return -1;
+    if (BASEOS_PANEL_RULE == 2 &&
+        ((panel_read32(0x0300b090u) & 0x0f000000u) != 0x06000000u ||
+         (BASEOS_PANEL_PULL_UP && (panel_read32(0x0300b0acu) & 0x3000u) != 0x1000u) ||
+         (unsigned)!(panel_read32(0x0300b0a0u) & 0x40u) != panel->panel)) return -1;
+    return (int)panel->panel;
+}
+
 __attribute__((noinline)) int baseos_native_display_state(void)
 {
     const struct baseos_native_display *display = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
@@ -95,10 +124,10 @@ __attribute__((noinline)) int baseos_native_display_state(void)
     if (logo->magic != BASEOS_NATIVE_LOGO_MAGIC || logo->reserved ||
         (BASEOS_PANEL_RULE < 2 && display->panel != BASEOS_PANEL_RULE) ||
         display->logo_bytes != logo->bytes || display->logo_fnv != logo->fnv ||
-        display->shown_ticks < record->loaded_ticks || display->shown_ticks > native_ticks() ||
-        baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_BMP_ADDRESS, display->logo_bytes) != display->logo_fnv ||
-        baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS,
-                        BASEOS_LOGO_WIDTH * BASEOS_LOGO_HEIGHT * 4u) != display->pixel_fnv) return -1;
+        display->shown_ticks < record->loaded_ticks || display->shown_ticks > native_ticks()) return -1;
+    /* The display program hashed the BMP against the SPL descriptor and the scanned-out
+     * pixels into this record moments ago, in this same run; nothing writes either
+     * buffer since, so they are not hashed again here. */
     return 1;
 }
 
@@ -115,8 +144,8 @@ static int make_command_line(const unsigned char *image)
     int early = baseos_native_display_state();
     if (early < 0) return -1;
     const struct baseos_native_display *display = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
-    int detected = early ? (int)display->panel :
-                   baseos_panel_probe(BASEOS_PANEL_RULE, BASEOS_PANEL_PULL_UP, &panel_io);
+    int detected = early ? (int)display->panel : baseos_spl_panel();
+    if (detected < 0) detected = baseos_panel_probe(BASEOS_PANEL_RULE, BASEOS_PANEL_PULL_UP, &panel_io);
     if (detected < 0) return -1;
     const char *panel = detected ? "boe" : "old";
     /* Android v2 has two separately bounded command-line fields. */
@@ -213,14 +242,27 @@ int baseos_prepare_kernel(void)
         offset != record->image_bytes) return 3;
     /* Draw where vendor U-Boot did: after BL31, from DRAM, with SRAM C unused. */
     const struct baseos_native_logo *logo = (void *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS;
-    if (logo->magic == BASEOS_NATIVE_LOGO_MAGIC && baseos_early_display(logo) == -1) return 14;
+    int display = 0;
+    if (logo->magic == BASEOS_NATIVE_LOGO_MAGIC) {
+        int panel = baseos_early_display_start(logo);
+        if (panel == -1) return 14;
+        display = panel >= 0;
+    }
     times[0] = record->started_ticks;
     times[1] = record->read_started_ticks;
     times[2] = record->loaded_ticks;
     times[3] = native_ticks();
     checkpoint(44);
-    unsigned long output_bytes = kernel_bytes;
-    if (custom_unpack((void *)0x40080000, 0x01f80000, image + kernel, &output_bytes)) return 4;
+    /* Decode in slices; the panel and TCON waits run out in between. */
+    struct baseos_lz4 lz4;
+    if (baseos_lz4_begin(&lz4, (void *)0x40080000, 0x01f80000, image + kernel, kernel_bytes)) return 4;
+    int step;
+    do {
+        step = baseos_lz4_step(&lz4);
+        if (display && baseos_early_display_poll() < 0) return 14;
+    } while (step == 1);
+    if (step) return 4;
+    unsigned long output_bytes = (unsigned long)(lz4.limit - lz4.dst);
 #ifdef BASEOS_NATIVE_DIAGNOSTIC
     if (output_bytes != BASEOS_KERNEL_BYTES ||
         byte_hash((void *)0x40080000, output_bytes) != BASEOS_KERNEL_FNV) return 12;
@@ -238,6 +280,9 @@ int baseos_prepare_kernel(void)
     int memory = fdt_path_offset(tree, "/memory@40000000");
     fdt64_t memory_reg[2] = {cpu_to_fdt64(0x40000000), cpu_to_fdt64(record->ram_bytes)};
     if (fdt_setprop(tree, memory, "reg", memory_reg, sizeof(memory_reg))) return 8;
+    /* Copying the initrd and opening the tree also fit in the display waits; the command
+     * line needs the lit display's record. */
+    if (display && baseos_early_display_finish() < 0) return 14;
     int chosen = fdt_path_offset(tree, "/chosen");
     if (make_command_line(image) ||
         fdt_setprop_string(tree, chosen, "bootargs", command_line) ||
