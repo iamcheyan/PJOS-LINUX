@@ -201,20 +201,13 @@ def verify_logo(machine, sym, manifest, tree, directory):
                 hardware_boot=False, kernel_decode_repeated=False)
 
 
-def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof_directory=None):
+def verify_display(machine, sym, manifest, tree, directory, record, ticks):
     """Exercise the linked ready-state boundary, cached panel, and warm FDT producer."""
     assert "baseos_native_display_state" in sym and "make_command_line" in sym
     root = Path(__file__).resolve().parents[3]
     width, height = manifest["boot_logo"]["width"], manifest["boot_logo"]["height"]
-    proof_directory = proof_directory or directory / "early-display/proof"
-    proof_path = proof_directory / "verification.json"
-    fixture_path = proof_directory / "display-source.bmp" if proof_path.is_file() else root / "work" / manifest["target"] / "bootlogo.bmp"
-    if proof_path.is_file() and not fixture_path.is_file():
-        spec = importlib.util.spec_from_file_location("display_source_reader", Path(__file__).with_name("verify-early-display.py"))
-        reader = importlib.util.module_from_spec(spec); spec.loader.exec_module(reader)
-        fixture_path, bmp, _ = reader.prepared_bmp(manifest["target"], width, height)
-    else:
-        bmp = fixture_path.read_bytes()
+    fixture_path = root / "work" / manifest["target"] / "bootlogo.bmp"
+    bmp = fixture_path.read_bytes()
     pixels = logo_pixels(bmp, width, height)
     display_address, descriptor_address = 0x4a300300, 0x4a300200
     bmp_address, pixel_address, tree_address, stop = 0x4b400000, 0x4b000000, 0x4a400000, 0x4a0d0000
@@ -222,8 +215,9 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof
     generation = bytes.fromhex(manifest["generation"])
     rule = manifest["panel_rule"]
     read_started, loaded = struct.unpack_from("<2Q", record, 32)
-    assert 0 < read_started <= loaded
-    shown = (read_started + loaded) // 2
+    assert 0 < read_started <= loaded < ticks[0]
+    # The A32 loader draws after the SPL load and before its own readiness check.
+    shown = loaded + 1
     policy = manifest["early_display"]["handoff"]
     assert set(policy) == {"boot_disp", "boot_disp1", "boot_disp2"}
     assert policy == {"boot_disp": 0x100, "boot_disp1": 0x01040000, "boot_disp2": 4}
@@ -240,24 +234,6 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof
 
     base_panel = 1 if rule == 2 else rule
     base = status(base_panel)
-    actual_helper = None
-    if proof_path.is_file():
-        proof = json.loads(proof_path.read_text())
-        assert proof["passed"] and proof["helper_sha256"] == manifest["early_display_helper"]["sha256"]
-        assert proof["verifier_sha256"] == hashlib.sha256(Path(__file__).with_name("verify-early-display.py").read_bytes()).hexdigest()
-        assert proof["fixture_sha256"] == hashlib.sha256(bmp).hexdigest()
-        assert proof["display_record_file"] == "display-record.bin" and proof["display_pixels_file"] == "display-pixels.bin"
-        raw = (proof_directory / proof["display_record_file"]).read_bytes()
-        actual_pixels = (proof_directory / proof["display_pixels_file"]).read_bytes()
-        assert len(raw) == 80 and actual_pixels == pixels
-        assert hashlib.sha256(raw).hexdigest() == proof["display_record_sha256"]
-        assert hashlib.sha256(actual_pixels).hexdigest() == proof["display_pixels_sha256"]
-        assert raw[32:64] == generation
-        actual_shown = struct.unpack_from("<Q", raw, 64)[0]
-        assert actual_shown == proof["shown_ticks"] and actual_shown > 1000
-        actual_helper = dict(record=raw, shown=actual_shown, proof_sha256=hashlib.sha256(proof_path.read_bytes()).hexdigest(),
-                             record_sha256=proof["display_record_sha256"], pixels_sha256=proof["display_pixels_sha256"],
-                             helper_sha256=proof["helper_sha256"], verifier_sha256=proof["verifier_sha256"])
     cases = []
     accesses = []
     sid_reads = []
@@ -341,42 +317,6 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof
         assert not accesses
         return actual_tree
 
-    def whole_main(raw, native_record):
-        machine.mem_write(0x4a300000, bytes(native_record))
-        machine.mem_write(display_address, raw)
-        machine.mem_write(descriptor_address, descriptor)
-        machine.mem_write(bmp_address, bmp)
-        machine.mem_write(pixel_address, pixels)
-        skipped = []
-        kernel_bytes = (directory / "kernel.bin").stat().st_size
-        def decoded(m, pc, size, data):
-            assert m.reg_read(a.UC_ARM_REG_R0) == 0x40080000
-            assert bytes(m.mem_read(0x40080000, kernel_bytes)) == (directory / "kernel.bin").read_bytes()
-            m.mem_write(m.reg_read(a.UC_ARM_REG_R3), struct.pack("<I", kernel_bytes))
-            skipped.append(True)
-            m.reg_write(a.UC_ARM_REG_R0, 0)
-            m.reg_write(a.UC_ARM_REG_PC, m.reg_read(a.UC_ARM_REG_LR))
-        hook = machine.hook_add(u.UC_HOOK_CODE, decoded, begin=sym["custom_unpack"], end=sym["custom_unpack"])
-        try: assert call("baseos_prepare_kernel") == 0
-        finally: machine.hook_del(hook)
-        assert skipped == [True]
-        output = bytes(machine.mem_read(0x44000000, len(tree)))
-        props = {(p, n): v for p, n, _, v in fdt.walk(output)}
-        assert props["/chosen", "baseos,boot-display"] == raw
-        assert props["/chosen", "baseos,native-boot"] == generation
-        stamps = struct.unpack(">7Q", props["/chosen", "baseos,native-timing"])
-        shown = struct.unpack_from("<Q", raw, 64)[0]
-        assert list(stamps) == sorted(stamps) and stamps[1] <= shown <= stamps[2]
-        panel = struct.unpack_from("<I", raw, 16)[0]
-        assert [v for v in props["/chosen", "bootargs"].split() if v.startswith(b"lcd_type=")] == [b"lcd_type=" + (b"boe" if panel else b"old")]
-        for name, value in policy.items():
-            assert props["/soc@03000000/disp@01000000", name] == struct.pack(">I", value)
-        assert bytes(machine.mem_read(pixel_address, len(pixels))) == pixels and not accesses
-        cases.append(dict(name="whole-main-ready", return_value=1, final_timing_property_valid=True,
-                          actual_prepare_kernel_executed=True, previously_decoded_kernel_reused=True,
-                          no_panel_probe_or_reset=True, panel_display_mmio_accesses=0))
-        return output
-
     try:
         execute("all-zero-cold", raw=bytes(80), expected=0)
         invalid = bytearray(80); invalid[-1] = 1
@@ -385,7 +325,7 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof
                 ("bytes", 8, "<I", 79), ("panel", 16, "<I", 2), ("logo-short", 20, "<I", 53),
                 ("logo-large", 20, "<I", 0x400001), ("reserved0", 72, "<I", 1),
                 ("reserved1", 76, "<I", 1), ("shown-zero", 64, "<Q", 0),
-                ("shown-before-read", 64, "<Q", read_started - 1), ("shown-after-load", 64, "<Q", loaded + 1)):
+                ("shown-before-load", 64, "<Q", loaded - 1), ("shown-after-now", 64, "<Q", 1 << 62)):
             damaged = bytearray(base); struct.pack_into(fmt, damaged, offset, value)
             execute("status-" + name, raw=checksum(damaged))
         damaged = bytearray(base); damaged[12] ^= 1
@@ -401,32 +341,9 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof
         execute("pixel-hash", source_pixels=bytes(damaged))
         for panel in (0, 1):
             execute("ready-" + ("boe" if panel else "old"), raw=status(panel), expected=1 if rule == 2 or panel == rule else -1)
-        for tick, name in ((read_started, "read-start"), (loaded, "loaded-end")):
+        for tick, name in ((loaded, "loaded-end"), (ticks[0], "current-counter")):
             execute("ready-stamp-" + name, raw=status(base_panel, tick), expected=1)
-        saved_status = base
         execute("ready-export", expected=1)
-        output_tree = whole_main(base, record)
-        interval_mode = "original native fixture interval"
-        if actual_helper:
-            shown = actual_helper["shown"]
-            actual_record = bytearray(record)
-            struct.pack_into("<3Q", actual_record, 24, shown - 1001, shown - 1000, shown + 1000)
-            struct.pack_into("<I", actual_record, 196, 0); struct.pack_into("<I", actual_record, 196, fnv(actual_record))
-            actual_tree = bytearray(tree)
-            fdt.set_same_size(actual_tree, "/chosen", "baseos,native-timing",
-                              struct.pack(">7Q", shown - 1001, shown - 1000, shown + 1000,
-                                          shown + 2000, shown + 3000, shown + 4000, shown + 5000))
-            actual_tree = bytes(actual_tree)
-            saved_status = actual_helper["record"]
-            execute("actual-helper-ready-export", raw=saved_status, expected=1,
-                    native_record=actual_record, input_tree=actual_tree)
-            ticks[0] = max(ticks[0], shown + 2000)
-            output_tree = whole_main(saved_status, actual_record)
-            interval_mode = "modeled native interval around unchanged actual helper shown_ticks"
-        (directory / "verified-early-logo-kernel.dtb").write_bytes(output_tree)
-        (directory / "early-logo-pixels.bin").write_bytes(pixels)
-        (directory / "early-display-record.bin").write_bytes(saved_status)
-        (directory / "early-logo-source.bmp").write_bytes(bmp)
     finally:
         for hook in hooks: machine.hook_del(hook)
         machine.mem_write(display_address, bytes(80))
@@ -434,15 +351,12 @@ def verify_display(machine, sym, manifest, tree, directory, record, ticks, proof
         machine.mem_write(0x4a300000, bytes(record))
     return dict(passed=True, linked_symbol="baseos_native_display_state", linked_symbol_address=hex(sym["baseos_native_display_state"]),
                 cases=cases, kernel_decode_repeated=False, no_panel_probe_or_reset=True, panel_display_mmio_accesses=0,
-                sid_read_count=len(sid_reads),
-                actual_helper_input=actual_helper is not None, helper_proof={k: v for k, v in actual_helper.items() if k != "record"} if actual_helper else None,
-                native_interval_mode=interval_mode, fixture_sha256=hashlib.sha256(bmp).hexdigest(),
-                fixture_path=str(fixture_path.resolve()),
-                prepared_fdt_sha256=hashlib.sha256(output_tree).hexdigest(), pixels_sha256=hashlib.sha256(pixels).hexdigest(),
-                display_record_sha256=hashlib.sha256(saved_status).hexdigest(), hardware_boot=False)
+                sid_read_count=len(sid_reads), fixture_sha256=hashlib.sha256(bmp).hexdigest(),
+                fixture_path=str(fixture_path.resolve()), pixels_sha256=hashlib.sha256(pixels).hexdigest(),
+                hardware_boot=False)
 
 
-def verify(directory, inventory, spl=None, prepared_source=False, early_display_proof=None):
+def verify(directory, inventory, spl=None, prepared_source=False):
     manifest = json.loads((directory / "manifest.json").read_text())
     inventory_manifest = json.loads((inventory / "inventory.json").read_text())
     serial = "1c00103dc2840671ed3" if prepared_source else inventory_manifest["serial"]
@@ -799,7 +713,7 @@ def verify(directory, inventory, spl=None, prepared_source=False, early_display_
     (directory / "verified-kernel.dtb").write_bytes(verified_tree)
     logo = verify_logo(m, sym, manifest, verified_tree, directory)
     logo["missing_logo_main_call_verified"] = True
-    early_display = verify_display(m, sym, manifest, verified_tree, directory, record, ticks, early_display_proof) if "early_display_helper" in manifest else None
+    early_display = verify_display(m, sym, manifest, verified_tree, directory, record, ticks)
     report = {"passed": True, "loader_sha256": manifest["loader_sha256"],
               "image_sha256": manifest["image_sha256"], "kernel_sha256": hashlib.sha256(expected_kernel).hexdigest(),
               "kernel_bytes_exact": len(expected_kernel), "final_call_r0_r3": list(map(hex, calls[0])),
@@ -842,6 +756,5 @@ if __name__ == "__main__":
     parser.add_argument("--spl", type=Path)
     parser.add_argument("--prepared-source", action="store_true",
                         help="use the prepared source FDT only; do not claim a live-device comparison")
-    parser.add_argument("--early-display-proof", type=Path, help="actual A64 helper proof directory; default NATIVE/early-display/proof")
     args = parser.parse_args()
-    verify(args.directory, args.inventory, args.spl, args.prepared_source, args.early_display_proof)
+    verify(args.directory, args.inventory, args.spl, args.prepared_source)

@@ -22,7 +22,6 @@ extern void sunxi_board_init(void);
 extern void baseos_checkpoint(struct blk_desc *, u32);
 extern int baseos_native_cache_on(void);
 extern void baseos_native_cache_off(void);
-extern void baseos_native_publish_code(unsigned long, unsigned int);
 
 int baseos_native_bootreason(unsigned int *reason, unsigned int *source)
 {
@@ -126,16 +125,6 @@ int baseos_vendor_handoff(struct blk_desc *card, u32 *result, const u8 *stock)
         const struct baseos_firmware_extent *item = &baseos_firmware_extents[i];
         if (item->offset > BASEOS_FIRMWARE_BYTES || item->bytes > BASEOS_FIRMWARE_BYTES - item->offset) return -1;
         memcpy((void *)(ulong)item->destination, package + item->offset, item->bytes);
-    }
-    const struct baseos_native_logo *logo = (void *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS;
-    if (logo->magic == BASEOS_NATIVE_LOGO_MAGIC) {
-        baseos_native_publish_code(BASEOS_NATIVE_DISPLAY_HELPER_ADDRESS, BASEOS_EARLY_DISPLAY_BYTES);
-        int (*draw)(const struct baseos_native_logo *) = (void *)BASEOS_NATIVE_DISPLAY_HELPER_ADDRESS;
-        int outcome = draw(logo);
-        int ready = baseos_display_valid(display, baseos_generation);
-        if ((outcome == -2 && ready != 0) || (outcome != -2 &&
-            (outcome < 0 || outcome > 1 || ready != 1 || display->panel != (unsigned)outcome ||
-             display->logo_bytes != logo->bytes || display->logo_fnv != logo->fnv))) return -1;
     }
     if (blk_dread(card, BASEOS_IMAGE_SECTOR, BASEOS_IMAGE_BYTES / 512,
                   (void *)BASEOS_NATIVE_IMAGE_ADDRESS) != BASEOS_IMAGE_BYTES / 512 ||

@@ -105,10 +105,9 @@ def model_policy(target, inventory):
             "bootreason_policy": "vendor PMIC reg20/reg00 classifier and unknown-only regf0 fallback",
             "bootreason_values": ["button", "irq", "usb", "charger", "battery", "unknow"],
             "bootreason_sources": ["unknown", "poweron", "pmu-f0-fallback"]}
-    policy["early_display"] = {"helper_address": 0x4a500000, "helper_capacity": 0x40000,
-        "record_address": 0x4a300300, "record_bytes": 80,
+    policy["early_display"] = {"runs_in": "a32-loader", "record_address": 0x4a300300, "record_bytes": 80,
         "vendor_dtb_sha256": sha(toc_items(package)["dtb"]),
-        "first_frame": "native before Linux image read; panel/SPI/DE/TCON initialized",
+        "first_frame": "A32 loader after BL31, before kernel unpack; panel/SPI/DE/TCON initialized",
         "kernel_handoff": "vendor warm display metadata only after validated ready record"}
     display_spec = importlib.util.spec_from_file_location("native_display_builder", HERE / "build-display.py")
     display = importlib.util.module_from_spec(display_spec)
@@ -300,8 +299,7 @@ char *strrchr(const char *, int);
     display_spec = importlib.util.spec_from_file_location("native_display_builder", HERE / "build-display.py")
     display = importlib.util.module_from_spec(display_spec)
     display_spec.loader.exec_module(display)
-    display_payload, display_manifest = display.build(output / "early-display", target, policy,
-                                                    generation, clang, lld, linker_env)
+    display_manifest = display.build(output, target, policy, generation)
     if kernel_probes:
         subprocess.run([clang, "--target=aarch64-none-elf", "-c", str(HERE / "kernel-trace64.S"),
                         "-o", str(output / "trampoline.o")], check=True)
@@ -318,7 +316,7 @@ char *strrchr(const char *, int);
         trampoline = (output / "trampoline.bin").read_bytes()
         assert 0 < len(trampoline) <= 1024 and len(trampoline) % 4 == 0
         (output / "native-trampoline.inc").write_text(".word " + ",".join(hex(value) for value in struct.unpack(f"<{len(trampoline)//4}I", trampoline)) + "\n")
-    sources = inputs[:4] + [lib / name for name in ("fdt.c", "fdt_ro.c", "fdt_rw.c", "fdt_wip.c", "fdt_check.c")]
+    sources = inputs[:4] + [HERE / "early-display.c"] + [lib / name for name in ("fdt.c", "fdt_ro.c", "fdt_rw.c", "fdt_wip.c", "fdt_check.c")]
     diagnostic_flags = ["-DBASEOS_NATIVE_DIAGNOSTIC=1"] if kernel_probes else []
     objects = []
     for source in sources:
@@ -355,8 +353,7 @@ SECTIONS {
     for name, destination, payload in (("monitor", 0x48000000, toc["monitor"]),
                                         ("dtbo", 0x4a100000, toc["dtbo"]),
                                         ("dtb", 0x4a200000, toc["dtb"]),
-                                        ("loader", 0x4a000000, bytes(blob)),
-                                        ("early-display", 0x4a500000, display_payload)):
+                                        ("loader", 0x4a000000, bytes(blob))):
         limit = 0x40000 if name == "monitor" else 0x100000
         assert len(payload) <= limit
         regions.append({"name": name, "offset": len(firmware), "bytes": len(payload), "destination": destination})
@@ -367,7 +364,6 @@ SECTIONS {
     with (output / "native-generated.h").open("a") as stream:
         stream.write(f"\n#define BASEOS_FIRMWARE_BYTES {len(firmware)}u\n"
                      f"#define BASEOS_FIRMWARE_FNV 0x{fnv(firmware):08x}u\n"
-                     f"#define BASEOS_EARLY_DISPLAY_BYTES {len(display_payload)}u\n"
                      "struct baseos_firmware_extent { unsigned int offset, bytes, destination; };\n"
                      f"static const struct baseos_firmware_extent baseos_firmware_extents[{len(regions)}] = {{\n" +
                      "".join(f"  {{{item['offset']}u, {item['bytes']}u, 0x{item['destination']:x}u}},\n" for item in regions) + "};\n")
@@ -375,7 +371,7 @@ SECTIONS {
                   image_fnv=fnv(image), loader_sha256=sha(blob), loader_bytes=len(blob), loader_fnv=fnv(blob),
                   firmware_sha256=sha(firmware), firmware_bytes=len(firmware), firmware_fnv=fnv(firmware),
                   firmware_regions=regions, kernel_sha256=sha(kernel), libfdt_archive_sha256=PIN,
-                  early_display_helper=display_manifest,
+                  early_display_tables=display_manifest,
                   native_diagnostic=kernel_probes,
                   entry_checksum_witness=kernel_probes,
                   kernel_exception_witness=kernel_probes,

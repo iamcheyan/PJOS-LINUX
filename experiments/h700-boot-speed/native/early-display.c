@@ -7,6 +7,9 @@
 #include "panel-spi9.h"
 #include "early-display-generated.h"
 
+extern uint64_t native_ticks(void);
+extern void release_display_sram(void);
+
 enum display_operation_kind { DISPLAY_UPDATE, DISPLAY_WRITE, DISPLAY_FRAMEBUFFER,
                               DISPLAY_DELAY_US, DISPLAY_POLL, DISPLAY_BARRIER };
 struct display_operation {
@@ -34,18 +37,11 @@ static void barrier(void *context)
     asm volatile("dmb sy" ::: "memory");
 }
 
-static uint64_t ticks(void)
-{
-    uint64_t value;
-    asm volatile("mrs %0, cntpct_el0" : "=r"(value));
-    return value;
-}
-
 static __attribute__((noinline)) int wait_us(uint32_t microseconds)
 {
-    uint64_t start = ticks();
+    uint64_t start = native_ticks();
     for (unsigned remaining = 100000000u; remaining; --remaining)
-        if (ticks() - start >= (uint64_t)microseconds * 24u) return 0;
+        if (native_ticks() - start >= (uint64_t)microseconds * 24u) return 0;
     return -1;
 }
 
@@ -66,10 +62,10 @@ static __attribute__((noinline)) int apply(const struct display_operation *opera
         } else if (op->kind == DISPLAY_DELAY_US) {
             if (wait_us(op->set_bits)) return -1;
         } else if (op->kind == DISPLAY_POLL) {
-            uint64_t start = ticks();
+            uint64_t start = native_ticks();
             unsigned remaining = 100000000u;
             while ((read32(NULL, op->address) & op->clear_mask) != op->set_bits) {
-                if (!--remaining || ticks() - start >= (uint64_t)op->timeout_us * 24u) return -1;
+                if (!--remaining || native_ticks() - start >= (uint64_t)op->timeout_us * 24u) return -1;
             }
         } else if (op->kind == DISPLAY_UPDATE) {
             update(op->address, op->clear_mask, op->set_bits);
@@ -116,27 +112,27 @@ static int initialize_panel(unsigned panel)
 
 static void clean_pixels(size_t bytes)
 {
-    uint64_t ctr;
-    asm volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    uint32_t ctr;
+    asm volatile("mrc p15, 0, %0, c0, c0, 1" : "=r"(ctr));
     uintptr_t line = (uintptr_t)4 << ((ctr >> 16) & 15);
     uintptr_t start = BASEOS_NATIVE_LOGO_PIXEL_ADDRESS;
     for (uintptr_t address = start & ~(line - 1); address < start + bytes; address += line)
-        asm volatile("dc cvac, %0" :: "r"(address) : "memory");
+        asm volatile("mcr p15, 0, %0, c7, c10, 1" :: "r"(address) : "memory");
     asm volatile("dsb sy" ::: "memory");
 }
 
 static int scanline_advances(void)
 {
     uint32_t first = (read32(NULL, 0x065110fcu) >> 16) & 0xfffu;
-    uint64_t start = ticks();
+    uint64_t start = native_ticks();
     for (unsigned remaining = 100000000u; remaining; --remaining) {
         if (((read32(NULL, 0x065110fcu) >> 16) & 0xfffu) != first) return 0;
-        if (ticks() - start >= 2400000u) return -1;
+        if (native_ticks() - start >= 2400000u) return -1;
     }
     return -1;
 }
 
-__attribute__((section(".text.entry"))) int baseos_early_display(const struct baseos_native_logo *logo)
+int baseos_early_display(const struct baseos_native_logo *logo)
 {
     struct baseos_native_display *record = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
     memset(record, 0, sizeof(*record));
@@ -148,10 +144,7 @@ __attribute__((section(".text.entry"))) int baseos_early_display(const struct ba
         !baseos_logo_pixels(bmp, logo->bytes, BASEOS_LOGO_WIDTH, BASEOS_LOGO_HEIGHT,
                             (void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, BASEOS_NATIVE_LOGO_CAPACITY)) return -2;
     clean_pixels(pixel_bytes);
-    /* Release the SRAM bridge exactly as stock does before display ownership. */
-    update(0x03000000u, 0x7fffffffu, 0);
-    update(0x03000004u, 0x01000000u, 0);
-    asm volatile("dsb sy" ::: "memory");
+    release_display_sram();
     if (apply(baseos_display_prepare, sizeof(baseos_display_prepare) / sizeof(*baseos_display_prepare))) return -1;
     int panel = prepare_panel();
     if (panel < 0 || initialize_panel((unsigned)panel) || wait_us(50000) ||
@@ -159,7 +152,8 @@ __attribute__((section(".text.entry"))) int baseos_early_display(const struct ba
         apply(baseos_display_enable, sizeof(baseos_display_enable) / sizeof(*baseos_display_enable)) ||
         wait_us(100000) || scanline_advances() || apply(baseos_display_backlight,
                               sizeof(baseos_display_backlight) / sizeof(*baseos_display_backlight))) return -1;
-    struct baseos_native_display next = {0};
+    struct baseos_native_display next;
+    memset(&next, 0, sizeof(next));
     next.magic = BASEOS_NATIVE_DISPLAY_MAGIC;
     next.version = 1;
     next.bytes = sizeof(next);
@@ -168,7 +162,7 @@ __attribute__((section(".text.entry"))) int baseos_early_display(const struct ba
     next.logo_fnv = logo->fnv;
     next.pixel_fnv = baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, (unsigned)pixel_bytes);
     memcpy(next.generation, baseos_generation, sizeof(next.generation));
-    next.shown_ticks = ticks();
+    next.shown_ticks = native_ticks();
     next.fnv = baseos_display_hash(&next);
     memcpy((unsigned char *)record + 4, (const unsigned char *)&next + 4, sizeof(next) - 4);
     asm volatile("dsb sy" ::: "memory");

@@ -16,6 +16,7 @@ extern int custom_unpack(unsigned char *, unsigned long, const unsigned char *, 
 extern void native_enable_mmu(void);
 extern uint64_t native_ticks(void);
 extern void native_kernel_enter(void) __attribute__((noreturn));
+extern int baseos_early_display(const struct baseos_native_logo *logo);
 
 static char command_line[2048];
 static uint64_t times[7];
@@ -94,7 +95,7 @@ __attribute__((noinline)) int baseos_native_display_state(void)
     if (logo->magic != BASEOS_NATIVE_LOGO_MAGIC || logo->reserved ||
         (BASEOS_PANEL_RULE < 2 && display->panel != BASEOS_PANEL_RULE) ||
         display->logo_bytes != logo->bytes || display->logo_fnv != logo->fnv ||
-        display->shown_ticks < record->read_started_ticks || display->shown_ticks > record->loaded_ticks ||
+        display->shown_ticks < record->loaded_ticks || display->shown_ticks > native_ticks() ||
         baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_BMP_ADDRESS, display->logo_bytes) != display->logo_fnv ||
         baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS,
                         BASEOS_LOGO_WIDTH * BASEOS_LOGO_HEIGHT * 4u) != display->pixel_fnv) return -1;
@@ -155,11 +156,12 @@ __attribute__((noinline)) int baseos_prepare_logo(void *tree)
     if (early < 0) return -1;
     const struct baseos_native_logo *logo = (void *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS;
     const unsigned char *bmp = (void *)BASEOS_NATIVE_LOGO_BMP_ADDRESS;
-    if (logo->magic != BASEOS_NATIVE_LOGO_MAGIC || logo->reserved ||
+    /* A ready record already authenticated the BMP and the scanned-out pixels. */
+    if (!early && (logo->magic != BASEOS_NATIVE_LOGO_MAGIC || logo->reserved ||
         !logo->bytes || logo->bytes > BASEOS_NATIVE_LOGO_CAPACITY ||
         baseos_logo_hash(bmp, logo->bytes) != logo->fnv ||
         !baseos_logo_pixels(bmp, logo->bytes, BASEOS_LOGO_WIDTH, BASEOS_LOGO_HEIGHT,
-                            (void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, BASEOS_NATIVE_LOGO_CAPACITY)) return early ? -1 : 0;
+                            (void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, BASEOS_NATIVE_LOGO_CAPACITY))) return 0;
     char description[72];
     const uint32_t fields[] = {BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, BASEOS_LOGO_WIDTH,
         BASEOS_LOGO_HEIGHT, 32, BASEOS_LOGO_WIDTH * 4, 0, 0, BASEOS_LOGO_WIDTH, BASEOS_LOGO_HEIGHT};
@@ -209,6 +211,9 @@ int baseos_prepare_kernel(void)
         checked_extent(&offset, initrd_bytes, record->image_bytes, &initrd) ||
         checked_extent(&offset, dtb_bytes, record->image_bytes, &dtb) ||
         offset != record->image_bytes) return 3;
+    /* Draw where vendor U-Boot did: after BL31, from DRAM, with SRAM C unused. */
+    const struct baseos_native_logo *logo = (void *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS;
+    if (logo->magic == BASEOS_NATIVE_LOGO_MAGIC && baseos_early_display(logo) == -1) return 14;
     times[0] = record->started_ticks;
     times[1] = record->read_started_ticks;
     times[2] = record->loaded_ticks;
@@ -259,7 +264,7 @@ int baseos_prepare_kernel(void)
     return 0;
 }
 
-static __attribute__((noinline)) void release_display_sram(void)
+__attribute__((noinline)) void release_display_sram(void)
 {
     volatile uint32_t *system = (void *)0x03000000;
     system[0] &= 1u << 31;

@@ -1,5 +1,31 @@
 # H700 boot project: handoff at user stop, 2026-10-15
 
+## Update: boot splash fixed for 1.5.0 (later on 2026-10-15)
+
+The logo-v3 failure was the SPL itself, not a missing vendor register. The A64
+helper released SYSCTRL 0x03000000/0x03000004 bit 24, which maps SRAM C
+(0x28000..) to the display engine. The SPL still executes and stores data there
+(`mmc_bread` 0x281f0, `sunxi_mmc`, rodata to 0x2b408, BSS 0x30000, stack 0x52a00,
+called from `board_init_f`). The next card read crashed, so the watchdog chose
+stock. The emulator never modelled SRAM C ownership.
+
+The display program now runs in the A32 loader, in vendor U-Boot's position:
+after BL31, from DRAM, before the kernel unpack. The SPL only reads the BMP.
+Build, proofs and every hash are in `work/h700-loader/v150/` (`IMPLEMENTATION.md`,
+`decisions.md`, `TOOLING.md`). No PMIC write is needed (`v150/pmic/REPORT.md`).
+
+RG40XX V passed noack, two native cycles and sleep with the splash, generation
+`4e756375…`. The logo is lit 1.51 s after the counter starts; stock lit it at
+about 3.4 s. Kernel entry moves from 1.37 s to 1.74 s, mostly the vendor's
+panel waits. RG34XX SP drew the splash, but its noack failed `FAT_healthy`. The
+card's dirty flag was already set before this work (`old-native-normalize`
+dmesg) and Linux 4.9 never clears it; `fsck.fat -n` reports nothing else.
+
+Step 2 measurement: the card reads at 23.5–23.8 MB/s both in the SPL and in
+Linux (50 MHz high-speed, 3.3 V only). Reading every library cold takes 1.33 s,
+and preloading the 28.5 MB payload would cost about 1.2 s before Linux. The
+whole-library preload is therefore not expected to save time.
+
 Read this checkpoint before the older `HANDOFF.md`. The user stopped this run
 and assigned the rest of the project to another agent. Implementation, new
 trials and background tests are stopped. **Early logo and Step 2 are unfinished.**

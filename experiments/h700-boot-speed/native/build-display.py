@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Compile a model's authenticated, pre-Linux display helper."""
+"""Generate a model's pinned display tables for the A32 loader's pre-Linux logo."""
 import hashlib
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SPL = HERE.parent / "spl"
-ADDRESS, CAPACITY = 0x4a500000, 0x40000
 KINDS = {"update": "DISPLAY_UPDATE", "write": "DISPLAY_WRITE",
          "framebuffer": "DISPLAY_FRAMEBUFFER", "delay_us": "DISPLAY_DELAY_US",
          "poll": "DISPLAY_POLL", "barrier": "DISPLAY_BARRIER"}
@@ -81,10 +77,9 @@ def contracts(target, policy):
     return model, artwork, panel["streams"]
 
 
-def build(output, target, policy, generation, clang, linker, environment):
+def build(output, target, policy, generation):
     model, panel, streams = contracts(target, policy)
     assert len(generation) == 32
-    output.mkdir()
     header = (f"#define BASEOS_PANEL_RULE {policy['panel_rule']}\n"
               f"#define BASEOS_PANEL_PULL_UP {int(policy['panel_pull_up'])}\n"
               f"#define BASEOS_LOGO_WIDTH {policy['boot_logo']['width']}u\n"
@@ -105,39 +100,11 @@ def build(output, target, policy, generation, clang, linker, environment):
             operations += "    {" + ",".join(fields) + "},\n"
         operations += "};\n"
     (output / "early-display-operations.h").write_text(operations)
-    for name in ("native-logo.h", "native-display.h"):
-        shutil.copyfile(SPL / name, output / name)
-    (output / "string.h").write_text("#include <stddef.h>\nvoid *memcpy(void *,const void *,size_t);\nvoid *memset(void *,int,size_t);\n")
-    objects = []
-    for name in ("early-display.c", "runtime.c"):
-        obj = output / (name + ".o")
-        subprocess.run([clang, "--target=aarch64-none-elf", "-mcpu=cortex-a53", "-mgeneral-regs-only", "-ffixed-x18",
-                        "-mstrict-align", "-Os", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
-                        "-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-ffunction-sections",
-                        "-fdata-sections", "-Wall", "-Wextra", "-Werror", "-I", str(output),
-                        "-c", str(HERE / name), "-o", str(obj)], check=True)
-        objects.append(str(obj))
-    script = output / "link.ld"
-    script.write_text(f"""ENTRY(baseos_early_display)
-SECTIONS {{
- .text 0x{ADDRESS:x} : {{ *(.text.entry) *(.text*) *(.rodata*) *(.data*) }}
- .bss (NOLOAD) : {{ __bss_start = .; *(.bss*) *(COMMON) __bss_end = .; }}
- ASSERT(__bss_start == __bss_end, "display helper requires zero BSS")
- ASSERT(__bss_end <= 0x{ADDRESS + CAPACITY:x}, "display helper exceeds arena")
- /DISCARD/ : {{ *(.comment) *(.ARM.attributes) *(.eh_frame*) }}
-}}
-""")
-    command = [str(linker), "-T", str(script), "--gc-sections", "-Map=" + str(output / "helper.map"), *objects]
-    subprocess.run(command + ["-o", str(output / "helper.elf")], check=True, env=environment)
-    subprocess.run(command + ["--oformat=binary", "-o", str(output / "helper.bin")], check=True, env=environment)
-    payload = (output / "helper.bin").read_bytes()
-    payload += bytes(-len(payload) % 512)
-    assert 0 < len(payload) <= CAPACITY
-    (output / "helper.bin").write_bytes(payload)
-    manifest = dict(target=target, generation=generation.hex(), address=ADDRESS, bytes=len(payload),
-                    sha256=sha(payload), vendor_dtb_sha256=model["vendor_dtb_sha256"],
+    manifest = dict(target=target, generation=generation.hex(), runs_in="a32-loader",
+                    tables_sha256=sha((output / "early-display-operations.h").read_bytes()),
+                    streams_sha256=sha((output / "early-display-generated.h").read_bytes()),
+                    vendor_dtb_sha256=model["vendor_dtb_sha256"],
                     engine_contract_sha256=sha((HERE / "display-engine.json").read_bytes()),
                     panel_contract_sha256=sha((HERE / "panel-init.json").read_bytes()),
                     hardware_qualified=False)
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    return payload, manifest
+    return manifest

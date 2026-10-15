@@ -6,8 +6,6 @@
 
 #define BASEOS_NATIVE_DISPLAY_MAGIC 0x31505344u
 #define BASEOS_NATIVE_DISPLAY_ADDRESS 0x4a300300u
-#define BASEOS_NATIVE_DISPLAY_HELPER_ADDRESS 0x4a500000u
-#define BASEOS_NATIVE_DISPLAY_HELPER_CAPACITY 0x00040000u
 
 /* Published only after a real plane, TCON and backlight have been enabled. */
 struct baseos_native_display {

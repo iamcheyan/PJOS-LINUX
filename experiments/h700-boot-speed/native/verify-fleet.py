@@ -48,7 +48,7 @@ def source_hashes():
 
 def verifier_hashes():
     return {str(path.relative_to(ROOT)): file_sha(path) for path in
-            (Path(__file__), HERE / "verify.py", HERE / "verify-kernel-logo.py", HERE / "verify-early-display.py")}
+            (Path(__file__), HERE / "verify.py", HERE / "verify-kernel-logo.py", HERE / "verify-loader-display.py")}
 
 
 def toc_items(package):
@@ -220,28 +220,23 @@ def check_artifact(target, inventory, directory, contract, panel):
     assert manifest["early_display"]["handoff"] == {key: handoff[key] for key in ("boot_disp", "boot_disp1", "boot_disp2")}
     for name in ("boot_disp", "boot_disp1", "boot_disp2"):
         assert re.search(rf"^#define BASEOS_DISPLAY_{name.upper()} 0x{handoff[name]:x}u$", generated, re.M)
-    helper_directory = directory / "early-display"
-    helper = json.loads((helper_directory / "manifest.json").read_text())
-    assert helper == manifest["early_display_helper"]
-    assert (helper["target"], helper["generation"], helper["address"]) == (target, manifest["generation"], 0x4a500000)
-    assert helper["bytes"] <= 0x40000 and helper["sha256"] == file_sha(helper_directory / "helper.bin")
-    assert helper["engine_contract_sha256"] == file_sha(HERE / "display-engine.json")
-    assert helper["panel_contract_sha256"] == file_sha(HERE / "panel-init.json")
-    assert helper["vendor_dtb_sha256"] == manifest["kernel_dtb_sha256"]
-    assert helper["hardware_qualified"] is False
-    for name in ("native-logo.h", "native-display.h"):
-        assert (helper_directory / name).read_bytes() == (HERE.parent / "spl" / name).read_bytes()
+    tables = manifest["early_display_tables"]
+    assert (tables["target"], tables["generation"], tables["runs_in"]) == (target, manifest["generation"], "a32-loader")
+    assert tables["engine_contract_sha256"] == file_sha(HERE / "display-engine.json")
+    assert tables["panel_contract_sha256"] == file_sha(HERE / "panel-init.json")
+    assert tables["vendor_dtb_sha256"] == manifest["kernel_dtb_sha256"]
+    assert tables["tables_sha256"] == file_sha(directory / "early-display-operations.h")
+    assert tables["hardware_qualified"] is False
     if "native_generated_header_sha256" in manifest:
         assert file_sha(directory / "native-generated.h") == manifest["native_generated_header_sha256"]
     firmware = (directory / "firmware.bin").read_bytes()
     assert sha(firmware) == manifest["firmware_sha256"]
     assert [(r["name"], r["destination"]) for r in manifest["firmware_regions"]] == [
         ("monitor", 0x48000000), ("dtbo", 0x4a100000), ("dtb", 0x4a200000),
-        ("loader", 0x4a000000), ("early-display", 0x4a500000)]
+        ("loader", 0x4a000000)]
     offset = 0
     for region in manifest["firmware_regions"]:
-        payload = ((directory / "loader.bin").read_bytes() if region["name"] == "loader" else
-                   (helper_directory / "helper.bin").read_bytes() if region["name"] == "early-display" else toc[region["name"]])
+        payload = (directory / "loader.bin").read_bytes() if region["name"] == "loader" else toc[region["name"]]
         assert region["offset"] == offset
         assert len(payload) == region["bytes"]
         assert firmware[region["offset"]:region["offset"] + region["bytes"]] == payload
@@ -309,23 +304,19 @@ def main():
         verify_args = [HERE / "verify.py", directory, inventory]
         if provenance["kind"] == "prepared-source":
             verify_args.append("--prepared-source")
-        print(json.dumps({"target": target, "stage": "actual A64 early-display helper"}), flush=True)
-        helper_proof_directory = directory / "early-display/proof"
-        helper_proof_path = helper_proof_directory / "verification.json"
-        if not helper_proof_path.exists():
-            run([HERE / "verify-early-display.py", directory, "--output", helper_proof_directory],
-                output / "logs" / (target + ".early-display.log"))
+        print(json.dumps({"target": target, "stage": "A32 loader splash"}), flush=True)
+        splash_directory = directory / "loader-display-proof"
+        if not splash_directory.exists():
+            run([HERE / "verify-loader-display.py", directory, "--inventory", inventory, "--output", splash_directory],
+                output / "logs" / (target + ".loader-display.log"))
         else:
-            assert args.resume, "existing early-display proof requires --resume"
-        helper_proof = json.loads(helper_proof_path.read_text())
-        assert helper_proof["passed"] and helper_proof["required_cases_complete"]
-        assert helper_proof["verifier_sha256"] == file_sha(HERE / "verify-early-display.py")
-        assert helper_proof["helper_sha256"] == manifest["early_display_helper"]["sha256"]
-        assert helper_proof["generation"] == manifest["generation"]
-        assert helper_proof["display_record_sha256"] == file_sha(helper_proof_directory / "display-record.bin")
-        assert helper_proof["display_pixels_sha256"] == file_sha(helper_proof_directory / "display-pixels.bin")
-        if (helper_proof_directory / "display-source.bmp").exists():
-            assert helper_proof["fixture_sha256"] == file_sha(helper_proof_directory / "display-source.bmp")
+            assert args.resume, "existing splash proof requires --resume"
+        splash = json.loads((splash_directory / "verification.json").read_text())
+        assert splash["passed"] and splash["sram_c_untouched_after_release"]
+        assert splash["verifier_sha256"] == file_sha(HERE / "verify-loader-display.py")
+        assert splash["generation"] == manifest["generation"] and splash["loader_sha256"] == manifest["loader_sha256"]
+        for name in ("verified-early-logo-kernel.dtb", "early-logo-pixels.bin", "early-display-record.bin", "early-logo-source.bmp"):
+            (directory / name).write_bytes((splash_directory / name).read_bytes())
         print(json.dumps({"target": target, "stage": "A32 decoder/FDT/SMC"}), flush=True)
         run(verify_args, output / "logs" / (target + ".verify.log"))
         proof = json.loads((directory / "verification.json").read_text())
@@ -350,15 +341,12 @@ def main():
             ("centered-smaller-odd-stride", 1), ("centered-one-pixel", 1),
             ("bmp-zero-width", 0), ("bmp-negative-width", 0)]
         early = proof["early_display"]
-        assert early["passed"] and early["actual_helper_input"] and not early["kernel_decode_repeated"]
+        assert early["passed"] and not early["kernel_decode_repeated"]
         assert early["no_panel_probe_or_reset"] and early["panel_display_mmio_accesses"] == 0
-        assert early["helper_proof"]["proof_sha256"] == file_sha(helper_proof_path)
-        assert early["display_record_sha256"] == helper_proof["display_record_sha256"]
-        assert early["pixels_sha256"] == helper_proof["display_pixels_sha256"]
-        assert early["fixture_sha256"] == helper_proof["fixture_sha256"] == file_sha(directory / "early-logo-source.bmp")
-        assert early["prepared_fdt_sha256"] == file_sha(directory / "verified-early-logo-kernel.dtb")
-        assert early["pixels_sha256"] == file_sha(directory / "early-logo-pixels.bin")
-        assert early["display_record_sha256"] == file_sha(directory / "early-display-record.bin")
+        warm_case = splash["cases"][0]
+        assert warm_case["fdt_sha256"] == file_sha(directory / "verified-early-logo-kernel.dtb")
+        assert warm_case["pixels_sha256"] == file_sha(directory / "early-logo-pixels.bin")
+        assert warm_case["record_sha256"] == file_sha(directory / "early-display-record.bin")
         if provenance["kind"] == "prepared-source":
             assert proof["live_fdt_static_properties_exact"] is False
             assert proof["fdt_reference_kind"] == "prepared-source"
@@ -395,10 +383,10 @@ def main():
         assert warm_consumer["verifier_sha256"] == file_sha(HERE / "verify-kernel-logo.py")
         warm = warm_consumer["cases"][0]
         assert warm["handoff_mode"] == "warm" and warm["boot_disp_sync"] == 1
-        assert warm["fdt_sha256"] == early["prepared_fdt_sha256"]
-        assert warm["source_pixels_sha256"] == warm["destination_pixels_sha256"] == early["pixels_sha256"]
-        assert warm["warm_status"]["display_record_sha256"] == early["display_record_sha256"]
-        assert warm["warm_status"]["fixture_sha256"] == early["fixture_sha256"]
+        assert warm["fdt_sha256"] == warm_case["fdt_sha256"]
+        assert warm["source_pixels_sha256"] == warm["destination_pixels_sha256"] == warm_case["pixels_sha256"]
+        assert warm["warm_status"]["display_record_sha256"] == warm_case["record_sha256"]
+        assert warm["warm_status"]["fixture_sha256"] == file_sha(directory / "early-logo-source.bmp")
         assert warm["manifest_sha256"] == file_sha(directory / "manifest.json")
         assert warm["kernel_sha256"] == manifest["kernel_sha256"]
         print(json.dumps({"target": target, "stage": "vendor monitor"}), flush=True)
@@ -427,11 +415,12 @@ def main():
                           "producer_report_sha256": file_sha(directory / "verification.json"),
                           "consumer_report_sha256": file_sha(logo_consumer_path),
                           "producer_cases": len(logo["cases"]), "kernel_pixels_copied_exact": True},
-            "early_display": {"helper_sha256": manifest["early_display_helper"]["sha256"],
-                              "helper_proof_sha256": file_sha(helper_proof_path),
-                              "display_record_sha256": early["display_record_sha256"],
-                              "prepared_fdt_sha256": early["prepared_fdt_sha256"],
-                              "pixels_sha256": early["pixels_sha256"],
+            "early_display": {"runs_in": "a32-loader", "tables_sha256": manifest["early_display_tables"]["tables_sha256"],
+                              "splash_proof_sha256": file_sha(splash_directory / "verification.json"),
+                              "splash_cases": splash["case_count"],
+                              "display_record_sha256": warm_case["record_sha256"],
+                              "prepared_fdt_sha256": warm_case["fdt_sha256"],
+                              "pixels_sha256": warm_case["pixels_sha256"],
                               "producer_cases": len(early["cases"]),
                               "warm_consumer_sha256": file_sha(warm_consumer_path),
                               "warm_kernel_pixels_copied_exact": True,
