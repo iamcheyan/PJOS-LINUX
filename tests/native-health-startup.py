@@ -32,6 +32,8 @@ while [ ! -e /run/release-charger ]; do /test/busybox sleep 0.01; done
     if native:
         boot.write("sys/firmware/devicetree/base/chosen/baseos,native-boot", GENERATION)
         boot.write("etc/baseos/native-generation", GENERATION)
+        boot.write("etc/baseos/native-panel", "old\n")
+        boot.write("proc/cmdline", boot.read("proc/cmdline") + " lcd_type=old\n")
     return boot
 
 
@@ -40,6 +42,8 @@ def assert_blocked(boot, before_charger=False):
     assert boot.proc.poll() is None
     calls = boot.calls()
     assert "baseos-update" not in calls, calls
+    assert " -t vfat " not in calls and " -t exfat " not in calls, calls
+    assert "hwclock" not in calls and "rfkill" not in calls and "bin/ip " not in calls, calls
     if before_charger:
         assert "baseos-charger" not in calls and "insmod" not in calls, calls
 
@@ -69,6 +73,42 @@ def main():
         finally:
             boot.close()
         print("PASS: native acceptance precedes updater", reboot_at)
+
+    for fault in ("wrong-panel", "missing-policy", "duplicate-token", "missing-token"):
+        boot = boot_fixture(args, mode="0")
+        try:
+            if fault == "missing-policy":
+                (boot.root / "etc/baseos/native-panel").unlink()
+            else:
+                commands = {"wrong-panel": "lcd_type=boe\n",
+                            "duplicate-token": "lcd_type=old lcd_type=old\n",
+                            "missing-token": "quiet\n"}
+                boot.write("proc/cmdline", commands[fault])
+            boot.start()
+            assert_blocked(boot)
+        finally:
+            boot.close()
+        print("PASS: healthy GPU/DE with", fault, "keeps native startup blocked")
+
+    boot = boot_fixture(args, mode="1")
+    try:
+        boot.write("proc/cmdline", "bootreason=charger lcd_type=boe\n")
+        boot.start()
+        assert_blocked(boot, before_charger=True)
+    finally:
+        boot.close()
+    print("PASS: wrong panel blocks charger acceptance before hardware/startup")
+
+    boot = boot_fixture(args, mode="0")
+    try:
+        boot.write("etc/baseos/native-panel", "boe\n")
+        boot.write("proc/cmdline", "quiet lcd_type=boe\n")
+        boot.start()
+        assert boot.proc.wait(timeout=4) == 0, boot.calls()
+        assert "native-health --accept" in boot.calls() and "baseos-update boot-check" in boot.calls(), boot.calls()
+    finally:
+        boot.close()
+    print("PASS: matched boe panel reaches normal accepted startup")
 
     for fault in ("HEALTH_MODEL_GPU_MISSING", "HEALTH_MODEL_BAD_DE"):
         boot = boot_fixture(args, mode="0", **{fault: "1"})

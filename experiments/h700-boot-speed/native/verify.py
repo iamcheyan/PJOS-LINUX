@@ -100,6 +100,16 @@ def verify(directory, inventory, spl=None, prepared_source=False):
     for address, value in sram_initial.items():
         m.mem_write(address, struct.pack("<I", value))
     sram_writes = []
+    panel_writes = []
+    panel_samples = []
+    panel_sequence = [(0x0300b124, 0xff000000, 0x11000000),
+                      (0x0300b130, 0x8000, 0x8000),
+                      (0x0300b130, 0x4000, 0x4000),
+                      (0x0300b130, 0x4000, 0),
+                      (0x0300b130, 0x4000, 0x4000),
+                      (0x0300b090, 0x0f000000, 0x06000000)]
+    if manifest["panel_pull_up"]:
+        panel_sequence.append((0x0300b0ac, 0x3000, 0x1000))
     prepare_completed = [False]
     prepare_hooks = []
 
@@ -120,13 +130,28 @@ def verify(directory, inventory, spl=None, prepared_source=False):
             assert prepare_completed[0], "SRAM release preceded successful kernel preparation"
             sram_writes.append((address, value))
         else:
-            assert manifest["panel_rule"] == 2 and address in (0x0300b090, 0x0300b0ac), \
+            assert manifest["panel_rule"] == 2 and len(panel_writes) < len(panel_sequence), \
                 ("unexpected loader MMIO write", hex(address), hex(value))
+            expected_address, mask, owned = panel_sequence[len(panel_writes)]
+            before = struct.unpack("<I", machine.mem_read(address, 4))[0]
+            assert address == expected_address and value == (before & ~mask) | owned, \
+                ("panel GPIO sequence or unrelated bits changed", hex(address), hex(value))
+            panel_writes.append((address, value, ticks[0]))
+
+    def panel_sample(machine, access, address, size, value, data):
+        assert manifest["panel_rule"] == 2 and size == 4
+        assert len(panel_writes) == len(panel_sequence), "panel sampled before prerequisite GPIO writes"
+        for previous, following, minimum in ((1, 2, 720000), (2, 3, 360000),
+                                              (3, 4, 1200000)):
+            assert panel_writes[following][2] - panel_writes[previous][2] >= minimum
+        assert ticks[0] - panel_writes[4][2] >= 2400000
+        panel_samples.append(ticks[0])
 
     def forbidden_display_access(machine, access, address, size, value, data):
         raise AssertionError(("loader touched DE/CCU instead of leaving kernel initialization intact",hex(address),access))
 
     display_hooks = [m.hook_add(u.UC_HOOK_MEM_WRITE, loader_mmio_write, begin=0x03000000, end=0x0300ffff)]
+    display_hooks.append(m.hook_add(u.UC_HOOK_MEM_READ, panel_sample, begin=0x0300b0a0, end=0x0300b0a3))
     display_hooks += [m.hook_add(u.UC_HOOK_MEM_READ | u.UC_HOOK_MEM_WRITE, forbidden_display_access,
                                 begin=begin,end=end)
                       for begin,end in ((0x03001000, 0x03001fff), (0x01000000, 0x023fffff))]
@@ -180,6 +205,8 @@ def verify(directory, inventory, spl=None, prepared_source=False):
     expected_sram_writes = [(0x03000000,sram_initial[0x03000000] & 0x80000000),
                             (0x03000004,sram_initial[0x03000004] & 0xfeffffff)]
     assert sram_writes == expected_sram_writes, sram_writes
+    assert len(panel_samples) == (1 if manifest["panel_rule"] == 2 else 0)
+    assert len(panel_writes) == (len(panel_sequence) if manifest["panel_rule"] == 2 else 0)
     for hook in display_hooks + prepare_hooks:
         m.hook_del(hook)
     assert not cp[0, 1, 0, 0] & 0x1005
@@ -326,7 +353,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
         m.reg_write(a.UC_ARM_REG_R0, 0x45000000)
         m.reg_write(a.UC_ARM_REG_SP, 0x4a0f0000)
         m.reg_write(a.UC_ARM_REG_LR, 0x4a0d0000)
-        m.emu_start(sym["make_command_line"], 0x50000000, count=100000)
+        m.emu_start(sym["make_command_line"], 0x50000000, count=500000)
         assert m.reg_read(a.UC_ARM_REG_R0) == 0
         text = bytes(m.mem_read(sym["command_line"], 2048)).split(b"\0")[0].decode()
         expected = "old" if manifest["panel_rule"] == 0 or manifest["panel_rule"] == 2 and level else "boe"
@@ -341,7 +368,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
             m.reg_write(a.UC_ARM_REG_R0, 0x45000000)
             m.reg_write(a.UC_ARM_REG_SP, 0x4a0f0000)
             m.reg_write(a.UC_ARM_REG_LR, 0x4a0d0000)
-            m.emu_start(sym["make_command_line"], 0x50000000, count=100000)
+            m.emu_start(sym["make_command_line"], 0x50000000, count=500000)
             assert m.reg_read(a.UC_ARM_REG_R0) == 0
             text = bytes(m.mem_read(sym["command_line"], 2048)).split(b"\0")[0].decode()
             assert "bootreason=" + expected in text.split() and "androidboot.mode=normal" in text.split()
@@ -355,6 +382,7 @@ def verify(directory, inventory, spl=None, prepared_source=False):
               "final_a32_sctlr": cp[0, 1, 0, 0], "kernel_smc_entry": kernel_call_entry,
               "translation_checks": translations, "modeled_cp15": events, "bootargs": command,
               "panel_results": panels, "refusals": refusals, "hardware_boot": False,
+              "panel_gpio_writes": panel_writes, "panel_sample_ticks": panel_samples,
               "native_record_version": record_version, "native_record_bytes": record_bytes,
               "boot_reason": reasons[boot_reason], "boot_reason_source": boot_reason_source,
               "bootreason_render_cases": bootreason_cases,

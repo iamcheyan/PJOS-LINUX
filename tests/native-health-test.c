@@ -87,7 +87,8 @@ static void put_file(const char *name, const void *value, size_t length)
 static int device_open(const char *name, int flags, ...)
 {
     if (startup_fixture && (!strcmp(name, FDT_GENERATION) || !strcmp(name, INSTALLED_GENERATION) ||
-                            !strcmp(name, BOOT_MODE) || !strcmp(name, CMDLINE))) return open(name, flags);
+                            !strcmp(name, BOOT_MODE) || !strcmp(name, CMDLINE) ||
+                            !strcmp(name, "/etc/baseos/native-panel"))) return open(name, flags);
     if (!strcmp(name, "/dev/mem")) { memory_opens++; return 1000; }
     if (!strcmp(name, "/dev/mali0")) { probes++; return gpu_missing ? -1 : 1001; }
     if (!strcmp(name, "/dev/fb0")) return 1002;
@@ -97,6 +98,7 @@ static int device_open(const char *name, int flags, ...)
     else if (!strcmp(name, INSTALLED_GENERATION)) redirect = file_path("installed");
     else if (!strcmp(name, BOOT_MODE)) redirect = file_path("boot-mode");
     else if (!strcmp(name, CMDLINE)) redirect = file_path("cmdline");
+    else if (!strcmp(name, "/etc/baseos/native-panel")) redirect = file_path("panel");
     else if (!strcmp(name, ACK_LOCK)) redirect = file_path("lock");
     else assert(!"unexpected path, network or frontend dependency");
     if (flags & O_CREAT) return open(redirect, flags, 0600);
@@ -235,7 +237,8 @@ static void initialize(void)
     put_file("fdt", generation, 32);
     put_file("installed", generation, 32);
     put_file("boot-mode", "0\n", 2);
-    put_file("cmdline", "console=ttyS0\n", 14);
+    put_file("cmdline", "console=ttyS0 lcd_type=old\n", sizeof("console=ttyS0 lcd_type=old\n") - 1);
+    put_file("panel", "old\n", 4);
 }
 static int run(const char *mode)
 {
@@ -262,6 +265,7 @@ static void cleanup(void)
 {
     assert(!unlink(file_path("fdt")) && !unlink(file_path("installed")));
     assert(!unlink(file_path("boot-mode")) && !unlink(file_path("cmdline")));
+    assert(!unlink(file_path("panel")));
     unlink(file_path("lock"));
     assert(!rmdir(directory));
 }
@@ -287,6 +291,42 @@ int main(int argc, char **argv)
         return result;
     }
     assert(argc == 1);
+    const char *panel_modes[] = {"--check", "--accept", "--accept-charger"};
+    for (unsigned i = 0; i < sizeof(panel_modes) / sizeof(panel_modes[0]); i++) {
+        /* The regression: healthy GPU/DE/input, wrong panel must not ack. */
+        initialize(); put_file("boot-mode", "1\n", 2);
+        put_file("cmdline", "lcd_type=boe\n", sizeof("lcd_type=boe\n") - 1);
+        assert(run(panel_modes[i]) == 3 && !memory_opens); unchanged();
+        initialize(); put_file("boot-mode", "1\n", 2); put_file("panel", "boe\n", 4);
+        assert(run(panel_modes[i]) == 3 && !memory_opens); unchanged();
+        initialize(); put_file("boot-mode", "1\n", 2); put_file("panel", "boe\n", 4);
+        put_file("cmdline", "quiet\tlcd_type=boe\tloglevel=0\n", sizeof("quiet\tlcd_type=boe\tloglevel=0\n") - 1);
+        assert(run(panel_modes[i]) == 0);
+        if (!strcmp(panel_modes[i], "--check")) unchanged();
+        else assert(change_count == 3 && !rtc[0x138 / 4] && !rtc[0x13c / 4] && !timer[WDT_MODE]);
+    }
+    const char *bad_panels[] = {"quiet\n", "lcd_type=old lcd_type=old\n", "lcd_type=old lcd_type=boe\n",
+                               "lcd_type=boe lcd_type=old\n", "lcd_type=old-extra\n", "xlcd_type=old\n",
+                               "lcd_type=\n", "lcd_type= old\n", "lcd_type=OLD\n"};
+    for (unsigned i = 0; i < sizeof(bad_panels) / sizeof(bad_panels[0]); i++) {
+        initialize(); put_file("cmdline", bad_panels[i], strlen(bad_panels[i]));
+        assert(run("--accept") == 3 && !memory_opens); unchanged();
+    }
+    const char *bad_policies[] = {"", "old", "old\n\n", "boe\r\n", " old\n", "OLD\n", "boe "};
+    for (unsigned i = 0; i < sizeof(bad_policies) / sizeof(bad_policies[0]); i++) {
+        initialize(); put_file("panel", bad_policies[i], strlen(bad_policies[i]));
+        assert(run("--accept") == 3 && !memory_opens); unchanged();
+    }
+    initialize(); put_file("panel", "old\000", 4);
+    assert(run("--accept") == 3 && !memory_opens); unchanged();
+    initialize(); assert(!unlink(file_path("panel")));
+    assert(run("--accept") == 3 && !memory_opens); unchanged();
+    initialize(); put_file("panel-target", "old\n", 4);
+    char panel_target[256]; assert(snprintf(panel_target, sizeof(panel_target), "%s/panel-target", directory) > 0);
+    assert(!unlink(file_path("panel")) && !symlink(panel_target, file_path("panel")));
+    assert(run("--accept") == 3 && !memory_opens); unchanged();
+    assert(!unlink(panel_target));
+    puts("native-health panel policy matrix passed; mismatches leave MMIO unopened");
     initialize(); assert(run("--accept") == 0);
     assert(change_count == 3 && changes[0].area == 0 && changes[0].index == 0x138 / 4 && !changes[0].value);
     assert(changes[1].area == 0 && changes[1].index == 0x13c / 4 && !changes[1].value);
@@ -301,19 +341,21 @@ int main(int argc, char **argv)
     initialize(); put_file("boot-mode", "1\n", 2); gpu_missing = 1;
     assert(run("--accept-charger") == 0 && !probes && change_count == 3);
     assert(!rtc[0x138 / 4] && !rtc[0x13c / 4] && !timer[WDT_MODE]);
-    initialize(); put_file("cmdline", "bootreason=charger\n", 19);
+    initialize(); put_file("cmdline", "bootreason=charger lcd_type=old\n", sizeof("bootreason=charger lcd_type=old\n") - 1);
     assert(run("--accept-charger") == 4 && !memory_opens); unchanged();
     initialize(); assert(!unlink(file_path("boot-mode")));
-    put_file("cmdline", "quiet bootreason=charger loglevel=0\n", 36); gpu_missing = 1;
+    put_file("cmdline", "quiet bootreason=charger loglevel=0 lcd_type=old\n", sizeof("quiet bootreason=charger loglevel=0 lcd_type=old\n") - 1); gpu_missing = 1;
     assert(run("--accept-charger") == 0 && !probes);
     initialize(); put_file("boot-mode", "invalid\n", 8);
-    put_file("cmdline", "quiet\tbootreason=charger\tloglevel=0\n", 36); gpu_missing = 1;
+    put_file("cmdline", "quiet\tbootreason=charger\tloglevel=0\tlcd_type=old\n", sizeof("quiet\tbootreason=charger\tloglevel=0\tlcd_type=old\n") - 1); gpu_missing = 1;
     assert(run("--accept-charger") == 0 && !probes);
     const char *wrong_reasons[] = {"bootreason=charger-extra\n", "xbootreason=charger\n",
                                  "bootreason=normal\n", "quiet\n"};
     for (unsigned i = 0; i < sizeof(wrong_reasons) / sizeof(wrong_reasons[0]); i++) {
         initialize(); assert(!unlink(file_path("boot-mode")));
-        put_file("cmdline", wrong_reasons[i], strlen(wrong_reasons[i]));
+        char command[128];
+        assert(snprintf(command, sizeof(command), "%slcd_type=old\n", wrong_reasons[i]) > 0);
+        put_file("cmdline", command, strlen(command));
         assert(run("--accept-charger") == 4 && !memory_opens); unchanged();
     }
     initialize(); put_file("boot-mode", "1\0000", 3);

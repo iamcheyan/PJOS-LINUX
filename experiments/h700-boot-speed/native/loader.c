@@ -4,6 +4,7 @@
 #include <libfdt.h>
 #include "native-handoff.h"
 #include "native-generated.h"
+#include "panel-probe.h"
 #ifdef BASEOS_NATIVE_DIAGNOSTIC
 #include "native-trace-constants.h"
 #endif
@@ -15,6 +16,21 @@ extern void native_kernel_enter(void) __attribute__((noreturn));
 
 static char command_line[2048];
 static uint64_t times[7];
+
+static uint32_t panel_read32(uint32_t address)
+{
+    uint32_t value = *(volatile uint32_t *)address;
+    asm volatile("dmb sy" ::: "memory");
+    return value;
+}
+
+static void panel_write32(uint32_t address, uint32_t value)
+{
+    *(volatile uint32_t *)address = value;
+    asm volatile("dmb sy" ::: "memory");
+}
+
+static const struct baseos_panel_io panel_io = {panel_read32, panel_write32, native_ticks};
 
 static void checkpoint(unsigned stage)
 {
@@ -75,14 +91,9 @@ static int make_command_line(const unsigned char *image)
     hex_digits(serial + 3, sid[0x208 / 4], 8);
     hex_digits(serial + 11, sid[0x20c / 4], 8);
     serial[19] = 0;
-    const char *panel = BASEOS_PANEL_RULE == 0 ? "old" : "boe";
-    if (BASEOS_PANEL_RULE == 2) {
-        volatile uint32_t *pio = (void *)0x0300b000;
-        pio[0x90 / 4] &= ~(15u << 24);
-        pio[0xac / 4] = (pio[0xac / 4] & ~(3u << 12)) | (1u << 12);
-        asm volatile("dmb sy" ::: "memory");
-        panel = pio[0xa0 / 4] & 0x40 ? "old" : "boe";
-    }
+    int detected = baseos_panel_probe(BASEOS_PANEL_RULE, BASEOS_PANEL_PULL_UP, &panel_io);
+    if (detected < 0) return -1;
+    const char *panel = detected ? "boe" : "old";
     /* Android v2 has two separately bounded command-line fields. */
     char android[1537];
     size_t first = strnlen((const char *)image + 64, 512);

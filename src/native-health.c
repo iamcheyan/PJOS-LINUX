@@ -20,6 +20,7 @@
 
 #define FDT_GENERATION "/sys/firmware/devicetree/base/chosen/baseos,native-boot"
 #define INSTALLED_GENERATION "/etc/baseos/native-generation"
+#define INSTALLED_PANEL "/etc/baseos/native-panel"
 #define BOOT_MODE "/sys/class/power_supply/axp2202-battery/boot_mode"
 #define CMDLINE "/proc/cmdline"
 #define ACK_LOCK "/run/baseos-native-health.lock"
@@ -104,6 +105,28 @@ static int read_text(const char *path, char *buffer, size_t capacity)
     if (used == capacity || memchr(buffer, 0, used)) return 0;
     buffer[used] = 0;
     return 1;
+}
+
+static int panel_matches(void)
+{
+    char expected[5];
+    if (!read_text(INSTALLED_PANEL, expected, sizeof(expected)) ||
+        (strcmp(expected, "old\n") && strcmp(expected, "boe\n"))) return 0;
+    char command[4096];
+    if (!read_text(CMDLINE, command, sizeof(command))) return 0;
+    const size_t key = sizeof("lcd_type=") - 1;
+    int found = 0;
+    for (char *word = command; *word;) {
+        while (isspace((unsigned char)*word)) word++;
+        char *end = word;
+        while (*end && !isspace((unsigned char)*end)) end++;
+        if ((size_t)(end - word) >= key && !memcmp(word, "lcd_type=", key)) {
+            if (found || (size_t)(end - word) != key + 3 || memcmp(word + key, expected, 3)) return 0;
+            found = 1;
+        }
+        word = end;
+    }
+    return found;
 }
 
 static int charger_boot(void)
@@ -278,6 +301,10 @@ int main(int argc, char **argv)
     if (!read_generation(FDT_GENERATION, running) || !read_generation(INSTALLED_GENERATION, installed) ||
         memcmp(running, installed, 32) || !generation_cookie(installed)) {
         fprintf(stderr, "native-health: absent, malformed or mismatched generation\n");
+        return 3;
+    }
+    if (!panel_matches()) {
+        fprintf(stderr, "native-health: absent, malformed or mismatched panel policy\n");
         return 3;
     }
     if (charger && !charger_boot()) {

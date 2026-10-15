@@ -2,19 +2,57 @@
 
 ## Active checkpoint — read this before the historical notes
 
-The per-card step 1 implementation is ready for its local commit and the
-user-authorized RGSP daily-use installation. Mainline SPL plus the minimal A32
-loader boots the original vendor Linux with correct DE output on both lab
-devices. Both persistent capsules pass deliberate no-acknowledgment recovery,
+The per-card step 1 implementation is committed as `205f677`, but **personal
+RGSP native acceptance is withdrawn**. Its stock `lcd_type=old` became `boe`
+under native and the physical screen was black. Linux, GPU/DE and Slot checks
+missed the panel mismatch. Verified 60 Hz did not restore it. Stock fallback
+restored `old`, and the user confirmed: **"Yes, normal Slot screen."**
+
+RGSP is now usable on stock, boot `c371afa0-b510-4630-8eac-d741b79a9703`.
+The exact owned RTC latch stays set so future boots stay stock. Recovery wrote
+no firmware. Slot, games and settings are preserved, including `high_refresh=1`.
+The user's explicit request to fix this supersedes the earlier instruction to
+leave RGSP alone. Keep it usable on stock while correcting and qualifying the
+probe on host and lab devices. **Step 2 is paused for the display fix.**
+
+Native omitted PI15 power and PI14 reset with the vendor 30/15/50/100 ms waits,
+then used PE6 function0 instead of function6. Pull-up policy also varies by model.
+The kernel trusts the command-line panel choice. The new compiled-probe proof
+compares actual operations with all eleven original U-Boots. The new health
+helper requires exact per-card `/etc/baseos/native-panel` policy and matching
+command line before watchdog acknowledgment. Fresh builds, all eleven linked
+model proofs and all eight new lab recovery/ordinary-boot/suspend reports pass.
+The original kernel, monitor, image and DTB remain byte-exact. Personal
+old-panel installation and physical acceptance are the next gate. Evidence is under
+`work/h700-loader/rgsp-user-install/black-screen-v1`,
+`work/h700-loader/panel-health-v1` and
+`work/h700-loader/rgsp-user-install/panel-acceptance-review-v1`.
+
+The corrected capsules are under `work/h700-loader/panel-release-artifacts-v2`.
+Their eight fresh hardware reports are under
+`work/h700-loader/panel-persistent-hardware-v2/{rg34xxsp,rg40xxv}` using
+`noack`, `native-cycle-1`, `native-cycle-2`, and `sleep`. Every report binds actual
+panel command lines to its native/recovery/resume boot IDs. Both labs are BOE;
+these reports do not establish physical old-panel coverage. Compact proof:
+`evidence/panel-acquisition-fix.json`. RG40 also passed its following native boot;
+SP's following boot is being checked. The initial failed noack reports remain
+under `noack-first-transient-state`; their native witnesses preserved RTC words,
+but the stock route normalized vendor GP2/6. SP also had a dirty FAT flag.
+Read-only fsck found no structural errors; backed-up metadata changed only byte65
+when the dirty flag was cleared, then read-only fsck passed. Fresh trials from
+normal stock state pass every gate without weakening the checks.
+
+Both persistent lab capsules pass deliberate no-acknowledgment recovery,
 two ordinary native boots, real suspend/wake and a native boot after waking.
-**RGSP is still unchanged.** Install the qualified per-card build, verify it
-once, then leave it alone for the user's Slot gaming. The latest explicit
-install authorization supersedes the earlier instruction to withhold it.
+The general fleet release remains open. Resume sequential kernel/library
+loading and boot-image A/B after the panel fix, preserving all eleven model
+and panel contracts without user configuration.
 Only the primary agent operates hardware; other agents work on host artifacts.
 
-**Latest live state:** both lab cards contain their persistent 128 KiB raw
-capsules and exact original secondary boot0. All eight required reports pass
-under `work/h700-loader/raw-persistent-hardware-v1`:
+**Historical v1 acceptance:** these eight reports qualified the earlier
+persistent capsules on BOE lab panels. They do not qualify the corrected panel
+probe or establish old-panel coverage. Reports are preserved under
+`work/h700-loader/raw-persistent-hardware-v1`:
 
 | Lab | No-ack recovery | Two ordinary boots | Suspend/wake | Following native boot |
 | --- | --- | --- | --- | --- |
@@ -51,12 +89,36 @@ owned mount changes on refusal. SP NextUI keeps writable log descriptors, so
 its scoped `work/h700-loader/quiesce-sp-nextui.py` must run before lab reboots.
 Never use filesystem-wide process killing to quiesce a card.
 
-The frozen installer is `work/h700-loader/install-rgsp-release.py`, SHA256
-`414b410bab525634fc58dd77250efdea525340bdf77791e0a47be9228abe4f98`.
-Its 84 host cases include the actual nested sleep-report schema. After the
-local source commit, `qualify-rgsp-daily.py` pins all eight actual lab reports,
-all inputs and that commit, then invokes the real installer preflight before
-emitting a deployable qualification. The installer backs up before writes,
+The historical install-v5 installer was `work/h700-loader/install-rgsp-release.py`, SHA256
+`e36dd337675055a3c357e85a6fcc1be6e88f43185e9f716c7a4aa3e8c6053e18`.
+Its 106 host cases include typed actual sleep reports, shared SSH
+connection handling and scoped frontend refusal recovery. `qualify-rgsp-daily.py` pins all eight actual lab reports,
+all inputs and the source commit, then invokes the real installer preflight
+before emitting a deployable qualification. The successful qualification is
+`rgsp-user-install/release-qualified-v4`, SHA256
+`4d809c46ed73e1ef395f3af1b7fac6bcbd8be78b0c1a246e217493c01042b483`.
+
+Earlier personal install attempts are retained as failures under
+`rgsp-user-install/install-v1` through `install-v4`. The first failed before
+writes at hostname resolution. A later staging failure needed exact manual
+completion of rollback. The next two completed original-byte rollback in their
+original boot. None completed a reboot. Read-only census reproduced one failed
+fresh password login in six, versus six successful shared-connection requests.
+The current transport uses an explicit task-owned SSH master, preserves the
+pinned `rgsp.local` host key for its numeric endpoint, retries only connection
+authentication, and never retries a remote write or reboot command.
+
+The last attempt safely refused reboot because Slot held writable stdout and
+stderr on `Logs/slot.log`. The new scoped handoff temporarily removes only the
+frontend respawn action, stops only the exact Slot process, remounts FAT read-only
+and restores the original init file before reboot. Slot Services and Wi-Fi stay
+running. That exact method passed on RG40 with no reboot, restored card/init
+state, a new healthy Slot PID and 100% matching nonuniform DE writeback.
+Evidence: `rgsp-user-install/slot-quiesce-rg40-v1`. Thirteen separate host cases
+include four actual generated signal-shell cases. The following `install-v5`
+completed one verification boot but missed the panel mismatch. Compact
+proof is `evidence/rgsp-native-daily-install.json`; the complete local journal is
+`work/h700-loader/rgsp-user-install/install-v5/install-journal.json`. The installer backs up before writes,
 verifies every write, preserves Slot and user files, and performs one boot.
 
 ### Clean native path and current devices
@@ -292,13 +354,18 @@ access. Reset-only reports cannot qualify a handoff. Both clean runs have fresh
 The original RG40 preflight overlapped checker development; preserve it and use
 the fresh strict sidecar. New benchmark runs require valid DE writeback pixels.
 
-Commit the verified per-card native chain, generate the aggregate qualification
-and install RGSP once. Then begin the sequential kernel/initramfs/library-image
-and boot-image A/B work on lab devices. Factory-bank hardware selection, charger
+The per-card native chain is committed, qualified and installed on RGSP. Begin
+the sequential kernel/initramfs/library-image and boot-image A/B work on labs.
+Host inspection proves all eleven vendor kernels support initramfs, loop and
+LZ4 squashfs. Two current whole-library bundles plus stock recovery exceed the
+64 MiB boot partition. `sequential/build-fixture.py` and its sixteen passing
+shell cases prepare a same-byte disk-versus-RAM library comparison before
+choosing storage. Preserve rootfs slots, recovery and update binding. Details:
+`work/h700-loader/sequential-v1/boot-contract.md`. Factory-bank hardware selection, charger
 and physical cold-boot coverage, repeated persistent-release timing and generic
 fleet image assembly remain separate open gates. Kernel rebuilding is last. RGSP's
 read-only inventory/backups are `work/h700-loader/rgsp-user-install/inventory-v1`;
-do no further agent testing there after its eventual release install.
+perform no further agent access or tests there after the completed installation.
 Canonical decisions are append-only in `work/h700-loader/decisions.tsv`.
 Historical sections below must not override this checkpoint.
 

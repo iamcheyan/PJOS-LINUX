@@ -4,6 +4,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 import struct
 import subprocess
 import sys
@@ -13,11 +14,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 CONTRACT = HERE.parent / "evidence/compatibility.json"
+PANEL_CONTRACT = HERE / "panel-contract.json"
 LIVE_TARGETS = {"rg34xxsp", "rg40xxv"}
 FIRMWARE_INPUTS = [
     HERE / name for name in ("build.py", "entry32.S", "loader.c", "runtime.c",
                             "kernel-trace64.S", "check-entry64.c", "kernel-fault64.S",
-                            "monitor-probe64.S", "initcall64.S")
+                            "monitor-probe64.S", "initcall64.S", "panel-probe.h", "panel-contract.json")
 ] + [HERE.parent / "fastboot/unpack.c"] + [
     HERE.parent / "spl" / name for name in
     ("native-handoff.h", "native-boot.c", "native-cache.c", "native-cache-off.S", "dram-select.c")
@@ -141,7 +143,7 @@ def inventory_for(target, output, compatibility, resume):
     return inventory, provenance
 
 
-def check_artifact(target, inventory, directory, contract):
+def check_artifact(target, inventory, directory, contract, panel):
     manifest = json.loads((directory / "manifest.json").read_text())
     source_dir = ROOT / "work" / target / "boot-gzip"
     source_manifest = json.loads((source_dir / "manifest.json").read_text())
@@ -170,6 +172,15 @@ def check_artifact(target, inventory, directory, contract):
     rule = {("old", "old"): 0, ("boe", "boe"): 1, ("old", "boe"): 2}[
         contract["vendor_pe6_lcd_type"]["high"], contract["vendor_pe6_lcd_type"]["low"]]
     assert manifest["panel_rule"] == rule
+    assert panel["package_sha256"] == sha(package)
+    assert panel["vendor_uboot_sha256"] == sha(toc["u-boot"])
+    assert (panel["rule"], panel["high"], panel["low"]) == (
+        rule, contract["vendor_pe6_lcd_type"]["high"], contract["vendor_pe6_lcd_type"]["low"])
+    assert type(panel["pull_up"]) is bool
+    assert manifest["panel_contract"] == panel and manifest["panel_pull_up"] is panel["pull_up"]
+    generated = (directory / "native-generated.h").read_text()
+    assert re.search(rf"^#define BASEOS_PANEL_RULE {rule}$", generated, re.M)
+    assert re.search(rf"^#define BASEOS_PANEL_PULL_UP {int(panel['pull_up'])}$", generated, re.M)
     firmware = (directory / "firmware.bin").read_bytes()
     assert sha(firmware) == manifest["firmware_sha256"]
     for region in manifest["firmware_regions"]:
@@ -195,6 +206,14 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     (output / "logs").mkdir(exist_ok=True)
     compatibility = json.loads(CONTRACT.read_text())
+    panel_contract = json.loads(PANEL_CONTRACT.read_text())
+    assert panel_contract["version"] == 1 and panel_contract["counter_hz"] == 24000000
+    assert panel_contract["models"].keys() == compatibility["targets"].keys()
+    assert panel_contract["prerequisites"] == {
+        "pi_cfg1": "0x300b124", "pi_data": "0x300b130", "power_pin": 15, "reset_pin": 14,
+        "power_wait_ms": 30, "reset_levels": [1, 0, 1], "reset_waits_ms": [15, 50, 100],
+        "pe_cfg0": "0x300b090", "pe_pull0": "0x300b0ac", "pe_data": "0x300b0a0",
+        "detect_pin": 6, "detect_function": 6}
     targets = sorted(args.target or compatibility["targets"])
     assert len(targets) == len(set(targets)) and set(targets) <= compatibility["targets"].keys()
     frozen = source_hashes()
@@ -204,6 +223,7 @@ def main():
         assert previous["compatibility_sha256"] == file_sha(CONTRACT), "cannot resume after compatibility changes"
     report = {"passed": False, "scope": "offline clean native-loader generation and host execution",
               "compatibility_sha256": file_sha(CONTRACT), "helper_sha256": file_sha(Path(__file__)),
+              "panel_contract_sha256": file_sha(PANEL_CONTRACT),
               "firmware_source_sha256": frozen, "targets": {},
               "hardware_boot": False, "spl_built": False, "dram_training_executed": False,
               "durable_install_eligible": False,
@@ -219,7 +239,8 @@ def main():
             run([HERE / "build.py", target, inventory, directory], output / "logs" / (target + ".build.log"))
         else:
             assert args.resume and (directory / "manifest.json").is_file(), "partial build needs a fresh output"
-        manifest = check_artifact(target, inventory, directory, compatibility["targets"][target])
+        panel = panel_contract["models"][target]
+        manifest = check_artifact(target, inventory, directory, compatibility["targets"][target], panel)
         write_json(directory / "provenance.json", provenance)
         verify_args = [HERE / "verify.py", directory, inventory]
         if provenance["kind"] == "prepared-source":
@@ -229,6 +250,10 @@ def main():
         proof = json.loads((directory / "verification.json").read_text())
         assert proof["passed"] and proof["loader_sha256"] == manifest["loader_sha256"]
         assert proof["final_call_r0_r3"] == ["0x8000ff04", "0x40080000", "0x44000000", "0x1"]
+        assert proof["panel_results"] == [panel["low"], panel["high"]]
+        expected_writes = 6 + int(panel["pull_up"]) if panel["rule"] == 2 else 0
+        assert len(proof["panel_gpio_writes"]) == expected_writes
+        assert len(proof["panel_sample_ticks"]) == int(panel["rule"] == 2)
         if provenance["kind"] == "prepared-source":
             assert proof["live_fdt_static_properties_exact"] is False
             assert proof["fdt_reference_kind"] == "prepared-source"
@@ -248,6 +273,8 @@ def main():
             "inventory_kind": provenance["kind"], "generation": manifest["generation"],
             "kernel_sha256": manifest["kernel_sha256"], "monitor_sha256": manifest["monitor_sha256"],
             "kernel_and_monitor_source_bytes_exact": True, "panel_rule": manifest["panel_rule"],
+            "panel_pull_up": panel["pull_up"], "panel_contract": panel,
+            "panel_prerequisite_gpio_timing_verified": panel["rule"] == 2,
             "panel_gpio_levels_verified": proof["panel_results"],
             "runtime_partition_map": next(word for word in manifest["bootargs_template"].split()
                                           if word.startswith("partitions=")),

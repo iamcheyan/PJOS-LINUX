@@ -5,10 +5,11 @@ loader while preserving the vendor kernel ABI, monitor, SCP, display, input,
 GPU, Wi-Fi and power behavior across all eleven models. No user configuration
 may be required for DRAM or panel revisions.
 
-The per-card step 1 implementation passes the required persistent functional
-checks on RG34XX SP and RG40XX V. Commit it, generate the pinned qualification,
-then complete the authorized RGSP daily-use installation. Generic fleet release
-qualification remains open.
+Step 1 is committed as `205f677`. RGSP daily-use acceptance is withdrawn:
+native chose `boe` for its `old` panel, leaving a black screen. Stock fallback
+restored the normal Slot screen, confirmed by the user. Keep RGSP usable on
+stock while correcting and requalifying automatic panel acquisition on host
+and lab devices. Step 2 is paused; generic fleet qualification remains open.
 The authoritative checkpoint and evidence locations are in [HANDOFF.md](HANDOFF.md).
 
 ## 1. Qualify and ship the native boot chain
@@ -33,10 +34,12 @@ The authoritative checkpoint and evidence locations are in [HANDOFF.md](HANDOFF.
   on both lab devices; rerun all-eleven-model artifact and compatibility proofs.
 - [x] Repeat matched clean-path benchmarks with display validation and fresh boot IDs.
 - [ ] Repeat final persistent-release timing after its functional qualification.
-- [ ] Reconcile documentation and evidence, review the decision trail, and
-  commit locally with a detailed message. Do not push without authorization.
-- [ ] Install the qualified persistent release on RGSP for Slot use. Perform
-  no further agent testing on RGSP after installation.
+- [x] Reconcile documentation and evidence, review the decision trail, and
+  commit the native chain locally with a detailed message (`205f677`). No push.
+- [x] Correct panel power/reset/strap acquisition for all models, enforce
+  stock/native panel equality before acknowledgment, and requalify both labs.
+- [ ] Install the corrected RGSP release and establish physical-screen
+  acceptance before leaving it for daily use.
 
 The selected 128 KiB raw capsule contains exact stock boot0 and an adopt-only
 native SPL. Actual Boot ROM replay, physical watchdog-retention controls,
@@ -55,11 +58,18 @@ now reject that path and preserve init, ADB, SSH and unrelated services.
 
 ## 2. Read the critical path sequentially
 
-Begin after step 1 is committed and installed. Package the kernel and a cpio
+Paused for the RGSP panel regression. After that fix, package the kernel and a cpio
 containing the library squashfs image into a contiguous boot payload, load
 libraries from RAM, and add boot-image A/B selection. Preserve root ext4,
 rootfs slots and update semantics. Measure the added sequential bytes against
 the avoided random card reads; the early one-second estimate is a hypothesis.
+
+All eleven vendor kernels already support initramfs. Two current 27.35 MB library
+images plus their kernels and stock recovery exceed p4's 64 MiB. The host startup
+fixture and sixteen shell cases are ready. Measure the complete cost of a
+synchronous RAM copy before selecting compression or a root-slot boot tail.
+See `work/h700-loader/sequential-v1/boot-contract.md` for the measured space
+budget and generation/update requirements.
 
 ## 3. Reduce kernel initialization
 

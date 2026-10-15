@@ -76,8 +76,16 @@ def model_policy(target, inventory):
                 " androidboot.secure_os_exist=0 gpt=1 bootreason=@BOOTREASON@ lcd_type=@PANEL@ @ANDROID@")
     strap = contract["vendor_pe6_lcd_type"]
     rule = {("old", "old"): 0, ("boe", "boe"): 1, ("old", "boe"): 2}[strap["high"], strap["low"]]
+    panel_contract = json.loads((HERE / "panel-contract.json").read_text())
+    assert panel_contract["version"] == 1 and panel_contract["counter_hz"] == 24000000
+    panel = panel_contract["models"][target]
+    assert panel["package_sha256"] == sha(package)
+    assert panel["vendor_uboot_sha256"] == sha(toc_items(package)["u-boot"])
+    assert (panel["rule"], panel["high"], panel["low"]) == (rule, strap["high"], strap["low"])
+    assert type(panel["pull_up"]) is bool
     return {"target": target, "model_id": sorted(compatibility).index(target) + 1,
-            "panel_rule": rule, "bootargs_template": command, "boot_partition_lba": boot_lba,
+            "panel_rule": rule, "panel_pull_up": panel["pull_up"],
+            "panel_contract": panel, "bootargs_template": command, "boot_partition_lba": boot_lba,
             "package_sha256": sha(package), "environment_sha256": sha((inventory / "env.bin").read_bytes()),
             "native_record_version": 2, "native_record_bytes": 240,
             "bootreason_policy": "vendor PMIC reg20/reg00 classifier and unknown-only regf0 fallback",
@@ -220,6 +228,7 @@ char *strrchr(const char *, int);
     binding_spec.loader.exec_module(binding)
     inputs = [HERE / name for name in ("entry32.S", "loader.c", "runtime.c")]
     inputs += [HERE.parent / "fastboot/unpack.c", SPL / "native-handoff.h", Path(__file__),
+               HERE / "panel-probe.h", HERE / "panel-contract.json",
                HERE / "kernel-trace64.S", HERE / "check-entry64.c",
                HERE / "kernel-fault64.S",
                HERE / "monitor-probe64.S", HERE / "initcall64.S",
@@ -241,6 +250,7 @@ char *strrchr(const char *, int);
         assert fnv(generation), "zero-cookie generation cannot be installed"
     header = (f"#define BASEOS_MODEL_ID {policy['model_id']}u\n"
               f"#define BASEOS_PANEL_RULE {policy['panel_rule']}\n"
+              f"#define BASEOS_PANEL_PULL_UP {int(policy['panel_pull_up'])}\n"
               f"#define BASEOS_IMAGE_BYTES {len(image)}u\n#define BASEOS_IMAGE_FNV 0x{fnv(image):08x}u\n"
               f"static const unsigned char baseos_generation[32] = {{{','.join(map(str,generation))}}};\n"
               f"static const char baseos_bootargs_template[] = {json.dumps(policy['bootargs_template'])};\n"
