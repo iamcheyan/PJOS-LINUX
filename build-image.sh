@@ -1,18 +1,24 @@
 #!/bin/sh
 # Compose one target's flashable BaseOS image from prepared StockMod inputs.
 # Usage: ./build-image.sh <target> [--native-dir DIR --native-panel old|boe]
+#        ./build-image.sh <target> --native-generation HEX --native-panel old|boe
+# --native-generation builds a rootfs for one card that already runs the
+# per-card native loader: it adds /etc/baseos/native-generation (the card's raw
+# 32-byte generation) and /etc/baseos/native-panel, so build-update.sh emits a
+# format1 payload carrying the matching native-generation= field.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tools/docker-platform.sh
 . "$HERE/tools/docker-platform.sh"
 TARGET="${1:?usage: $0 <target>}"; shift
-NATIVE_DIR=; NATIVE_PANEL=
+NATIVE_DIR=; NATIVE_PANEL=; NATIVE_GENERATION=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --native-dir) [ "$#" -ge 2 ] || exit 2; NATIVE_DIR="$(cd "$2" && pwd)"; shift 2 ;;
     --native-panel) [ "$#" -ge 2 ] || exit 2; NATIVE_PANEL="$2"; shift 2 ;;
-    *) echo "usage: $0 <target> [--native-dir DIR --native-panel old|boe]" >&2; exit 2 ;;
+    --native-generation) [ "$#" -ge 2 ] || exit 2; NATIVE_GENERATION="$2"; shift 2 ;;
+    *) echo "usage: $0 <target> [--native-dir DIR | --native-generation HEX] [--native-panel old|boe]" >&2; exit 2 ;;
   esac
 done
 SEQUENTIAL=0
@@ -20,9 +26,18 @@ if [ -n "$NATIVE_DIR" ]; then
   case "$NATIVE_PANEL" in old|boe) ;; *) echo "native compose requires an internal old|boe panel policy" >&2; exit 2 ;; esac
   [ -f "$NATIVE_DIR/manifest.json" ] || { echo "missing native manifest" >&2; exit 1; }
   SEQUENTIAL=1
+elif [ -n "$NATIVE_GENERATION" ]; then
+  case "$NATIVE_PANEL" in old|boe) ;; *) echo "--native-generation requires --native-panel old|boe" >&2; exit 2 ;; esac
+  printf "%s" "$NATIVE_GENERATION" | grep -Eqx "[0-9a-f]{64}" \
+    && printf "%s" "$NATIVE_GENERATION" | grep -q "[1-9a-f]" || {
+    echo "--native-generation must be 64 lowercase hex digits, not all zero" >&2; exit 2;
+  }
 elif [ -n "$NATIVE_PANEL" ]; then
-  echo "--native-panel requires --native-dir" >&2; exit 2
+  echo "--native-panel requires --native-dir or --native-generation" >&2; exit 2
 fi
+[ -z "$NATIVE_DIR" ] || [ -z "$NATIVE_GENERATION" ] || {
+  echo "--native-dir and --native-generation are exclusive" >&2; exit 2;
+}
 eval "$(python3 "$HERE/tools/device_profile.py" shell "$TARGET")"
 
 WORK="$HERE/work/$TARGET"
@@ -73,6 +88,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   -e P2_START="$SOURCE_P2_START" \
   -e SLOT_START="$SLOT_START" -e SLOT_SECTORS="$SLOT_SECTORS" \
   -e FS_SECTORS="$FS_SECTORS" -e SEQUENTIAL="$SEQUENTIAL" -e NATIVE_PANEL="$NATIVE_PANEL" \
+  -e NATIVE_GENERATION="$NATIVE_GENERATION" \
   -e SLOT_B_START="$SLOT_B_START" \
   -e UDISK_START="$UDISK_START" -e UDISK_SECTORS="$UDISK_SECTORS" \
   -e PRIMARY_START="$PRIMARY_START" -e PRIMARY_SECTORS="$PRIMARY_SECTORS" \
@@ -132,6 +148,19 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   rm -rf /tmp/lib-check /tmp/lib.got
   echo "/usr/lib image: $(wc -l < /tmp/lib.want) entries, $(stat -c %s /tmp/usr-lib.sqfs) bytes"
 
+  if [ -n "$NATIVE_GENERATION" ]; then
+    [ -f "$R/usr/sbin/native-health" ] && [ -x "$R/usr/sbin/native-health" ] || {
+      echo "FATAL: per-card native rootfs lacks /usr/sbin/native-health"; exit 1
+    }
+    mkdir -p "$R/etc/baseos"
+    python3 -c "import sys; open(sys.argv[1], \"wb\").write(bytes.fromhex(sys.argv[2]))" \
+      "$R/etc/baseos/native-generation" "$NATIVE_GENERATION"
+    printf "%s\n" "$NATIVE_PANEL" > "$R/etc/baseos/native-panel"
+    chown 0:0 "$R/etc/baseos" "$R/etc/baseos/native-generation" "$R/etc/baseos/native-panel"
+    chmod 755 "$R/etc/baseos"
+    chmod 644 "$R/etc/baseos/native-generation" "$R/etc/baseos/native-panel"
+    echo "per-card native policy: generation $NATIVE_GENERATION, panel $NATIVE_PANEL"
+  fi
   if [ "$SEQUENTIAL" -eq 1 ]; then
     rm -rf "/work/boot-payload-$NATIVE_PANEL"
     python3 /repo/tools/slot_image.py prepare "$R" /native "$TARGET" "$NATIVE_PANEL" "/work/boot-payload-$NATIVE_PANEL"
@@ -185,6 +214,20 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
     echo "FATAL: p5 /usr/lib is not an empty mount point"; exit 1
   }
   echo "p5 /usr/lib image OK"
+  if [ -n "$NATIVE_GENERATION" ]; then
+    debugfs -R "dump /etc/baseos/native-generation /tmp/generation.p5" /tmp/p5.img 2>/dev/null
+    [ "$(od -An -v -tx1 /tmp/generation.p5 | tr -d " \n")" = "$NATIVE_GENERATION" ] || {
+      echo "FATAL: p5 native-generation does not match"; exit 1
+    }
+    [ "$(debugfs -R "cat /etc/baseos/native-panel" /tmp/p5.img 2>/dev/null)" = "$NATIVE_PANEL" ] || {
+      echo "FATAL: p5 native-panel does not match"; exit 1
+    }
+    debugfs -R "stat /usr/sbin/native-health" /tmp/p5.img 2>/dev/null | grep -q "Mode:  0755" || {
+      echo "FATAL: p5 native-health is not executable"; exit 1
+    }
+    rm -f /tmp/generation.p5
+    echo "p5 per-card native policy OK"
+  fi
 
   mcopy -i "$OUT@@$((P2_START * 512))" ::/bootlogo.bmp /tmp/embedded-bootlogo.bmp
   cmp /work/bootlogo.bmp /tmp/embedded-bootlogo.bmp
