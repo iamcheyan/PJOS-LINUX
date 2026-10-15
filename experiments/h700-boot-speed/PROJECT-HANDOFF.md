@@ -1,5 +1,38 @@
 # H700 boot project: handoff at user stop, 2026-10-15
 
+## Next: per-model 1.5.1 release (user requirement, 2026-10-15)
+
+The user wants a v1.5.1 `.img` and `.bosupd` for all eleven models. They must build
+from the repository plus the prepared artefacts (`fetch-prepared.sh`, GitHub
+`prepared-YYYYMMDD`), with no device or card access. The `.bosupd` must take any
+card from 1.0.0 to 1.5.0 to 1.5.1.
+
+- Drop the per-card binding. Build each model's capsule from the untouched stock
+  boot0 in its prepared prefix. Writing the capsule replaces whatever boot0 the
+  card holds; if the device falls back to stock, it retrains DRAM once, like a
+  freshly flashed card. The generation and cookie then become per-model and can
+  live in the rootfs image.
+- Panel type can differ between units of one model, and the SPL/loader already
+  detects it at every boot. Do not bake `/etc/baseos/native-panel` into the
+  image; record it from the first native boot, or derive the health check from
+  the live detection.
+- Ship the model's capsule, firmware, image and recovery TOC inside the
+  `.bosupd`. Extend `baseos-boot-migrate`, which already moves 1.0.0–1.3.x cards
+  to the 1.4.0 boot files, with the guarded native write: hold the stock latch,
+  write the body before the header, read everything back, and clear the exact
+  latch. This is the same protocol as `v150/rgsp-install/install-rgsp-release.py`,
+  as on-device code. Cover the starting points original vendor files (≤1.3.x),
+  1.4.0 gzip pair, and 1.5.0 native.
+- `.img`: the normal per-model card image with the capsule, firmware, image and
+  TOC already written (sectors 16/17, 32800, p4+40/48 MiB).
+- Trials: both labs from a 1.4.0 and from a 1.5.0 start, then the user's RG SP
+  and RG28XX. The RG28XX's DDR3 at 792 MHz and its panel are only emulated so far.
+- 1.5.1 loader source: branch `loader-speed` `a91eae7`. RG40XX V ran it: logo lit
+  at 1.33 s, frontend at 3.16 s, against 1.5.0's 1.51 s and 3.46 s.
+  `work/h700-loader/v151/build.py` gained an rg28xx entry after sealing; re-seal
+  before more trials. The per-card rg28xx image attempt was stopped; do not
+  resume it.
+
 ## Update: boot splash fixed for 1.5.0 (later on 2026-10-15)
 
 The logo-v3 failure was the SPL itself, not a missing vendor register. The A64
