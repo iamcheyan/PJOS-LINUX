@@ -3,6 +3,7 @@
 import argparse
 import gzip
 import hashlib
+import importlib.util
 import json
 import re
 import struct
@@ -19,11 +20,13 @@ LIVE_TARGETS = {"rg34xxsp", "rg40xxv"}
 FIRMWARE_INPUTS = [
     HERE / name for name in ("build.py", "entry32.S", "loader.c", "runtime.c",
                             "kernel-trace64.S", "check-entry64.c", "kernel-fault64.S",
-                            "monitor-probe64.S", "initcall64.S", "panel-probe.h", "panel-contract.json")
+                            "monitor-probe64.S", "initcall64.S", "panel-probe.h", "panel-contract.json",
+                            "boot-logo-file.h", "boot-logo-pixels.h", "build-display.py", "early-display.c",
+                            "display-engine.json", "display-handoff.json", "panel-init.json", "panel-spi9.h")
 ] + [HERE.parent / "fastboot/unpack.c"] + [
     HERE.parent / "spl" / name for name in
-    ("native-handoff.h", "native-boot.c", "native-cache.c", "native-cache-off.S", "dram-select.c")
-]
+    ("native-handoff.h", "native-logo.h", "native-display.h", "native-boot.c", "native-cache.c", "native-cache-off.S", "dram-select.c")
+] + [ROOT / "devices.json", ROOT / "tools/device_profile.py"]
 
 
 def sha(data):
@@ -41,6 +44,11 @@ def write_json(path, value):
 
 def source_hashes():
     return {str(path.relative_to(ROOT)): file_sha(path) for path in FIRMWARE_INPUTS}
+
+
+def verifier_hashes():
+    return {str(path.relative_to(ROOT)): file_sha(path) for path in
+            (Path(__file__), HERE / "verify.py", HERE / "verify-kernel-logo.py", HERE / "verify-early-display.py")}
 
 
 def toc_items(package):
@@ -181,12 +189,64 @@ def check_artifact(target, inventory, directory, contract, panel):
     generated = (directory / "native-generated.h").read_text()
     assert re.search(rf"^#define BASEOS_PANEL_RULE {rule}$", generated, re.M)
     assert re.search(rf"^#define BASEOS_PANEL_PULL_UP {int(panel['pull_up'])}$", generated, re.M)
+    profile_spec = importlib.util.spec_from_file_location("fleet_device_profiles", ROOT / "tools/device_profile.py")
+    profiles = importlib.util.module_from_spec(profile_spec)
+    profile_spec.loader.exec_module(profiles)
+    profile = profiles.get_profile(target)
+    prefix = (inventory / "prefix.bin").read_bytes()
+    table, count, entry_size = struct.unpack_from("<QII", prefix, 584)
+    logo_partitions = []
+    for index in range(count):
+        entry = prefix[table * 512 + index * entry_size:table * 512 + (index + 1) * entry_size]
+        if any(entry[:16]) and entry[56:128].decode("utf-16-le").rstrip("\0") == "boot-resource":
+            first, last = struct.unpack_from("<QQ", entry, 32)
+            logo_partitions.append((first, last - first + 1))
+    assert len(logo_partitions) == 1
+    logo = manifest["boot_logo"]
+    assert (logo["partition_lba"], logo["partition_sectors"]) == logo_partitions[0]
+    assert (logo["width"], logo["height"]) == (profile["bootlogo_width"], profile["bootlogo_height"])
+    assert 0 < logo["width"] * logo["height"] * 4 <= 0x400000
+    for macro, value in {"BASEOS_LOGO_PARTITION_SECTOR": logo["partition_lba"],
+                         "BASEOS_LOGO_PARTITION_SECTORS": logo["partition_sectors"],
+                         "BASEOS_LOGO_WIDTH": logo["width"], "BASEOS_LOGO_HEIGHT": logo["height"]}.items():
+        assert re.search(rf"^#define {macro} {value}u$", generated, re.M), (target, macro)
+    assert (directory / "native-logo.h").read_bytes() == (HERE.parent / "spl/native-logo.h").read_bytes()
+    assert (directory / "native-display.h").read_bytes() == (HERE.parent / "spl/native-display.h").read_bytes()
+    handoff_contract = json.loads((HERE / "display-handoff.json").read_text())
+    assert handoff_contract["version"] == 1
+    handoff = handoff_contract["models"][target]
+    assert handoff["package_sha256"] == manifest["package_sha256"]
+    assert handoff["vendor_uboot_sha256"] == panel["vendor_uboot_sha256"]
+    assert manifest["early_display"]["handoff"] == {key: handoff[key] for key in ("boot_disp", "boot_disp1", "boot_disp2")}
+    for name in ("boot_disp", "boot_disp1", "boot_disp2"):
+        assert re.search(rf"^#define BASEOS_DISPLAY_{name.upper()} 0x{handoff[name]:x}u$", generated, re.M)
+    helper_directory = directory / "early-display"
+    helper = json.loads((helper_directory / "manifest.json").read_text())
+    assert helper == manifest["early_display_helper"]
+    assert (helper["target"], helper["generation"], helper["address"]) == (target, manifest["generation"], 0x4a500000)
+    assert helper["bytes"] <= 0x40000 and helper["sha256"] == file_sha(helper_directory / "helper.bin")
+    assert helper["engine_contract_sha256"] == file_sha(HERE / "display-engine.json")
+    assert helper["panel_contract_sha256"] == file_sha(HERE / "panel-init.json")
+    assert helper["vendor_dtb_sha256"] == manifest["kernel_dtb_sha256"]
+    assert helper["hardware_qualified"] is False
+    for name in ("native-logo.h", "native-display.h"):
+        assert (helper_directory / name).read_bytes() == (HERE.parent / "spl" / name).read_bytes()
+    if "native_generated_header_sha256" in manifest:
+        assert file_sha(directory / "native-generated.h") == manifest["native_generated_header_sha256"]
     firmware = (directory / "firmware.bin").read_bytes()
     assert sha(firmware) == manifest["firmware_sha256"]
+    assert [(r["name"], r["destination"]) for r in manifest["firmware_regions"]] == [
+        ("monitor", 0x48000000), ("dtbo", 0x4a100000), ("dtb", 0x4a200000),
+        ("loader", 0x4a000000), ("early-display", 0x4a500000)]
+    offset = 0
     for region in manifest["firmware_regions"]:
-        payload = (directory / "loader.bin").read_bytes() if region["name"] == "loader" else toc[region["name"]]
+        payload = ((directory / "loader.bin").read_bytes() if region["name"] == "loader" else
+                   (helper_directory / "helper.bin").read_bytes() if region["name"] == "early-display" else toc[region["name"]])
+        assert region["offset"] == offset
         assert len(payload) == region["bytes"]
         assert firmware[region["offset"]:region["offset"] + region["bytes"]] == payload
+        offset += (len(payload) + 511) & ~511
+    assert offset == len(firmware) <= 0x100000
     return manifest
 
 
@@ -217,14 +277,17 @@ def main():
     targets = sorted(args.target or compatibility["targets"])
     assert len(targets) == len(set(targets)) and set(targets) <= compatibility["targets"].keys()
     frozen = source_hashes()
+    frozen_verifiers = verifier_hashes()
     if args.resume and (output / "fleet.json").is_file():
         previous = json.loads((output / "fleet.json").read_text())
         assert previous["firmware_source_sha256"] == frozen, "cannot resume after firmware source changes"
         assert previous["compatibility_sha256"] == file_sha(CONTRACT), "cannot resume after compatibility changes"
+        assert previous["verification_source_sha256"] == frozen_verifiers, "cannot resume after verifier changes"
     report = {"passed": False, "scope": "offline clean native-loader generation and host execution",
               "compatibility_sha256": file_sha(CONTRACT), "helper_sha256": file_sha(Path(__file__)),
               "panel_contract_sha256": file_sha(PANEL_CONTRACT),
               "firmware_source_sha256": frozen, "targets": {},
+              "verification_source_sha256": frozen_verifiers,
               "hardware_boot": False, "spl_built": False, "dram_training_executed": False,
               "durable_install_eligible": False,
               "unperformed": ["new hardware boots for these generated artifacts", "SPL builds and DRAM training",
@@ -232,6 +295,7 @@ def main():
     write_json(output / "fleet.json", report)
     for target in targets:
         assert source_hashes() == frozen, "firmware inputs changed during fleet generation"
+        assert verifier_hashes() == frozen_verifiers, "verifiers changed during fleet generation"
         print(json.dumps({"target": target, "stage": "build"}), flush=True)
         inventory, provenance = inventory_for(target, output, compatibility, args.resume)
         directory = output / "loaders" / target
@@ -245,20 +309,98 @@ def main():
         verify_args = [HERE / "verify.py", directory, inventory]
         if provenance["kind"] == "prepared-source":
             verify_args.append("--prepared-source")
+        print(json.dumps({"target": target, "stage": "actual A64 early-display helper"}), flush=True)
+        helper_proof_directory = directory / "early-display/proof"
+        helper_proof_path = helper_proof_directory / "verification.json"
+        if not helper_proof_path.exists():
+            run([HERE / "verify-early-display.py", directory, "--output", helper_proof_directory],
+                output / "logs" / (target + ".early-display.log"))
+        else:
+            assert args.resume, "existing early-display proof requires --resume"
+        helper_proof = json.loads(helper_proof_path.read_text())
+        assert helper_proof["passed"] and helper_proof["required_cases_complete"]
+        assert helper_proof["verifier_sha256"] == file_sha(HERE / "verify-early-display.py")
+        assert helper_proof["helper_sha256"] == manifest["early_display_helper"]["sha256"]
+        assert helper_proof["generation"] == manifest["generation"]
+        assert helper_proof["display_record_sha256"] == file_sha(helper_proof_directory / "display-record.bin")
+        assert helper_proof["display_pixels_sha256"] == file_sha(helper_proof_directory / "display-pixels.bin")
+        if (helper_proof_directory / "display-source.bmp").exists():
+            assert helper_proof["fixture_sha256"] == file_sha(helper_proof_directory / "display-source.bmp")
         print(json.dumps({"target": target, "stage": "A32 decoder/FDT/SMC"}), flush=True)
         run(verify_args, output / "logs" / (target + ".verify.log"))
         proof = json.loads((directory / "verification.json").read_text())
         assert proof["passed"] and proof["loader_sha256"] == manifest["loader_sha256"]
+        assert proof["verifier_sha256"] == file_sha(HERE / "verify.py")
         assert proof["final_call_r0_r3"] == ["0x8000ff04", "0x40080000", "0x44000000", "0x1"]
         assert proof["panel_results"] == [panel["low"], panel["high"]]
         expected_writes = 6 + int(panel["pull_up"]) if panel["rule"] == 2 else 0
         assert len(proof["panel_gpio_writes"]) == expected_writes
         assert len(proof["panel_sample_ticks"]) == int(panel["rule"] == 2)
+        logo = proof["boot_logo"]
+        assert logo["passed"] and logo["linked_symbol"] == "baseos_prepare_logo" and not logo["kernel_decode_repeated"]
+        assert logo["missing_logo_main_call_verified"]
+        assert logo["fixture_sha256"] == file_sha(ROOT / logo["fixture_path"])
+        assert (logo["width"], logo["height"]) == (manifest["boot_logo"]["width"], manifest["boot_logo"]["height"])
+        assert logo["prepared_fdt_sha256"] == file_sha(directory / "verified-logo-kernel.dtb")
+        assert logo["pixels_sha256"] == file_sha(directory / "logo-pixels.bin")
+        assert logo["descriptor_sha256"] == file_sha(directory / "logo-descriptor.bin")
+        assert logo["missing_logo_fdt_sha256"] == file_sha(directory / "verified-kernel.dtb")
+        assert [sum(case["return_value"] == value for case in logo["cases"]) for value in (0, 1, -1)] == [20, 3, 2]
+        assert [(case["name"], case["return_value"]) for case in logo["geometry_cases"]] == [
+            ("centered-smaller-odd-stride", 1), ("centered-one-pixel", 1),
+            ("bmp-zero-width", 0), ("bmp-negative-width", 0)]
+        early = proof["early_display"]
+        assert early["passed"] and early["actual_helper_input"] and not early["kernel_decode_repeated"]
+        assert early["no_panel_probe_or_reset"] and early["panel_display_mmio_accesses"] == 0
+        assert early["helper_proof"]["proof_sha256"] == file_sha(helper_proof_path)
+        assert early["display_record_sha256"] == helper_proof["display_record_sha256"]
+        assert early["pixels_sha256"] == helper_proof["display_pixels_sha256"]
+        assert early["fixture_sha256"] == helper_proof["fixture_sha256"] == file_sha(directory / "early-logo-source.bmp")
+        assert early["prepared_fdt_sha256"] == file_sha(directory / "verified-early-logo-kernel.dtb")
+        assert early["pixels_sha256"] == file_sha(directory / "early-logo-pixels.bin")
+        assert early["display_record_sha256"] == file_sha(directory / "early-display-record.bin")
         if provenance["kind"] == "prepared-source":
             assert proof["live_fdt_static_properties_exact"] is False
             assert proof["fdt_reference_kind"] == "prepared-source"
         else:
             assert proof["live_fdt_static_properties_exact"] is True
+        print(json.dumps({"target": target, "stage": "actual logo kernel consumer"}), flush=True)
+        logo_consumer_path = directory / "kernel-logo-verification.json"
+        if not logo_consumer_path.exists():
+            run([HERE / "verify-kernel-logo.py", directory, "--dtb", directory / "verified-logo-kernel.dtb",
+                 "--pixels", directory / "logo-pixels.bin", "--output", logo_consumer_path],
+                output / "logs" / (target + ".kernel-logo.log"))
+        else:
+            assert args.resume, "existing logo consumer proof requires --resume"
+        consumer = json.loads(logo_consumer_path.read_text())
+        assert consumer["passed"] and not consumer["errors"] and len(consumer["cases"]) == 1
+        assert consumer["verifier_sha256"] == file_sha(HERE / "verify-kernel-logo.py")
+        consumed = consumer["cases"][0]
+        assert consumed["input_mode"] == "generated-fdt-and-pixels"
+        assert consumed["fdt_sha256"] == logo["prepared_fdt_sha256"]
+        assert consumed["source_pixels_sha256"] == consumed["destination_pixels_sha256"] == logo["pixels_sha256"]
+        assert consumed["manifest_sha256"] == file_sha(directory / "manifest.json")
+        assert consumed["kernel_sha256"] == manifest["kernel_sha256"]
+        assert consumed["pixels_copied_exact"] and consumed["source_held_reserved_for_boot"]
+        assert consumed["handoff_mode"] == "cold" and consumed["boot_disp_sync"] == 0
+        warm_consumer_path = directory / "kernel-early-logo-verification.json"
+        if not warm_consumer_path.exists():
+            run([HERE / "verify-kernel-logo.py", directory, "--warm", "--dtb", directory / "verified-early-logo-kernel.dtb",
+                 "--pixels", directory / "early-logo-pixels.bin", "--output", warm_consumer_path],
+                output / "logs" / (target + ".kernel-early-logo.log"))
+        else:
+            assert args.resume, "existing warm consumer proof requires --resume"
+        warm_consumer = json.loads(warm_consumer_path.read_text())
+        assert warm_consumer["passed"] and not warm_consumer["errors"] and len(warm_consumer["cases"]) == 1
+        assert warm_consumer["verifier_sha256"] == file_sha(HERE / "verify-kernel-logo.py")
+        warm = warm_consumer["cases"][0]
+        assert warm["handoff_mode"] == "warm" and warm["boot_disp_sync"] == 1
+        assert warm["fdt_sha256"] == early["prepared_fdt_sha256"]
+        assert warm["source_pixels_sha256"] == warm["destination_pixels_sha256"] == early["pixels_sha256"]
+        assert warm["warm_status"]["display_record_sha256"] == early["display_record_sha256"]
+        assert warm["warm_status"]["fixture_sha256"] == early["fixture_sha256"]
+        assert warm["manifest_sha256"] == file_sha(directory / "manifest.json")
+        assert warm["kernel_sha256"] == manifest["kernel_sha256"]
         print(json.dumps({"target": target, "stage": "vendor monitor"}), flush=True)
         monitor_path = directory / "monitor-verification.json"
         run([HERE.parent / "spl/verify-monitor.py", ROOT / "work" / target / "boot-gzip/boot-package.bin",
@@ -276,6 +418,24 @@ def main():
             "panel_pull_up": panel["pull_up"], "panel_contract": panel,
             "panel_prerequisite_gpio_timing_verified": panel["rule"] == 2,
             "panel_gpio_levels_verified": proof["panel_results"],
+            "boot_logo": {"policy": manifest["boot_logo"], "fixture_path": logo["fixture_path"],
+                          "fixture_sha256": logo["fixture_sha256"], "pixels_sha256": logo["pixels_sha256"],
+                          "prepared_fdt_sha256": logo["prepared_fdt_sha256"],
+                          "descriptor_sha256": logo["descriptor_sha256"],
+                          "native_generated_header_sha256": file_sha(directory / "native-generated.h"),
+                          "native_logo_header_sha256": file_sha(directory / "native-logo.h"),
+                          "producer_report_sha256": file_sha(directory / "verification.json"),
+                          "consumer_report_sha256": file_sha(logo_consumer_path),
+                          "producer_cases": len(logo["cases"]), "kernel_pixels_copied_exact": True},
+            "early_display": {"helper_sha256": manifest["early_display_helper"]["sha256"],
+                              "helper_proof_sha256": file_sha(helper_proof_path),
+                              "display_record_sha256": early["display_record_sha256"],
+                              "prepared_fdt_sha256": early["prepared_fdt_sha256"],
+                              "pixels_sha256": early["pixels_sha256"],
+                              "producer_cases": len(early["cases"]),
+                              "warm_consumer_sha256": file_sha(warm_consumer_path),
+                              "warm_kernel_pixels_copied_exact": True,
+                              "no_second_panel_probe_or_reset": True},
             "runtime_partition_map": next(word for word in manifest["bootargs_template"].split()
                                           if word.startswith("partitions=")),
             "dram_policy": "loader consumes the trained SPL record; no user DRAM selection",
@@ -285,6 +445,7 @@ def main():
         write_json(output / "fleet.json", report)
         print(json.dumps({"target": target, "stage": "passed"}), flush=True)
     assert source_hashes() == frozen, "firmware inputs changed during fleet generation"
+    assert verifier_hashes() == frozen_verifiers, "verifiers changed during fleet generation"
     report["passed"] = len(report["targets"]) == len(targets)
     report["all_eleven_models"] = set(report["targets"]) == compatibility["targets"].keys()
     report["monitor_families"] = sorted({item["monitor_sha256"] for item in report["targets"].values()})

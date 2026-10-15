@@ -1,19 +1,35 @@
 #!/bin/sh
 # Compose one target's flashable BaseOS image from prepared StockMod inputs.
-# Usage: ./build-image.sh <target>
+# Usage: ./build-image.sh <target> [--native-dir DIR --native-panel old|boe]
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tools/docker-platform.sh
 . "$HERE/tools/docker-platform.sh"
-TARGET="${1:?usage: $0 <target>}"
-[ "$#" -eq 1 ] || { echo "usage: $0 <target>" >&2; exit 2; }
+TARGET="${1:?usage: $0 <target>}"; shift
+NATIVE_DIR=; NATIVE_PANEL=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --native-dir) [ "$#" -ge 2 ] || exit 2; NATIVE_DIR="$(cd "$2" && pwd)"; shift 2 ;;
+    --native-panel) [ "$#" -ge 2 ] || exit 2; NATIVE_PANEL="$2"; shift 2 ;;
+    *) echo "usage: $0 <target> [--native-dir DIR --native-panel old|boe]" >&2; exit 2 ;;
+  esac
+done
+SEQUENTIAL=0
+if [ -n "$NATIVE_DIR" ]; then
+  case "$NATIVE_PANEL" in old|boe) ;; *) echo "native compose requires an internal old|boe panel policy" >&2; exit 2 ;; esac
+  [ -f "$NATIVE_DIR/manifest.json" ] || { echo "missing native manifest" >&2; exit 1; }
+  SEQUENTIAL=1
+elif [ -n "$NATIVE_PANEL" ]; then
+  echo "--native-panel requires --native-dir" >&2; exit 2
+fi
 eval "$(python3 "$HERE/tools/device_profile.py" shell "$TARGET")"
 
 WORK="$HERE/work/$TARGET"
 SOURCE="$WORK/source.json"
 BOOT_PREFIX="$WORK/boot-prefix.img"
 OUT="$WORK/baseos-$TARGET.img"
+[ "$SEQUENTIAL" -eq 0 ] || OUT="$WORK/baseos-$TARGET-$NATIVE_PANEL.img"
 
 [ -f "$SOURCE" ] || { echo "missing $SOURCE (run prepare-stock.sh $TARGET IMAGE)" >&2; exit 1; }
 [ -f "$BOOT_PREFIX" ] || { echo "missing $BOOT_PREFIX (run prepare-stock.sh $TARGET IMAGE)" >&2; exit 1; }
@@ -37,6 +53,8 @@ python3 "$HERE/tools/lib_image.py" check "$TARGET"
 # being a partition is what keeps it invisible to desktop operating systems.
 SLOT_START="$SOURCE_P5_START"
 SLOT_SECTORS=$((512 * 2048))
+FS_SECTORS="$SLOT_SECTORS"
+[ "$SEQUENTIAL" -eq 0 ] || FS_SECTORS=$((472 * 2048))
 UDISK_SECTORS=$((128 * 2048))
 SLOT_B_START=$((SLOT_START + SLOT_SECTORS))
 UDISK_START=$((SLOT_START + 2 * SLOT_SECTORS))
@@ -48,11 +66,13 @@ PRIMARY_SECTORS=$((TOTAL_SECTORS - 4 - PRIMARY_START + 1))
 # work is earlier). Explicit host platform avoids a cached arm64 image on Intel.
 docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   -v "$WORK":/work -v "$HERE/tools":/tools:ro \
+  -v "$HERE":/repo:ro -v "${NATIVE_DIR:-$HERE}":/native:ro \
   -v "$HERE/manifest":/manifest:ro \
   -e TARGET="$TARGET" -e OUT_NAME="$(basename "$OUT")" \
   -e TOTAL_SECTORS="$TOTAL_SECTORS" \
   -e P2_START="$SOURCE_P2_START" \
   -e SLOT_START="$SLOT_START" -e SLOT_SECTORS="$SLOT_SECTORS" \
+  -e FS_SECTORS="$FS_SECTORS" -e SEQUENTIAL="$SEQUENTIAL" -e NATIVE_PANEL="$NATIVE_PANEL" \
   -e SLOT_B_START="$SLOT_B_START" \
   -e UDISK_START="$UDISK_START" -e UDISK_SECTORS="$UDISK_SECTORS" \
   -e PRIMARY_START="$PRIMARY_START" -e PRIMARY_SECTORS="$PRIMARY_SECTORS" \
@@ -112,8 +132,16 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   rm -rf /tmp/lib-check /tmp/lib.got
   echo "/usr/lib image: $(wc -l < /tmp/lib.want) entries, $(stat -c %s /tmp/usr-lib.sqfs) bytes"
 
+  if [ "$SEQUENTIAL" -eq 1 ]; then
+    rm -rf "/work/boot-payload-$NATIVE_PANEL"
+    python3 /repo/tools/slot_image.py prepare "$R" /native "$TARGET" "$NATIVE_PANEL" "/work/boot-payload-$NATIVE_PANEL"
+  fi
   mke2fs -q -F -t ext4 -O "$EXT4_OPTS" -b 4096 -L rootfs -d "$R" \
-    -E offset=$((SLOT_START * 512)) "$OUT" $((SLOT_SECTORS / 8))
+    -E offset=$((SLOT_START * 512)) "$OUT" $((FS_SECTORS / 8))
+  if [ "$SEQUENTIAL" -eq 1 ]; then
+    dd if="/work/boot-payload-$NATIVE_PANEL/payload/boot-blob.bin" of="$OUT" bs=512 \
+      seek=$((SLOT_START + FS_SECTORS)) conv=notrunc status=none
+  fi
 
   # Slot B is left as zeros on purpose: the first system update writes it.
 
@@ -127,6 +155,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   sgdisk -v "$OUT" | tail -4
   dd if="$OUT" of=/tmp/p5.img bs=512 skip="$SLOT_START" count="$SLOT_SECTORS" status=none
   e2fsck -fn /tmp/p5.img >/dev/null
+  [ "$SEQUENTIAL" -eq 0 ] || python3 /repo/tools/slot_image.py verify /tmp/p5.img "$TARGET"
   echo "p5 rootfs (slot A) ext4 OK"
   dd if="$OUT" of=/tmp/p6.img bs=512 skip="$UDISK_START" count="$UDISK_SECTORS" status=none
   e2fsck -fn /tmp/p6.img >/dev/null

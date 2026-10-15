@@ -1,6 +1,35 @@
 # Handoff: where the pre-Linux time goes, and the counter-stamp measurement
 
+**Stopped at the user's request on 2026-10-15. Read
+[PROJECT-HANDOFF.md](PROJECT-HANDOFF.md) first.** It supersedes the in-progress
+checkpoint below, records exact restored lab state, all current source/proof
+locations and the unfinished logo/Step 2 integration. Active code is already in
+the main local checkout on `uboot-trace`; the old boot-speed worktree is clean.
+The private diagnostic was never booted and RG40's qualified v2 media was restored
+without reboot. No background work remains.
+
 ## Active checkpoint — read this before the historical notes
+
+**Current priority: restore an early native-loader boot logo.** The user clarified
+that a first logo during kernel display initialization would be too late. Read-only
+FAT/BMP loading, an A64 DE/TCON/panel helper, and the original-kernel warm
+pixel-copy handoff are implemented. The helper runs before the main image read,
+selects the panel after power/reset, and authenticates its active-display record
+for the A32 loader. Final SP host replay passes the actual helper, cached-panel
+producer and both cold/warm kernel consumers; the full boot chain and eleven
+model profiles are being qualified under `native-logo-v1/artifacts-v3` and
+`native-logo-v1/fleet-v1`. RG40XX V v3 staging passed exact backups/readbacks,
+but the first noack trial returned through autonomous stock fallback without a
+native witness. The identical v3 capsule/firmware then booted accepted native
+with only the FAT artwork name temporarily hidden; its exact directory sector
+was restored. This isolates the failure to early display initialization. Follow
+the complete vendor display call chain and its prerequisites, as the user
+explicitly requested; do not add another guessed register fix. A private owned
+RTC-phase diagnostic is being prepared. RG34XX SP returned on stock, passed an
+ordinary old-v2 native normalization boot and is quiesced; v3 is not installed
+there. Personal RGSP remains untouched on its confirmed working panel-fixed build.
+Step 2 hardware comparisons are paused for this display work. Current artifacts
+and ownership are recorded in `work/h700-loader/native-logo-v1/design.md`.
 
 Step 1 is committed as `205f677`, with the panel fix in `ad95638`. **The
 corrected personal RGSP release is installed and the user confirmed normal Slot.**

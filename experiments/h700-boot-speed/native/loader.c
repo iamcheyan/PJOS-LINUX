@@ -5,6 +5,9 @@
 #include "native-handoff.h"
 #include "native-generated.h"
 #include "panel-probe.h"
+#include "native-logo.h"
+#include "native-display.h"
+#include "boot-logo-pixels.h"
 #ifdef BASEOS_NATIVE_DIAGNOSTIC
 #include "native-trace-constants.h"
 #endif
@@ -81,6 +84,23 @@ static void hex_digits(char *out, uint32_t word, unsigned digits)
         out[i] = "0123456789abcdef"[(word >> ((digits - 1 - i) * 4)) & 15];
 }
 
+__attribute__((noinline)) int baseos_native_display_state(void)
+{
+    const struct baseos_native_display *display = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
+    int ready = baseos_display_valid(display, baseos_generation);
+    if (ready <= 0) return ready;
+    const struct baseos_native_record *record = (void *)BASEOS_NATIVE_RECORD_ADDRESS;
+    const struct baseos_native_logo *logo = (void *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS;
+    if (logo->magic != BASEOS_NATIVE_LOGO_MAGIC || logo->reserved ||
+        (BASEOS_PANEL_RULE < 2 && display->panel != BASEOS_PANEL_RULE) ||
+        display->logo_bytes != logo->bytes || display->logo_fnv != logo->fnv ||
+        display->shown_ticks < record->read_started_ticks || display->shown_ticks > record->loaded_ticks ||
+        baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_BMP_ADDRESS, display->logo_bytes) != display->logo_fnv ||
+        baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS,
+                        BASEOS_LOGO_WIDTH * BASEOS_LOGO_HEIGHT * 4u) != display->pixel_fnv) return -1;
+    return 1;
+}
+
 static int make_command_line(const unsigned char *image)
 {
     const struct baseos_native_record *record = (void *)BASEOS_NATIVE_RECORD_ADDRESS;
@@ -91,7 +111,11 @@ static int make_command_line(const unsigned char *image)
     hex_digits(serial + 3, sid[0x208 / 4], 8);
     hex_digits(serial + 11, sid[0x20c / 4], 8);
     serial[19] = 0;
-    int detected = baseos_panel_probe(BASEOS_PANEL_RULE, BASEOS_PANEL_PULL_UP, &panel_io);
+    int early = baseos_native_display_state();
+    if (early < 0) return -1;
+    const struct baseos_native_display *display = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
+    int detected = early ? (int)display->panel :
+                   baseos_panel_probe(BASEOS_PANEL_RULE, BASEOS_PANEL_PULL_UP, &panel_io);
     if (detected < 0) return -1;
     const char *panel = detected ? "boe" : "old";
     /* Android v2 has two separately bounded command-line fields. */
@@ -123,6 +147,44 @@ static int make_command_line(const unsigned char *image)
     }
     command_line[used] = 0;
     return 0;
+}
+
+__attribute__((noinline)) int baseos_prepare_logo(void *tree)
+{
+    int early = baseos_native_display_state();
+    if (early < 0) return -1;
+    const struct baseos_native_logo *logo = (void *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS;
+    const unsigned char *bmp = (void *)BASEOS_NATIVE_LOGO_BMP_ADDRESS;
+    if (logo->magic != BASEOS_NATIVE_LOGO_MAGIC || logo->reserved ||
+        !logo->bytes || logo->bytes > BASEOS_NATIVE_LOGO_CAPACITY ||
+        baseos_logo_hash(bmp, logo->bytes) != logo->fnv ||
+        !baseos_logo_pixels(bmp, logo->bytes, BASEOS_LOGO_WIDTH, BASEOS_LOGO_HEIGHT,
+                            (void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, BASEOS_NATIVE_LOGO_CAPACITY)) return early ? -1 : 0;
+    char description[72];
+    const uint32_t fields[] = {BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, BASEOS_LOGO_WIDTH,
+        BASEOS_LOGO_HEIGHT, 32, BASEOS_LOGO_WIDTH * 4, 0, 0, BASEOS_LOGO_WIDTH, BASEOS_LOGO_HEIGHT};
+    unsigned used = 0;
+    for (unsigned i = 0; i < 9; i++) {
+        if (i) description[used++] = ',';
+        unsigned digits = 1;
+        while (digits < 8 && fields[i] >> (digits * 4)) digits++;
+        hex_digits(description + used, fields[i], digits);
+        used += digits;
+    }
+    description[used] = 0;
+    int display = fdt_path_offset(tree, "/soc@03000000/disp@01000000");
+    if (display < 0 || fdt_setprop_string(tree, display, "boot_fb0", description) ||
+        fdt_add_mem_rsv(tree, BASEOS_NATIVE_LOGO_PIXEL_ADDRESS,
+                        BASEOS_LOGO_WIDTH * BASEOS_LOGO_HEIGHT * 4)) return -1;
+    if (early) {
+        if (fdt_setprop_u32(tree, display, "boot_disp", BASEOS_DISPLAY_BOOT_DISP) ||
+            fdt_setprop_u32(tree, display, "boot_disp1", BASEOS_DISPLAY_BOOT_DISP1) ||
+            fdt_setprop_u32(tree, display, "boot_disp2", BASEOS_DISPLAY_BOOT_DISP2)) return -1;
+        int chosen = fdt_path_offset(tree, "/chosen");
+        if (fdt_setprop(tree, chosen, "baseos,boot-display", (void *)BASEOS_NATIVE_DISPLAY_ADDRESS,
+                        sizeof(struct baseos_native_display))) return -1;
+    }
+    return 1;
 }
 
 int baseos_prepare_kernel(void)
@@ -178,11 +240,13 @@ int baseos_prepare_kernel(void)
         fdt_setprop_u64(tree, chosen, "linux,initrd-end", 0x42000000 + initrd_bytes) ||
         fdt_add_mem_rsv(tree, 0x42000000, initrd_bytes) ||
         fdt_setprop(tree, chosen, "baseos,native-boot", record->generation, 32)) return 9;
+    if (baseos_prepare_logo(tree) < 0) return 13;
     /* Image input carries BaseOS's late USB policy; retain the proved HDMI deferral. */
     int hdmi = fdt_path_offset(tree, "/soc@03000000/hdmi@06000000");
     if (hdmi >= 0 && fdt_setprop_string(tree, hdmi, "status", "late")) return 10;
     times[5] = native_ticks();
     times[6] = native_ticks();
+    chosen = fdt_path_offset(tree, "/chosen");
     fdt64_t stamps[7];
     for (unsigned i = 0; i < 7; i++) stamps[i] = cpu_to_fdt64(times[i]);
     if (fdt_setprop(tree, chosen, "baseos,native-timing", stamps, sizeof(stamps))) return 11;

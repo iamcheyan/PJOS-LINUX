@@ -86,7 +86,68 @@ raw_generation() {
 	printf "%s" "$generation_hex"
 }
 
+panel_policy() {
+	panel_path=/etc/baseos/native-panel
+	[ -f "$panel_path" ] && [ ! -L "$panel_path" ] || return 1
+	panel_hex="$(od -An -v -tx1 "$panel_path" 2>/dev/null | tr -d " \n")"
+	case "$panel_hex" in 6f6c640a) printf old ;; 626f650a) printf boe ;; *) return 1 ;; esac
+}
+
+sequential_compatible() {
+	[ "$SLOT_SECTORS" = 1048576 ] || { EV_REASON="format2 requires exact 512 MiB slots"; return 1; }
+	[ ! -L /etc ] && [ -d /etc/baseos ] && [ ! -L /etc/baseos ] || {
+		EV_REASON="installed boot policy path is not a real directory"; return 1;
+	}
+	[ ! -e /etc/baseos/native-generation ] && [ ! -L /etc/baseos/native-generation ] || {
+		EV_REASON="format2 rootfs must not pin a per-card native generation"; return 1;
+	}
+	[ -f /etc/baseos/boot-payload-format ] && [ ! -L /etc/baseos/boot-payload-format ] \
+		&& [ "$(od -An -v -tx1 /etc/baseos/boot-payload-format | tr -d " \n")" = 626173656f732d736c6f742f320a ] || {
+		EV_REASON="format2 payload requires an installed sequential boot release"; return 1;
+	}
+	for policy_field in native-abi boot-payload-id; do
+		[ "$(grep -c "^$policy_field=" "$manifest")" = 1 ] || {
+			EV_REASON="missing or duplicate payload $policy_field"; return 1;
+		}
+		policy_value="$(field "$manifest" "$policy_field")"
+		case "$policy_value" in *[!0-9a-f]*) EV_REASON="malformed payload $policy_field"; return 1 ;; esac
+		[ "${#policy_value}" -eq 64 ] || { EV_REASON="malformed payload $policy_field"; return 1; }
+		case "$policy_value" in *[1-9a-f]*) ;; *) EV_REASON="zero payload $policy_field"; return 1 ;; esac
+		installed_value="$(raw_generation "/etc/baseos/$policy_field")" || {
+			EV_REASON="malformed installed $policy_field"; return 1;
+		}
+		case "$installed_value" in *[1-9a-f]*) ;; *) EV_REASON="zero installed $policy_field"; return 1 ;; esac
+		running_value="$(raw_generation "/sys/firmware/devicetree/base/chosen/baseos,$policy_field")" || {
+			EV_REASON="running boot has no valid $policy_field"; return 1;
+		}
+		[ "$installed_value" = "$running_value" ] || { EV_REASON="running and installed $policy_field differ"; return 1; }
+		if [ "$policy_field" = native-abi ] && [ "$policy_value" != "$installed_value" ]; then
+			EV_REASON="payload requires a different native ABI"; return 1
+		fi
+	done
+	[ "$(grep -c '^boot-payload-format=' "$manifest")" = 1 ] \
+		&& [ "$(field "$manifest" boot-payload-format)" = baseos-slot/2 ] \
+		&& [ "$(grep -c '^native-generation=' "$manifest")" = 0 ] || {
+		EV_REASON="format2 payload has incompatible boot identity fields"; return 1;
+	}
+	installed_panel="$(panel_policy)" || { EV_REASON="installed panel policy is malformed"; return 1; }
+	[ "$(grep -c '^native-panel=' "$manifest")" = 1 ] \
+		&& [ "$(field "$manifest" native-panel)" = "$installed_panel" ] || {
+		EV_REASON="payload differs from the trusted installed panel policy"; return 1;
+	}
+	[ -f /usr/sbin/native-health ] && [ ! -L /usr/sbin/native-health ] && [ -x /usr/sbin/native-health ] || {
+		EV_REASON="installed native health helper is unavailable"; return 1;
+	}
+	return 0
+}
+
 boot_compatible() {
+	if [ "$ev_format" = baseos-update/2 ]; then sequential_compatible; return $?; fi
+	if [ -e /etc/baseos/boot-payload-format ] || [ -L /etc/baseos/boot-payload-format ] \
+		|| [ -e /etc/baseos/native-abi ] || [ -L /etc/baseos/native-abi ] \
+		|| [ -e /etc/baseos/boot-payload-id ] || [ -L /etc/baseos/boot-payload-id ]; then
+		EV_REASON="sequential boot requires a format2 payload"; return 1
+	fi
 	native_fields="$(grep -c "^native-generation=" "$manifest")"
 	payload_generation="$(field "$manifest" native-generation)"
 	case "$native_fields" in
@@ -202,9 +263,27 @@ version_newer() {
 # Sets EV_VERSION / EV_BUILD / EV_SHA, and EV_REASON for humans.
 evaluate() {
 	EV_VERSION=""; EV_BUILD=""; EV_SHA=""; EV_REASON=""
+	EV_MEMBER=rootfs.img.gz
 	manifest=/tmp/.bosupd-manifest
 	if ! tar -xOf "$1" manifest > "$manifest" 2>/dev/null || [ ! -s "$manifest" ]; then
 		EV_REASON="not a BaseOS update payload"; return 2
+	fi
+	if [ "$(field "$manifest" format)" = baseos-update/2 ]; then
+		[ "$(grep -c '^format=' "$manifest")" = 1 ] && [ "$(grep -c '^variants=' "$manifest")" = 1 ] \
+			&& [ "$(field "$manifest" variants)" = old,boe ] || {
+			EV_REASON="format2 payload must bundle both panel variants"; return 2;
+		}
+		[ ! -L /etc ] && [ -d /etc/baseos ] && [ ! -L /etc/baseos ] || {
+			EV_REASON="installed boot policy path is not a real directory"; return 2;
+		}
+		selected_panel="$(panel_policy)" || { EV_REASON="installed panel policy is malformed"; return 2; }
+		if ! tar -xOf "$1" "manifest-$selected_panel" > "$manifest" 2>/dev/null || [ ! -s "$manifest" ]; then
+			EV_REASON="selected panel manifest is missing"; return 2
+		fi
+		[ "$(grep -c '^format=' "$manifest")" = 1 ] && [ "$(field "$manifest" format)" = baseos-update/2 ] || {
+			EV_REASON="selected panel manifest has an incompatible format"; return 2;
+		}
+		EV_MEMBER="rootfs-$selected_panel.img.gz"
 	fi
 	EV_VERSION="$(field "$manifest" version)"
 	EV_BUILD="$(field "$manifest" build)"
@@ -213,8 +292,17 @@ evaluate() {
 	ev_target="$(field "$manifest" target)"
 	ev_slot="$(field "$manifest" slot-sectors)"
 	ev_size="$(field "$manifest" image-size)"
+	if [ "$ev_format" = baseos-update/2 ]; then
+		for required_field in format target version build slot-sectors image-size image-sha256; do
+			[ "$(grep -c "^$required_field=" "$manifest")" = 1 ] || {
+				EV_REASON="missing or duplicate payload $required_field"; return 2;
+			}
+		done
+		case "$EV_SHA" in *[!0-9a-f]*) EV_REASON="malformed image-sha256"; return 2 ;; esac
+		[ "${#EV_SHA}" = 64 ] || { EV_REASON="malformed image-sha256"; return 2; }
+	fi
 
-	if [ "$ev_format" != "baseos-update/1" ]; then
+	if [ "$ev_format" != "baseos-update/1" ] && [ "$ev_format" != "baseos-update/2" ]; then
 		EV_REASON="unsupported payload format '$ev_format'"; return 2
 	fi
 	if [ "$ev_target" != "$BASEOS_TARGET" ]; then
@@ -328,6 +416,7 @@ apply() {
 	version="$EV_VERSION"
 	build="$EV_BUILD"
 	want_sha="$EV_SHA"
+	payload_member="$EV_MEMBER"
 
 	mkdir -p "$STATE_DIR"
 	update_log "applying $version ($build) from $payload to slot at LBA $SLOT_INACTIVE_START"
@@ -342,7 +431,7 @@ apply() {
 	# stalling it at the end, so the progress shown is data actually committed.
 	step=$((count_mb / 16))
 	[ "$step" -ge 1 ] || step=1
-	if ! tar -xOf "$payload" rootfs.img.gz 2>>"$LOG" | gunzip 2>>"$LOG" | {
+	if ! tar -xOf "$payload" "$payload_member" 2>>"$LOG" | gunzip 2>>"$LOG" | {
 		written=0
 		while [ "$written" -lt "$count_mb" ]; do
 			this="$step"

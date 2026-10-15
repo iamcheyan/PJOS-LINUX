@@ -142,8 +142,9 @@ def main(output: Path, boot0: Path | None = None, dram: bool = False, package: P
             assert hashlib.sha256(payload).hexdigest() == native_manifest[f"{name}_sha256"]
         arch = source / "arch/arm/mach-sunxi"
         shutil.copyfile(HERE / "native-boot.c", arch / "baseos_vendor_handoff.c")
-        for name in ("native-handoff.h", "native-cache.c", "native-cache-off.S"):
+        for name in ("native-handoff.h", "native-logo.h", "native-display.h", "native-cache.c", "native-cache-off.S"):
             shutil.copyfile(HERE / name, arch / name)
+        shutil.copyfile(HERE.parent / "native/boot-logo-file.h", arch / "boot-logo-file.h")
         header = native_header.decode()
         header += (f"\n#define BASEOS_FIRMWARE_SECTOR {native_manifest['boot_partition_lba'] + 40 * 2048}ul\n"
                    f"#define BASEOS_IMAGE_SECTOR {native_manifest['boot_partition_lba'] + 48 * 2048}ul\n")

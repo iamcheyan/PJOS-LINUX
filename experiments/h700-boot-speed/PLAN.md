@@ -12,6 +12,12 @@ and the user confirmed normal Slot. Leave personal RGSP untouched for daily
 use and continue step 2 on the labs. Generic fleet qualification remains open.
 The authoritative checkpoint and evidence locations are in [HANDOFF.md](HANDOFF.md).
 
+The current user priority is an early boot logo from the native loader, before
+Linux, with the configured p2 artwork and automatic panel selection. The kernel
+pixel-copy path can preserve artwork during takeover but does not satisfy the
+requested early appearance by itself. Qualify loader display initialization and
+takeover on the two labs before resuming step 2. Personal RGSP stays untouched.
+
 ## 1. Qualify and ship the native boot chain
 
 - [x] Preserve exact boot-area backups and identify each lab device explicitly.

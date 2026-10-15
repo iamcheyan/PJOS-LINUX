@@ -4,6 +4,16 @@
 
 extern void __asm_invalidate_dcache_all(void);
 
+void baseos_native_publish_code(unsigned long start, unsigned int bytes)
+{
+    u64 ctr;
+    asm volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    unsigned long line = 4ul << ((ctr >> 16) & 15);
+    for (unsigned long address = start & ~(line - 1); address < start + bytes; address += line)
+        asm volatile("dc cvau, %0" :: "r"(address) : "memory");
+    asm volatile("dsb sy; ic iallu; dsb sy; isb" ::: "memory");
+}
+
 int baseos_native_cache_on(void)
 {
     u64 control;

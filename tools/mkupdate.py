@@ -14,6 +14,7 @@ secrets.
 Usage: mkupdate.py IMAGE TARGET VERSION BUILD OUTPUT
 """
 import gzip
+import argparse
 import hashlib
 import io
 import re
@@ -25,6 +26,8 @@ import tarfile
 import tempfile
 import uuid
 from pathlib import Path
+
+import boot_payload
 
 SECTOR = 512
 CHUNK = 4 * 1024 * 1024
@@ -53,15 +56,17 @@ def rootfs_extent(image: Path) -> tuple[int, int]:
     return start, end - start + 1
 
 
-def native_generation(slot: Path) -> bytes | None:
-    """Read the installed policy from ext4, never from arbitrary image bytes."""
-    debugfs = shutil.which("debugfs")
-    if not debugfs:
-        die("debugfs is required to inspect rootfs boot compatibility (use build-update.sh)")
+class RootPolicy:
+    """Read boot policy through ext4 inodes, never by searching image bytes."""
+    def __init__(self, slot):
+        self.slot = slot
+        self.debugfs = shutil.which("debugfs")
+        if not self.debugfs:
+            die("debugfs is required to inspect rootfs boot compatibility (use build-update.sh)")
 
-    def inode(path):
+    def inode(self, path):
         result = subprocess.run(
-            [debugfs, "-R", f"stat {path}", str(slot)], capture_output=True, check=False
+            [self.debugfs, "-R", f"stat {path}", str(self.slot)], capture_output=True, check=False
         )
         output = result.stdout.decode("utf-8", "replace")
         error = result.stderr.decode("utf-8", "replace")
@@ -77,42 +82,73 @@ def native_generation(slot: Path) -> bytes | None:
             die(f"cannot read rootfs inode size for {path}")
         return match[1], int(match[2], 8), int(size[1])
 
-    for path in ("/etc", "/etc/baseos"):
-        record = inode(path)
+    def read(self, path, size=None):
+        record = self.inode(path)
         if record is None:
             return None
+        if record[0] != "regular" or (size is not None and record[2] != size):
+            die(f"rootfs {path} must be a regular " + (f"raw{size}-byte file" if size else "file"))
+        result = subprocess.run([self.debugfs, "-R", f"cat {path}", str(self.slot)], capture_output=True, check=False)
+        if result.returncode or len(result.stdout) != record[2]:
+            die(f"cannot read rootfs {path}")
+        return result.stdout
+
+    def helper(self):
+        for path in ("/usr", "/usr/sbin"):
+            record = self.inode(path)
+            if record is None or record[0] != "directory":
+                die(f"native helper path is not a directory: {path}")
+        helper = self.inode("/usr/sbin/native-health")
+        if helper is None or helper[0] != "regular" or not helper[1] & 0o111 or not helper[2]:
+            die("native rootfs must contain a regular executable /usr/sbin/native-health")
+
+
+def native_policy(slot: Path, target: str) -> dict:
+    policy = RootPolicy(slot)
+    with slot.open("rb") as stream:
+        stream.seek(boot_payload.TAIL_OFFSET)
+        has_tail = stream.read(len(boot_payload.MAGIC)) == boot_payload.MAGIC
+    for path in ("/etc", "/etc/baseos"):
+        record = policy.inode(path)
+        if record is None:
+            if has_tail: die("sequential tail has no rootfs boot policy")
+            return {}
         if record[0] != "directory":
             die(f"rootfs boot policy path is not a directory: {path}")
+    sequential = policy.read("/etc/baseos/boot-payload-format")
+    if sequential is not None:
+        if sequential != b"baseos-slot/2\n":
+            die("unsupported rootfs boot-payload-format")
+        abi = policy.read("/etc/baseos/native-abi", 32)
+        identity = policy.read("/etc/baseos/boot-payload-id", 32)
+        panel = policy.read("/etc/baseos/native-panel")
+        if abi is None or identity is None or panel not in (b"old\n", b"boe\n"):
+            die("sequential rootfs requires exact native-abi, boot-payload-id and native-panel policy")
+        if policy.inode("/etc/baseos/native-generation") is not None:
+            die("sequential rootfs must not pin a per-card native-generation")
+        policy.helper()
+        try:
+            boot_payload.validate_slot(slot, target=target, native_abi=abi, root_build_id=identity)
+        except ValueError as error:
+            die(str(error))
+        return {"boot-payload-format": "baseos-slot/2", "native-abi": abi.hex(),
+                "boot-payload-id": identity.hex(), "native-panel": panel.decode().strip()}
+    if has_tail or any(policy.inode(path) is not None for path in ("/etc/baseos/native-abi", "/etc/baseos/boot-payload-id")):
+        die("sequential rootfs policy has no format marker")
     marker = "/etc/baseos/native-generation"
-    record = inode(marker)
+    record = policy.inode(marker)
     if record is None:
-        return None
+        return {}
     if record[0] != "regular" or record[2] != 32:
         die("rootfs native-generation must be a regular raw32-byte file")
-    result = subprocess.run([debugfs, "-R", f"cat {marker}", str(slot)], capture_output=True, check=False)
-    if result.returncode or len(result.stdout) != 32:
+    generation = policy.read(marker, 32)
+    if generation is None:
         die("cannot read the rootfs raw32-byte native generation")
-    for path in ("/usr", "/usr/sbin"):
-        record = inode(path)
-        if record is None or record[0] != "directory":
-            die(f"native helper path is not a directory: {path}")
-    helper = inode("/usr/sbin/native-health")
-    if helper is None or helper[0] != "regular" or not helper[1] & 0o111 or not helper[2]:
-        die("native rootfs must contain a regular executable /usr/sbin/native-health")
-    return result.stdout
+    policy.helper()
+    return {"native-generation": generation.hex()}
 
 
-def main() -> int:
-    if len(sys.argv) != 6:
-        die("usage: mkupdate.py IMAGE TARGET VERSION BUILD OUTPUT")
-    image, target, version, build, output = (
-        Path(sys.argv[1]),
-        sys.argv[2],
-        sys.argv[3],
-        sys.argv[4],
-        Path(sys.argv[5]),
-    )
-
+def package_image(image, target, version, build):
     start, sectors = rootfs_extent(image)
     size = sectors * SECTOR
     print(f"rootfs slot at LBA {start}, {sectors} sectors ({size} bytes)")
@@ -150,7 +186,7 @@ def main() -> int:
                         stamps[stamp] = True
                 tail = chunk[-window:]
         slot.flush()
-        generation = native_generation(Path(slot.name))
+        policy = native_policy(Path(slot.name), target)
 
     for stamp, seen in stamps.items():
         if not seen:
@@ -159,7 +195,7 @@ def main() -> int:
     manifest = "".join(
         f"{key}={value}\n"
         for key, value in (
-            ("format", "baseos-update/1"),
+            ("format", "baseos-update/2" if "boot-payload-id" in policy else "baseos-update/1"),
             ("target", target),
             ("version", version),
             ("build", build),
@@ -168,14 +204,36 @@ def main() -> int:
             ("image-sha256", digest.hexdigest()),
         )
     )
-    if generation is not None:
-        manifest += f"native-generation={generation.hex()}\n"
+    manifest += "".join(f"{key}={value}\n" for key, value in policy.items())
     manifest = manifest.encode()
+    return manifest, compressed.getvalue(), policy
 
-    payload = compressed.getvalue()
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("image", type=Path)
+    for name in ("target", "version", "build"): parser.add_argument(name)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--panel-image", type=Path, help="other panel variant; both are bundled and selected automatically")
+    args = parser.parse_args()
+    output = args.output
+    manifest, payload, policy = package_image(args.image, args.target, args.version, args.build)
+    members = [("manifest", manifest), ("rootfs.img.gz", payload)]
+    if "boot-payload-id" in policy:
+        if args.panel_image is None:
+            die("format2 releases require both old and boe panel images in one automatically selected bundle")
+        other_manifest, other_payload, other_policy = package_image(args.panel_image, args.target, args.version, args.build)
+        if {policy.get("native-panel"), other_policy.get("native-panel")} != {"old", "boe"} or policy["native-abi"] != other_policy.get("native-abi"):
+            die("panel variants must contain old and boe with the same native ABI")
+        members = [("manifest", b"format=baseos-update/2\nvariants=old,boe\n")]
+        for metadata, blob, selected in ((manifest, payload, policy), (other_manifest, other_payload, other_policy)):
+            panel = selected["native-panel"]
+            members.extend((("manifest-" + panel, metadata), ("rootfs-" + panel + ".img.gz", blob)))
+    elif args.panel_image is not None:
+        die("panel bundles require format2 slot images")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(output, "w", format=tarfile.USTAR_FORMAT) as archive:
-        for name, blob in (("manifest", manifest), ("rootfs.img.gz", payload)):
+        for name, blob in members:
             info = tarfile.TarInfo(name)
             info.size = len(blob)
             info.mtime = 0
@@ -184,9 +242,13 @@ def main() -> int:
             archive.addfile(info, io.BytesIO(blob))
 
     print(f"payload:  {output} ({output.stat().st_size} bytes)")
-    print(f"target:   {target}")
-    print(f"version:  {version} ({build})")
-    print(f"sha256:   {digest.hexdigest()}    (publish this next to the download)")
+    print(f"target:   {args.target}")
+    print(f"version:  {args.version} ({args.build})")
+    for name, blob in members:
+        if name == "manifest" or name.startswith("manifest-"):
+            metadata = dict(line.split("=", 1) for line in blob.decode().splitlines())
+            if "image-sha256" in metadata:
+                print(f"sha256:   {metadata['image-sha256']}    ({name}; decompressed whole slot)")
     return 0
 
 

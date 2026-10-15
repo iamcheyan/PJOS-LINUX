@@ -51,7 +51,7 @@ def model_policy(target, inventory):
     assert prefix[512:520] == b"EFI PART"
     table, count, entry_size = struct.unpack_from("<QII", prefix, 512 + 72)
     assert count <= 128 and entry_size == 128 and (table * 512 + count * entry_size) <= len(prefix)
-    partitions, boot_lba = [], None
+    partitions, boot_lba, logo_partition = [], None, None
     for index in range(count):
         entry = prefix[table * 512 + index * entry_size:table * 512 + (index + 1) * entry_size]
         if not any(entry[:16]): continue
@@ -59,7 +59,20 @@ def model_policy(target, inventory):
         assert re.fullmatch(r"[A-Za-z0-9_-]+", name)
         partitions.append(f"{name}@mmcblk0p{index + 1}")
         if name == "boot": boot_lba = struct.unpack_from("<Q", entry, 32)[0]
-    assert boot_lba is not None
+        if name == "boot-resource":
+            first, last = struct.unpack_from("<QQ", entry, 32)
+            assert 0 < first <= last < 0x100000000
+            logo_partition = (first, last - first + 1)
+    assert boot_lba is not None and logo_partition is not None
+    profile_spec = importlib.util.spec_from_file_location("native_device_profiles", ROOT / "tools/device_profile.py")
+    profiles = importlib.util.module_from_spec(profile_spec)
+    profile_spec.loader.exec_module(profiles)
+    profile = next(item for item in profiles.load_profiles() if item["id"] == target)
+    logo = {"partition_lba": logo_partition[0], "partition_sectors": logo_partition[1],
+            "width": profile["bootlogo_width"], "height": profile["bootlogo_height"],
+            "source": "mutable p2 BOOTLOGO.BMP; FAT16/FAT32; physical 24-bit BMP",
+            "kernel_handoff": "boot_fb0 pixels; vendor warm metadata after early ready; owned pixel reservation held for boot"}
+    assert 0 < logo["width"] * logo["height"] * 4 <= 0x400000
     values = {key.decode(): value.decode() for key, value in env.items()}
     values.update(partitions=":".join(partitions), snum="@SERIAL@")
     command = values["setargs_mmc"]
@@ -83,14 +96,26 @@ def model_policy(target, inventory):
     assert panel["vendor_uboot_sha256"] == sha(toc_items(package)["u-boot"])
     assert (panel["rule"], panel["high"], panel["low"]) == (rule, strap["high"], strap["low"])
     assert type(panel["pull_up"]) is bool
-    return {"target": target, "model_id": sorted(compatibility).index(target) + 1,
+    policy = {"target": target, "model_id": sorted(compatibility).index(target) + 1,
             "panel_rule": rule, "panel_pull_up": panel["pull_up"],
             "panel_contract": panel, "bootargs_template": command, "boot_partition_lba": boot_lba,
+            "boot_logo": logo,
             "package_sha256": sha(package), "environment_sha256": sha((inventory / "env.bin").read_bytes()),
             "native_record_version": 2, "native_record_bytes": 240,
             "bootreason_policy": "vendor PMIC reg20/reg00 classifier and unknown-only regf0 fallback",
             "bootreason_values": ["button", "irq", "usb", "charger", "battery", "unknow"],
             "bootreason_sources": ["unknown", "poweron", "pmu-f0-fallback"]}
+    policy["early_display"] = {"helper_address": 0x4a500000, "helper_capacity": 0x40000,
+        "record_address": 0x4a300300, "record_bytes": 80,
+        "vendor_dtb_sha256": sha(toc_items(package)["dtb"]),
+        "first_frame": "native before Linux image read; panel/SPI/DE/TCON initialized",
+        "kernel_handoff": "vendor warm display metadata only after validated ready record"}
+    display_spec = importlib.util.spec_from_file_location("native_display_builder", HERE / "build-display.py")
+    display = importlib.util.module_from_spec(display_spec)
+    display_spec.loader.exec_module(display)
+    display.contracts(target, policy)
+    policy["early_display"]["handoff"] = display.handoff(target, policy)
+    return policy
 
 
 def build(target, inventory, output, single_cpu=False, kernel_probes=False, persistent=False, raw_capsule=False):
@@ -229,6 +254,11 @@ char *strrchr(const char *, int);
     inputs = [HERE / name for name in ("entry32.S", "loader.c", "runtime.c")]
     inputs += [HERE.parent / "fastboot/unpack.c", SPL / "native-handoff.h", Path(__file__),
                HERE / "panel-probe.h", HERE / "panel-contract.json",
+               HERE / "boot-logo-file.h", HERE / "boot-logo-pixels.h", SPL / "native-logo.h",
+               HERE / "build-display.py", HERE / "early-display.c", HERE / "display-engine.json",
+               HERE / "display-handoff.json",
+               HERE / "panel-init.json", HERE / "panel-spi9.h", SPL / "native-display.h",
+               ROOT / "devices.json", ROOT / "tools/device_profile.py",
                HERE / "kernel-trace64.S", HERE / "check-entry64.c",
                HERE / "kernel-fault64.S",
                HERE / "monitor-probe64.S", HERE / "initcall64.S",
@@ -251,6 +281,13 @@ char *strrchr(const char *, int);
     header = (f"#define BASEOS_MODEL_ID {policy['model_id']}u\n"
               f"#define BASEOS_PANEL_RULE {policy['panel_rule']}\n"
               f"#define BASEOS_PANEL_PULL_UP {int(policy['panel_pull_up'])}\n"
+              f"#define BASEOS_LOGO_PARTITION_SECTOR {policy['boot_logo']['partition_lba']}u\n"
+              f"#define BASEOS_LOGO_PARTITION_SECTORS {policy['boot_logo']['partition_sectors']}u\n"
+              f"#define BASEOS_LOGO_WIDTH {policy['boot_logo']['width']}u\n"
+              f"#define BASEOS_LOGO_HEIGHT {policy['boot_logo']['height']}u\n"
+              f"#define BASEOS_DISPLAY_BOOT_DISP 0x{policy['early_display']['handoff']['boot_disp']:x}u\n"
+              f"#define BASEOS_DISPLAY_BOOT_DISP1 0x{policy['early_display']['handoff']['boot_disp1']:x}u\n"
+              f"#define BASEOS_DISPLAY_BOOT_DISP2 0x{policy['early_display']['handoff']['boot_disp2']:x}u\n"
               f"#define BASEOS_IMAGE_BYTES {len(image)}u\n#define BASEOS_IMAGE_FNV 0x{fnv(image):08x}u\n"
               f"static const unsigned char baseos_generation[32] = {{{','.join(map(str,generation))}}};\n"
               f"static const char baseos_bootargs_template[] = {json.dumps(policy['bootargs_template'])};\n"
@@ -258,6 +295,13 @@ char *strrchr(const char *, int);
               ",".join(json.dumps(name) for name in binding.DRAM_PROPERTIES) + "};\n")
     (output / "native-generated.h").write_text(header)
     shutil.copyfile(SPL / "native-handoff.h", output / "native-handoff.h")
+    shutil.copyfile(SPL / "native-logo.h", output / "native-logo.h")
+    shutil.copyfile(SPL / "native-display.h", output / "native-display.h")
+    display_spec = importlib.util.spec_from_file_location("native_display_builder", HERE / "build-display.py")
+    display = importlib.util.module_from_spec(display_spec)
+    display_spec.loader.exec_module(display)
+    display_payload, display_manifest = display.build(output / "early-display", target, policy,
+                                                    generation, clang, lld, linker_env)
     if kernel_probes:
         subprocess.run([clang, "--target=aarch64-none-elf", "-c", str(HERE / "kernel-trace64.S"),
                         "-o", str(output / "trampoline.o")], check=True)
@@ -311,7 +355,8 @@ SECTIONS {
     for name, destination, payload in (("monitor", 0x48000000, toc["monitor"]),
                                         ("dtbo", 0x4a100000, toc["dtbo"]),
                                         ("dtb", 0x4a200000, toc["dtb"]),
-                                        ("loader", 0x4a000000, bytes(blob))):
+                                        ("loader", 0x4a000000, bytes(blob)),
+                                        ("early-display", 0x4a500000, display_payload)):
         limit = 0x40000 if name == "monitor" else 0x100000
         assert len(payload) <= limit
         regions.append({"name": name, "offset": len(firmware), "bytes": len(payload), "destination": destination})
@@ -322,13 +367,15 @@ SECTIONS {
     with (output / "native-generated.h").open("a") as stream:
         stream.write(f"\n#define BASEOS_FIRMWARE_BYTES {len(firmware)}u\n"
                      f"#define BASEOS_FIRMWARE_FNV 0x{fnv(firmware):08x}u\n"
+                     f"#define BASEOS_EARLY_DISPLAY_BYTES {len(display_payload)}u\n"
                      "struct baseos_firmware_extent { unsigned int offset, bytes, destination; };\n"
-                     "static const struct baseos_firmware_extent baseos_firmware_extents[4] = {\n" +
+                     f"static const struct baseos_firmware_extent baseos_firmware_extents[{len(regions)}] = {{\n" +
                      "".join(f"  {{{item['offset']}u, {item['bytes']}u, 0x{item['destination']:x}u}},\n" for item in regions) + "};\n")
     report = dict(policy, generation=generation.hex(), image_sha256=sha(image), image_bytes=len(image),
                   image_fnv=fnv(image), loader_sha256=sha(blob), loader_bytes=len(blob), loader_fnv=fnv(blob),
                   firmware_sha256=sha(firmware), firmware_bytes=len(firmware), firmware_fnv=fnv(firmware),
                   firmware_regions=regions, kernel_sha256=sha(kernel), libfdt_archive_sha256=PIN,
+                  early_display_helper=display_manifest,
                   native_diagnostic=kernel_probes,
                   entry_checksum_witness=kernel_probes,
                   kernel_exception_witness=kernel_probes,
