@@ -105,6 +105,11 @@ def model_policy(target, inventory):
             "bootreason_policy": "vendor PMIC reg20/reg00 classifier and unknown-only regf0 fallback",
             "bootreason_values": ["button", "irq", "usb", "charger", "battery", "unknow"],
             "bootreason_sources": ["unknown", "poweron", "pmu-f0-fallback"]}
+    policy["native_panel"] = {"record_address": 0x4a300280, "record_bytes": 96, "record_version": 1,
+        "producer": "SPL: PI15 power, PI14 reset 30/15/50/100 ms minimum waits and PE6 strap, polled between card reads",
+        "consumer": "A32 loader: used only when every wait is proved and live pins match; otherwise it redoes the steps"}
+    policy["kernel_decoder"] = {"source": "native/lz4-stream.c", "flags": "-O2 -munaligned-access",
+        "sliced": True, "overlaps_display_waits": True}
     policy["early_display"] = {"runs_in": "a32-loader", "record_address": 0x4a300300, "record_bytes": 80,
         "vendor_dtb_sha256": sha(toc_items(package)["dtb"]),
         "first_frame": "A32 loader after BL31, before kernel unpack; panel/SPI/DE/TCON initialized",
@@ -251,7 +256,8 @@ char *strrchr(const char *, int);
     binding = importlib.util.module_from_spec(binding_spec)
     binding_spec.loader.exec_module(binding)
     inputs = [HERE / name for name in ("entry32.S", "loader.c", "runtime.c")]
-    inputs += [HERE.parent / "fastboot/unpack.c", SPL / "native-handoff.h", Path(__file__),
+    inputs += [HERE / "lz4-stream.c", SPL / "native-handoff.h", Path(__file__), HERE / "lz4-stream.h",
+               SPL / "native-panel.h",
                HERE / "panel-probe.h", HERE / "panel-contract.json",
                HERE / "boot-logo-file.h", HERE / "boot-logo-pixels.h", SPL / "native-logo.h",
                HERE / "build-display.py", HERE / "early-display.c", HERE / "display-engine.json",
@@ -296,6 +302,8 @@ char *strrchr(const char *, int);
     shutil.copyfile(SPL / "native-handoff.h", output / "native-handoff.h")
     shutil.copyfile(SPL / "native-logo.h", output / "native-logo.h")
     shutil.copyfile(SPL / "native-display.h", output / "native-display.h")
+    shutil.copyfile(SPL / "native-panel.h", output / "native-panel.h")
+    shutil.copyfile(HERE / "lz4-stream.h", output / "lz4-stream.h")
     display_spec = importlib.util.spec_from_file_location("native_display_builder", HERE / "build-display.py")
     display = importlib.util.module_from_spec(display_spec)
     display_spec.loader.exec_module(display)
@@ -321,8 +329,10 @@ char *strrchr(const char *, int);
     objects = []
     for source in sources:
         obj = output / (source.name + ".o")
+        # Only the kernel decoder runs hot enough to matter; it alone uses unaligned word access.
+        tuning = ["-munaligned-access", "-O2"] if source.name == "lz4-stream.c" else ["-mno-unaligned-access", "-Os"]
         subprocess.run([clang, "--target=armv7a-none-eabi", "-march=armv7-a", "-marm", "-mfloat-abi=soft",
-                        "-mno-unaligned-access", "-Os", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
+                        *tuning, "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
                         "-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-ffunction-sections", "-fdata-sections",
                         "-Wall", "-Wextra", "-Werror", "-I", str(shim), "-I", str(lib), "-I", str(output),
                         *diagnostic_flags,

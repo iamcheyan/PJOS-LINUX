@@ -4,6 +4,10 @@
 Host-only Unicorn replay with explicit peripheral models (CNTPCT, CTR, polls, TCON line
 counter, PE6 strap). SRAM C (0x28000..0x57fff) is unmapped when SYSCTRL bit 24 is cleared
 and any loader access to it fails the run. Not a panel, timing or coherency qualification.
+
+v151: the SPL's panel record lets the loader skip the panel power/reset/strap steps; any
+record or pin mismatch must fall back to the full steps. The waits after the panel stream
+starts are deadlines polled between kernel decode slices; each must still hold its minimum.
 """
 import argparse
 import hashlib
@@ -25,6 +29,10 @@ sys.dont_write_bytecode = True
 import fdt
 
 RECORD, DESC, DISPLAY, PIXELS, BMP, CAP = 0x4a300000, 0x4a300200, 0x4a300300, 0x4b000000, 0x4b400000, 0x400000
+PANEL_RECORD = 0x4a300280
+PE_CFG, PE_PULL = 0x0300b090, 0x0300b0ac
+WAITS_MS = (30, 15, 50, 100)
+SIMULATED_DECODE_STEPS = 40
 SRAM_C = (0x28000, 0x58000)
 PHASES = ("prepare", "publish", "enable", "backlight")
 CFG, DAT, STRAP, SCANLINE = 0x0300b124, 0x0300b130, 0x0300b0a0, 0x065110fc
@@ -75,7 +83,9 @@ class Run:
             assert self.code[address - 0x4a000000:address - 0x4a000000 + len(expected)] == expected, phase
             self.tables[address] = phase
 
-    def run(self, name, high=True, line=64, fault=None, unpack=False):
+    def run(self, name, high=True, line=64, fault=None, unpack=False, panel=None, pio=None, record=None, skip=False):
+        """panel: SPL panel record bytes (None = none published); pio: live PIO values it left;
+        skip: the loader must use the record and leave power, reset and strap alone."""
         m = u.Uc(u.UC_ARCH_ARM, u.UC_MODE_ARM)
         m.mem_map(0x20000, SRAM_C[1] - 0x20000)
         m.mem_map(0x01000000, 0x01400000)
@@ -85,7 +95,9 @@ class Run:
         m.mem_map(0x40000000, 0x10000000)
         m.mem_write(0x4a000000, self.code)
         m.mem_write(0x45000000, self.image)
-        m.mem_write(RECORD, self.record)
+        record = record or self.record
+        m.mem_write(RECORD, record)
+        m.mem_write(PANEL_RECORD, panel or bytes(96))
         bmp = bytearray(self.bmp)
         descriptor = self.descriptor
         if fault == "no-logo":
@@ -101,16 +113,18 @@ class Run:
         for offset, value in zip((0x204, 0x208, 0x20c), sid):
             m.mem_write(0x03006000 + offset, struct.pack("<I", value))
         initial = {0x03000000: 0xf1234567, 0x03000004: 0x89abcdef, CFG: 0x22345678, DAT: 0xa5a5e7a5,
-                   0x030017bc: 0xa5a55a5a, 0x030f0030: 0xc369a59a}
+                   PE_CFG: 0x77777777, PE_PULL: 0, 0x030017bc: 0xa5a55a5a, 0x030f0030: 0xc369a59a}
+        initial.update(pio or {})
         for address, value in initial.items():
             m.mem_write(address, struct.pack("<I", value))
         width, height = self.manifest["boot_logo"]["width"], self.manifest["boot_logo"]["height"]
         pixel_end = PIXELS + width * height * 4
-        loaded = struct.unpack_from("<Q", self.record, 40)[0]
+        loaded = struct.unpack_from("<Q", record, 40)[0]
         state = dict(clock=loaded + TICK, seq=0, released=None, active=None, queue=[], clean=[], clean_start=None,
                      last_pixel=0, last_dsb=0, first_display_write=None, scanlines=[], frame=None, frames=[],
                      timeline=[], gpio=[], wait=None, sysctrl=[], sram_c=[], calls=[], wfi=False, result=None,
-                     phases=[], unexpected=[], publish=None)
+                     phases=[], unexpected=[], publish=None, deferred=None, last_read=None, pio_other=[],
+                     lz4_steps=0, lz4_before_lit=0, lit=False, deferred_checked=[])
         cp = {(0, 1, 0, 0): 0x30c00820, (1, 0, 0, 1): 0x02000023, (1, 0, 0, 0): 2 | (3 << 3) | (7 << 13),
               (0, 0, 0, 1): (line.bit_length() - 3) << 16}
         polls = [op for phase in PHASES for op in self.model[phase] if op["kind"] == "poll"]
@@ -127,8 +141,19 @@ class Run:
         def sram_access(uc, access, address, size, value, data):
             S["sram_c"].append([hex(address), access])
 
+        def due():
+            # A deferred vendor wait must have fully elapsed before the next display access.
+            if S["deferred"]:
+                since, microseconds = S["deferred"]
+                assert S["last_read"] is not None and S["last_read"] - since >= microseconds * 24, \
+                    ("deferred wait cut short", microseconds, since, S["last_read"])
+                S["deferred_checked"].append(microseconds)
+                S["deferred"] = None
+
         def mmio_read(uc, access, address, size, value, data):
             step()
+            if 0x01000000 <= address < 0x02400000 or 0x06510000 <= address < 0x06512000 or address in (CFG, DAT):
+                due()
             old = get(address)
             if address == SCANLINE:
                 count = 31 if fault == "scanline-stuck" else 31 + len(S["scanlines"])
@@ -148,6 +173,8 @@ class Run:
 
         def mmio_write(uc, access, address, size, value, data):
             seq = step()
+            if address not in (0x03000000, 0x03000004):
+                due()
             assert size == 4, ("MMIO width", hex(address), size)
             old = get(address)
             if S.get("replayed") == (address, value):
@@ -177,7 +204,9 @@ class Run:
                     S["first_display_write"] = seq
                     assert S["released"] is not None, "display write before SRAM C release"
                 return
-            assert address in (CFG, DAT, 0x0300b090, 0x0300b0ac), ("unowned MMIO write", hex(address), hex(value))
+            assert address in (CFG, DAT, PE_CFG, PE_PULL), ("unowned MMIO write", hex(address), hex(value))
+            if address != DAT:
+                S["pio_other"].append(dict(address=address, old=old, value=value))
             if address == DAT:
                 assert (old ^ value) & ~0xc700 == 0, "panel DAT write changed unrelated bits"
                 S["gpio"].append(dict(ticks=S["clock"], old=old, value=value))
@@ -207,7 +236,10 @@ class Run:
         def code(uc, address, size, data):
             seq = step()
             if address == self.sym["apply"]:
+                due()
                 phase = self.tables[uc.reg_read(a.UC_ARM_REG_R0)]
+                if phase == "backlight":
+                    S["lit"] = True
                 assert uc.reg_read(a.UC_ARM_REG_R1) == len(self.model[phase])
                 if phase == "backlight":
                     assert len(set(S["scanlines"])) >= 2, "backlight before scanline progress"
@@ -218,6 +250,11 @@ class Run:
                 return
             if address == self.sym["wait_us"]:
                 S["timeline"].append(["wait_us", uc.reg_read(a.UC_ARM_REG_R0)])
+                return
+            if address == self.sym["defer_us"]:
+                due()  # a stream delay at the very end runs straight into the 50 ms wait
+                S["timeline"].append(["wait_us", uc.reg_read(a.UC_ARM_REG_R0)])
+                S["deferred"] = (S["clock"], uc.reg_read(a.UC_ARM_REG_R0))
                 return
             if S["active"] and address == S["phases"][-1]["return_address"]:
                 result = uc.reg_read(a.UC_ARM_REG_R0)
@@ -232,11 +269,20 @@ class Run:
             if address == S.get("prepare_return"):
                 S["result"] = uc.reg_read(a.UC_ARM_REG_R0)
                 return
-            if address == self.sym["custom_unpack"] and not unpack:
-                uc.mem_write(0x40080000, self.kernel)
-                uc.mem_write(uc.reg_read(a.UC_ARM_REG_R3), struct.pack("<I", len(self.kernel)))
-                uc.reg_write(a.UC_ARM_REG_R0, 0)
-                uc.reg_write(a.UC_ARM_REG_PC, uc.reg_read(a.UC_ARM_REG_LR))
+            if address == self.sym["baseos_lz4_step"]:
+                S["lz4_steps"] += 1
+                S["lz4_before_lit"] += not S["lit"]
+                if not unpack:
+                    # Model decode slices: the real begin() set dst/limit; finish after a fixed count.
+                    state = uc.reg_read(a.UC_ARM_REG_R0)
+                    dst, out, limit = struct.unpack("<3I", uc.mem_read(state + 12, 12))
+                    done = S["lz4_steps"] >= SIMULATED_DECODE_STEPS
+                    if done:
+                        assert limit - dst == len(self.kernel)
+                        uc.mem_write(dst, self.kernel)
+                        uc.mem_write(state + 16, struct.pack("<I", limit))
+                    uc.reg_write(a.UC_ARM_REG_R0, 0 if done else 1)
+                    uc.reg_write(a.UC_ARM_REG_PC, uc.reg_read(a.UC_ARM_REG_LR))
                 return
             ins = self.special.get(address)
             if not ins:
@@ -255,6 +301,7 @@ class Run:
             if ins.mnemonic == "mrrc":
                 uc.reg_write(a.UC_ARM_REG_R0, S["clock"] & 0xffffffff)
                 uc.reg_write(a.UC_ARM_REG_R1, S["clock"] >> 32)
+                S["last_read"] = S["clock"]
                 S["clock"] += TICK
             else:
                 match = re.fullmatch(r"p15, #(\d+), (\w+), c(\d+), c(\d+), #(\d+)", ins.op_str)
@@ -287,7 +334,8 @@ class Run:
                 watched.add(address)
                 m.hook_add(u.UC_HOOK_CODE, code, begin=address, end=address)
 
-        for address in set(self.special) | {self.sym[n] for n in ("apply", "wait_us", "baseos_prepare_kernel", "custom_unpack")}:
+        for address in set(self.special) | {self.sym[n] for n in ("apply", "wait_us", "defer_us", "baseos_prepare_kernel",
+                                                                 "baseos_lz4_step")}:
             watch(address)
         m.reg_write(a.UC_ARM_REG_CPSR, 0x1d3)
         start = 0x4a000000
@@ -299,14 +347,26 @@ class Run:
             S["unmapped"] = True
             start = m.reg_read(a.UC_ARM_REG_PC)
         assert S.get("unmapped") and get(0x03000004) == 0x88abcdef and get(0x03000000) == 0x80000000, "SYSCTRL state"
-        return self.check(name, m, S, high, line, fault, bytes(bmp), descriptor, width, height, pixel_end)
+        return self.check(name, m, S, high, line, fault, bytes(bmp), descriptor, width, height, pixel_end, panel, unpack, skip)
 
-    def check(self, name, m, S, high, line, fault, bmp, descriptor, width, height, pixel_end):
+    def check(self, name, m, S, high, line, fault, bmp, descriptor, width, height, pixel_end, spl_panel, unpack, fast):
         record = bytes(m.mem_read(DISPLAY, 80))
         assert not S["sram_c"], ("loader touched SRAM C", S["sram_c"][:4])
         rule, contract = self.manifest["panel_rule"], self.manifest["panel_contract"]
         row = dict(name=name, pe6="high" if high else "low", ctr_line_bytes=line, fault=fault,
-                   prepare_kernel_result=S["result"], sram_c_accesses=0, sysctrl_writes=S["sysctrl"])
+                   prepare_kernel_result=S["result"], sram_c_accesses=0, sysctrl_writes=S["sysctrl"],
+                   spl_panel_record=bool(spl_panel), decode_steps=S["lz4_steps"], real_decode=unpack)
+        # The loader may skip the panel steps only for a valid record whose pins still match.
+        touched = [g for g in S["gpio"] if (g["old"] ^ g["value"]) & 0xc000] + \
+                  [w for w in S["pio_other"] if w["address"] in (PE_CFG, PE_PULL) or (w["old"] ^ w["value"]) & 0xff000000]
+        row["panel_steps_in_loader"] = bool(touched) or any(e == ["wait_us", 30000] for e in S["timeline"])
+        if fast:
+            assert spl_panel and not touched, ("loader redid SPL panel steps", name, touched[:3])
+        if fault in ("no-logo", "bad-bmp") and fast:
+            assert not S["gpio"] and not S["pio_other"], "cold path with a valid SPL panel record touched GPIO"
+            command = bytes(m.mem_read(self.sym["command_line"], 2048)).split(b"\0")[0].split()
+            want = struct.unpack_from("<I", spl_panel, 16)[0]
+            assert [t for t in command if t.startswith(b"lcd_type=")] == [b"lcd_type=" + (b"boe" if want else b"old")]
         if fault in ("no-logo", "bad-bmp"):
             assert S["result"] == 0 and S["calls"] == [[0x8000ff04, 0x40080000, 0x44000000, 1]]
             assert record == bytes(80) and S["first_display_write"] is None and not S["phases"] and not S["clean"]
@@ -333,12 +393,14 @@ class Run:
         pixels = bytes(m.mem_read(PIXELS, pixel_end - PIXELS))
         assert pixels == V.logo_pixels(bmp, width, height), "pixels differ from independent BMP conversion"
         assert bytes(m.mem_read(pixel_end, BMP - pixel_end)) == b"\xa5" * (BMP - pixel_end)
-        moments = [g["ticks"] for g in S["gpio"][:4]]
-        for i, delay in enumerate((30000, 15000, 50000)):
-            assert moments[i + 1] - moments[i] >= delay * 24, "panel power/reset delay short"
+        if not fast:
+            moments = [g["ticks"] for g in S["gpio"][:4]]
+            for i, delay in enumerate((30000, 15000, 50000)):
+                assert moments[i + 1] - moments[i] >= delay * 24, "panel power/reset delay short"
         stream = self.streams[panel]
         expected = [["wait_us", op["set_bits"]] for op in self.model["prepare"] if op["kind"] == "delay_us"]
-        expected += [["wait_us", v] for v in (30000, 15000, 50000, 100000)]
+        if not fast:
+            expected += [["wait_us", v] for v in (30000, 15000, 50000, 100000)]
         expected += [["wait_us", (op & 0x7fff) * 1000] if op & 0x8000 else ["data" if op & 0x100 else "command", op & 255]
                      for op in stream]
         expected += [["wait_us", 50000]]
@@ -364,9 +426,15 @@ class Run:
         assert props[display, "boot_fb0"] == ",".join(f"{v:x}" for v in fields).encode() + b"\0"
         assert (PIXELS, width * height * 4) in V.fdt_reservations(tree)
         stamps = struct.unpack(">7Q", props["/chosen", "baseos,native-timing"])
-        assert list(stamps) == sorted(stamps) and stamps[2] <= shown <= stamps[3], (stamps, shown)
+        # The logo is lit while the kernel decodes: after the image load, before the FDT is finished.
+        assert list(stamps) == sorted(stamps) and stamps[2] <= shown <= stamps[5], (stamps, shown)
+        assert S["lz4_before_lit"] >= 1 and stamps[3] <= shown, "kernel decode did not overlap the display waits"
+        assert S["deferred"] is None and len(S["deferred_checked"]) == \
+            sum(1 for op in stream if op & 0x8000) + 2, ("deferred waits not all honoured", S["deferred_checked"])
         command = props["/chosen", "bootargs"].rstrip(b"\0").split()
         assert [t for t in command if t.startswith(b"lcd_type=")] == [b"lcd_type=" + (b"boe" if panel else b"old")]
+        row.update(decode_steps_before_backlight=S["lz4_before_lit"], deferred_waits_us=S["deferred_checked"],
+                   panel_steps_skipped=fast)
         row.update(panel="boe" if panel else "old", passed=True, kernel_entry=True, record_sha256=sha(record),
                    shown_ticks=shown, native_timing=list(stamps), cvac_lines=len(S["clean"]),
                    spi_frames=sum(1 for e in S["timeline"] if e[0] != "wait_us"),
@@ -404,7 +472,7 @@ def main():
         descriptor = struct.pack("<4I", 0x31474f4c, len(bmp), fnv(bmp), 0)
         words = list(struct.unpack_from("<32I", (args.inventory / "boot0.bin").read_bytes(), 0x38))
         record = bytearray(struct.pack("<4I4QI32I8s3I32s2I", 0x314e5342, 2, 240, manifest["model_id"],
-                                       (words[7] >> 16) << 20, 1000, 2000, 3000, words[1], *words, bytes(8),
+                                       (words[7] >> 16) << 20, 12000000, 12100000, 23000000, words[1], *words, bytes(8),
                                        manifest["image_bytes"], manifest["image_fnv"], 0,
                                        bytes.fromhex(manifest["generation"]), 5, 0))
         struct.pack_into("<I", record, 196, fnv(record))
@@ -412,14 +480,89 @@ def main():
         source = "modeled native record from inventory boot0 and " + ("given BMP" if args.bmp else "work/<target>/bootlogo.bmp")
     assert len(record) == 240 and struct.unpack_from("<I", descriptor)[0] == 0x31474f4c
     runner = Run(native, engine, streams, record, bmp, descriptor, args.serial)
-    cases = [runner.run("valid-high-64", high=True, unpack=args.real_unpack),
-             runner.run("valid-low-64", high=False),
-             runner.run("valid-high-16", high=True, line=16),
-             runner.run("no-logo-cold", fault="no-logo"),
-             runner.run("malformed-bmp-cold", fault="bad-bmp"),
-             runner.run("scanline-stuck", fault="scanline-stuck")]
+    rule, contract = manifest["panel_rule"], manifest["panel_contract"]
+
+    def strap_panel(high):
+        return int(contract["high" if high else "low"] == "boe") if rule == 2 else rule
+
+    def panel_record(panel, ticks, version=1, generation=None, rule_field=None):
+        raw = bytearray(struct.pack("<6I5Q32s", 0x314c4e50, version, 96, 0, panel,
+                                    rule if rule_field is None else rule_field, *ticks,
+                                    generation or bytes.fromhex(manifest["generation"])))
+        struct.pack_into("<I", raw, 12, fnv(raw, (12, 16)))
+        return bytes(raw)
+
+    if args.spl_proof:
+        panels = {}
+        for high, prefix in ((False, "valid"), (True, "valid-pe6-high")):
+            pio = {int(k, 16): v for k, v in json.loads((args.spl_proof / (prefix + "-pio-state.json")).read_text()).items()}
+            panels[high] = ((args.spl_proof / (prefix + "-native-panel.bin")).read_bytes(), pio,
+                            (args.spl_proof / (prefix + "-native-record.bin")).read_bytes())
+            assert struct.unpack_from("<I", panels[high][0], 16)[0] == strap_panel(high)
+        panel_source = "SPL emulation panel records and final PIO state"
+    else:
+        started = struct.unpack_from("<Q", record, 24)[0]
+        ticks, at = [], started + 500000
+        for wait in (0,) + WAITS_MS:
+            at += wait * TICK
+            ticks.append(at)  # exact minimum gaps: the boundary must be accepted
+        panels = {}
+        for high in (False, True):
+            pio = {CFG: 0x11345678, DAT: 0xa5a5e7a5,
+                   PE_CFG: 0x76777777 if rule == 2 else 0x77777777,
+                   PE_PULL: 0x1000 if rule == 2 and manifest["panel_pull_up"] else 0}
+            panels[high] = (panel_record(strap_panel(high), ticks), pio, record)
+        panel_source = "modeled panel record at the exact minimum waits"
+
+    def fast(name, high, **kw):
+        good, pio, own = panels[high]
+        return runner.run(name, high=high, panel=good, pio=pio, record=own, skip=True, **kw)
+
+    def refused(name, panel=None, pio=None):
+        good, base_pio, own = panels[False]
+        row = runner.run(name, high=False, panel=panel or good, pio={**base_pio, **(pio or {})}, record=own)
+        assert row["panel_steps_in_loader"], ("refused record still skipped the panel steps", name)
+        row["refused_panel_record"] = True
+        return row
+
+    good = panels[False][0]
+    ticks = list(struct.unpack_from("<5Q", good, 24))
+    started = struct.unpack_from("<Q", panels[False][2], 24)[0]
+    loaded = struct.unpack_from("<Q", panels[False][2], 40)[0]
+    panel = struct.unpack_from("<I", good, 16)[0]
+    short = list(ticks)
+    short[3] = short[2] + WAITS_MS[2] * TICK - 1
+    short[4] = max(short[4], short[3] + WAITS_MS[3] * TICK)
+    damaged = bytearray(good)
+    damaged[12] ^= 1
+    base_dat, base_cfg = panels[False][1][DAT], panels[False][1][CFG]
+    cases = [fast("spl-panel-low-64", False, unpack=args.real_unpack),
+             fast("spl-panel-high-64", True),
+             fast("spl-panel-high-16", True, line=16),
+             runner.run("fallback-high-64", high=True),
+             runner.run("fallback-low-64", high=False),
+             refused("refuse-wait-short", panel=panel_record(panel, short)),
+             refused("refuse-checksum", panel=bytes(damaged)),
+             refused("refuse-version", panel=panel_record(panel, ticks, version=2)),
+             refused("refuse-generation", panel=panel_record(panel, ticks, generation=bytes(32))),
+             refused("refuse-rule", panel=panel_record(panel, ticks, rule_field=(rule + 1) % 3)),
+             refused("refuse-before-spl-start", panel=panel_record(panel, [started - 1] + ticks[1:])),
+             refused("refuse-not-finished", panel=panel_record(panel, ticks[:4] + [loaded + (1 << 40)])),
+             refused("refuse-power-off", pio={DAT: base_dat & ~0x8000}),
+             refused("refuse-in-reset", pio={DAT: base_dat & ~0x4000}),
+             refused("refuse-pins-not-output", pio={CFG: base_cfg | 0x77000000})]
+    if rule == 2:
+        cases.append(refused("refuse-strap-not-input", pio={PE_CFG: panels[False][1][PE_CFG] | 0x0f000000}))
+        if manifest["panel_pull_up"]:
+            cases.append(refused("refuse-strap-pull", pio={PE_PULL: panels[False][1][PE_PULL] & ~0x3000}))
+        if strap_panel(False) != strap_panel(True):
+            cases.append(refused("refuse-strap-differs", panel=panel_record(1 - panel, ticks)))
+    cases += [fast("no-logo-cold-spl-panel", False, fault="no-logo"),
+              runner.run("no-logo-cold", fault="no-logo"),
+              fast("malformed-bmp-cold-spl-panel", False, fault="bad-bmp"),
+              fast("scanline-stuck", False, fault="scanline-stuck")]
     if any(op["kind"] == "poll" for phase in PHASES for op in engine[phase]):
-        cases.append(runner.run("poll-timeout", fault="poll-timeout"))
+        cases.append(fast("poll-timeout", False, fault="poll-timeout"))
     args.output.mkdir(parents=True)
     first = cases[0].pop("_artifacts")
     for row in cases:
@@ -432,8 +575,13 @@ def main():
     report = dict(passed=True, target=target, generation=manifest["generation"], loader_sha256=manifest["loader_sha256"],
                   verifier_sha256=sha(Path(__file__).read_bytes()), input_source=source, case_count=len(cases),
                   cases=cases, sram_c_untouched_after_release=True, real_kernel_unpack=args.real_unpack,
+                  panel_record_source=panel_source,
+                  spl_panel_skip_cases=sum(1 for row in cases if row.get("spl_panel_record") and not row.get("panel_steps_in_loader")),
+                  refused_panel_record_cases=sum(1 for row in cases if row.get("refused_panel_record")),
+                  decode_overlaps_display_waits=all(row.get("decode_steps_before_backlight", 1) >= 1 for row in cases),
                   scope="actual linked A32 loader from 0x4a000000 to the kernel SMC; modeled CNTPCT/CTR/CP15, polls, "
-                        "TCON line counter and PE6 strap; SRAM C unmapped at release",
+                        "TCON line counter and PE6 strap; SRAM C unmapped at release; decode slices modeled except "
+                        "in the first case",
                   limitations=["No electrical/panel timing, PLL lock or coherency proof; DCCMVAC is a recorded event.",
                                "Counter-stall loop bound not executed (100M-iteration guard)."],
                   device_access=False, hardware_qualified=False)

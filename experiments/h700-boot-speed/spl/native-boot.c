@@ -9,6 +9,7 @@
 #include "native-generated.h"
 #include "native-logo.h"
 #include "native-display.h"
+#include "native-panel.h"
 #include "boot-logo-file.h"
 #ifdef BASEOS_RAW_CAPSULE
 #include "raw-capsule-generated.h"
@@ -72,9 +73,107 @@ static u32 fnv(const u8 *bytes, unsigned int size)
     return hash;
 }
 
+/* Vendor panel power-on (PI15), reset pulse (PI14) and PE6 strap. GPIO only: the SPL
+ * still owns SRAM C, so SYSCTRL and the display engine stay with the A32 loader. */
+static struct {
+    unsigned int step; /* 0 idle, 1..4 waiting before step N, 5 done */
+    unsigned int panel;
+    u64 ticks[5];
+} panel_sequence;
+
+static void panel_update(ulong address, u32 mask, u32 bits)
+{
+    writel((readl((void *)address) & ~mask) | bits, (void *)address);
+}
+
+/* Counter value after the preceding store has completed. */
+static u64 panel_mark(void)
+{
+    u64 now;
+    asm volatile("dsb sy; isb; mrs %0, cntpct_el0" : "=r"(now) :: "memory");
+    return now;
+}
+
+static void panel_start(void)
+{
+    if (panel_sequence.step)
+        return;
+    panel_update(0x0300b124, 0xff000000, 0x11000000);
+    panel_update(0x0300b130, 0x8000, 0x8000);
+    panel_sequence.ticks[0] = panel_mark();
+    panel_sequence.step = 1;
+}
+
+/* Take every step whose minimum wait has passed. Waits only ever get longer. */
+static void panel_advance(void)
+{
+    static const u32 wait_ms[4] = BASEOS_PANEL_WAITS_MS;
+    while (panel_sequence.step >= 1 && panel_sequence.step <= 4) {
+        unsigned int step = panel_sequence.step;
+        u64 now;
+        asm volatile("isb; mrs %0, cntpct_el0" : "=r"(now));
+        if (now - panel_sequence.ticks[step - 1] < (u64)wait_ms[step - 1] * BASEOS_PANEL_TICKS_PER_MS)
+            return;
+        if (step < 4) {
+            panel_update(0x0300b130, 0x4000, step == 2 ? 0 : 0x4000);
+        } else {
+            panel_sequence.panel = BASEOS_PANEL_RULE;
+#if BASEOS_PANEL_RULE == 2
+            panel_update(0x0300b090, 0x0f000000, 0x06000000);
+#if BASEOS_PANEL_PULL_UP
+            panel_update(0x0300b0ac, 0x3000, 0x1000);
+#endif
+            panel_sequence.panel = !(readl((void *)0x0300b0a0) & 0x40);
+#endif
+        }
+        panel_sequence.ticks[step] = panel_mark();
+        panel_sequence.step = step + 1;
+    }
+}
+
+static void panel_publish(void)
+{
+    for (unsigned int remaining = 100000000u; remaining && panel_sequence.step &&
+         panel_sequence.step < 5; remaining--)
+        panel_advance();
+    if (panel_sequence.step != 5)
+        return;
+    struct baseos_native_panel *record = (void *)BASEOS_NATIVE_PANEL_ADDRESS, next;
+    memset(&next, 0, sizeof(next));
+    next.magic = BASEOS_NATIVE_PANEL_MAGIC;
+    next.version = BASEOS_NATIVE_PANEL_VERSION;
+    next.bytes = sizeof(next);
+    next.panel = panel_sequence.panel;
+    next.rule = BASEOS_PANEL_RULE;
+    memcpy(next.ticks, panel_sequence.ticks, sizeof(next.ticks));
+    memcpy(next.generation, baseos_generation, sizeof(next.generation));
+    next.fnv = baseos_panel_hash(&next);
+    memcpy((u8 *)record + 4, (const u8 *)&next + 4, sizeof(next) - 4);
+    asm volatile("dmb sy" ::: "memory");
+    record->magic = next.magic;
+}
+
+/* 512 KiB per command (about 22 ms at 23.5 MB/s) bounds how far a panel wait stretches. */
+#define BASEOS_READ_CHUNK_BLOCKS 1024u
+
+static int read_polled(struct blk_desc *card, lbaint_t start, lbaint_t blocks, void *output)
+{
+    u8 *at = output;
+    while (blocks) {
+        lbaint_t now = blocks < BASEOS_READ_CHUNK_BLOCKS ? blocks : BASEOS_READ_CHUNK_BLOCKS;
+        if (blk_dread(card, start, now, at) != now)
+            return 0;
+        start += now;
+        blocks -= now;
+        at += now * 512;
+        panel_advance();
+    }
+    return 1;
+}
+
 static int logo_read(void *context, uint32_t lba, uint32_t blocks, void *output)
 {
-    return blk_dread(context, lba, blocks, output) == blocks;
+    return read_polled(context, lba, blocks, output);
 }
 
 static void load_boot_logo(struct blk_desc *card)
@@ -117,19 +216,26 @@ int baseos_vendor_handoff(struct blk_desc *card, u32 *result, const u8 *stock)
     asm volatile("mrs %0, cntpct_el0" : "=r"(reading));
     struct baseos_native_display *display = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
     memset(display, 0, sizeof(*display));
+    memset((void *)BASEOS_NATIVE_PANEL_ADDRESS, 0, sizeof(struct baseos_native_panel));
+    /* A strapped model always probes, so start at once. A fixed panel is powered
+     * only for the splash, as before. */
+    if (BASEOS_PANEL_RULE == 2)
+        panel_start();
     load_boot_logo(card);
+    if (((struct baseos_native_logo *)BASEOS_NATIVE_LOGO_RECORD_ADDRESS)->magic == BASEOS_NATIVE_LOGO_MAGIC)
+        panel_start();
     u8 *package = (void *)0x42e00000;
-    if (blk_dread(card, BASEOS_FIRMWARE_SECTOR, BASEOS_FIRMWARE_BYTES / 512, package) != BASEOS_FIRMWARE_BYTES / 512 ||
+    if (!read_polled(card, BASEOS_FIRMWARE_SECTOR, BASEOS_FIRMWARE_BYTES / 512, package) ||
         fnv(package, BASEOS_FIRMWARE_BYTES) != BASEOS_FIRMWARE_FNV) return -1;
     for (unsigned i = 0; i < ARRAY_SIZE(baseos_firmware_extents); i++) {
         const struct baseos_firmware_extent *item = &baseos_firmware_extents[i];
         if (item->offset > BASEOS_FIRMWARE_BYTES || item->bytes > BASEOS_FIRMWARE_BYTES - item->offset) return -1;
         memcpy((void *)(ulong)item->destination, package + item->offset, item->bytes);
     }
-    if (blk_dread(card, BASEOS_IMAGE_SECTOR, BASEOS_IMAGE_BYTES / 512,
-                  (void *)BASEOS_NATIVE_IMAGE_ADDRESS) != BASEOS_IMAGE_BYTES / 512 ||
+    if (!read_polled(card, BASEOS_IMAGE_SECTOR, BASEOS_IMAGE_BYTES / 512, (void *)BASEOS_NATIVE_IMAGE_ADDRESS) ||
         fnv((void *)BASEOS_NATIVE_IMAGE_ADDRESS, BASEOS_IMAGE_BYTES) != BASEOS_IMAGE_FNV) return -1;
     asm volatile("mrs %0, cntpct_el0" : "=r"(loaded));
+    panel_publish();
     baseos_checkpoint(card, 32);
     u8 *uboot = (void *)0x4a000000, *monitor = (void *)0x48000000;
     const u32 *parameters = baseos_selected_vendor_params();

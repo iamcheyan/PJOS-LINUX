@@ -39,6 +39,8 @@ native_enable_mmu:
     mcr p15, 0, r0, c3, c0, 0
     mrc p15, 0, r0, c1, c0, 0
     bic r0, r0, #0x30000000
+    /* SCTLR.A clear: the kernel decoder uses unaligned LDR/STR on Normal DRAM. */
+    bic r0, r0, #2
     orr r0, r0, #0x00800000
     orr r0, r0, #1
     orr r0, r0, #4

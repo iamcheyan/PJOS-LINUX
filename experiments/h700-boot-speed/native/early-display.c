@@ -9,6 +9,7 @@
 
 extern uint64_t native_ticks(void);
 extern void release_display_sram(void);
+extern int baseos_spl_panel(void);
 
 enum display_operation_kind { DISPLAY_UPDATE, DISPLAY_WRITE, DISPLAY_FRAMEBUFFER,
                               DISPLAY_DELAY_US, DISPLAY_POLL, DISPLAY_BARRIER };
@@ -81,6 +82,9 @@ static __attribute__((noinline)) int apply(const struct display_operation *opera
 
 static int prepare_panel(void)
 {
+    /* The SPL normally ran these steps while it read the card. */
+    int ready = baseos_spl_panel();
+    if (ready >= 0) return ready;
     update(0x0300b124u, 0xff000000u, 0x11000000u);
     update(0x0300b130u, 0x8000u, 0x8000u);
     if (wait_us(30000)) return -1;
@@ -94,20 +98,6 @@ static int prepare_panel(void)
     update(0x0300b090u, 0x0f000000u, 0x06000000u);
     if (BASEOS_PANEL_PULL_UP) update(0x0300b0acu, 0x3000u, 0x1000u);
     return !(read32(NULL, 0x0300b0a0u) & 0x40u);
-}
-
-static int initialize_panel(unsigned panel)
-{
-    struct baseos_panel_spi9 port = {{NULL, read32, write32, barrier}, 0};
-    const uint16_t *stream = panel ? baseos_panel_boe : baseos_panel_old;
-    size_t count = panel ? sizeof(baseos_panel_boe) / sizeof(*stream) : sizeof(baseos_panel_old) / sizeof(*stream);
-    for (size_t i = 0; i < count; ++i) {
-        unsigned op = stream[i];
-        if (op & 0x8000u) {
-            if (wait_us((op & 0x7fffu) * 1000u)) return -1;
-        } else baseos_panel_spi9_send(&port, (uint8_t)op, op & 0x100u);
-    }
-    return 0;
 }
 
 static void clean_pixels(size_t bytes)
@@ -132,7 +122,110 @@ static int scanline_advances(void)
     return -1;
 }
 
-int baseos_early_display(const struct baseos_native_logo *logo)
+/* After the panel stream starts, every remaining vendor wait is a deadline. The
+ * loader polls between kernel decode slices, so the waits overlap the decode while
+ * each step still runs in vendor order and no earlier than its minimum wait. */
+enum display_stage { DISPLAY_IDLE, DISPLAY_STREAM, DISPLAY_PUBLISH, DISPLAY_BACKLIGHT,
+                     DISPLAY_DONE, DISPLAY_FAILED };
+static struct {
+    enum display_stage stage;
+    unsigned panel;
+    const uint16_t *stream;
+    size_t count, next;
+    struct baseos_panel_spi9 port;
+    uint64_t since, wait;
+    const struct baseos_native_logo *logo;
+} job;
+
+static __attribute__((noinline)) void defer_us(uint32_t microseconds)
+{
+    job.since = native_ticks();
+    job.wait = (uint64_t)microseconds * 24u;
+}
+
+/* Send panel stream operations up to the next delay: 1 at a delay, 0 at the end. */
+static int stream_run(void)
+{
+    while (job.next < job.count) {
+        unsigned op = job.stream[job.next++];
+        if (op & 0x8000u) {
+            defer_us((op & 0x7fffu) * 1000u);
+            return 1;
+        }
+        baseos_panel_spi9_send(&job.port, (uint8_t)op, op & 0x100u);
+    }
+    return 0;
+}
+
+static void publish_record(void)
+{
+    struct baseos_native_display *record = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
+    size_t pixel_bytes = BASEOS_LOGO_WIDTH * BASEOS_LOGO_HEIGHT * 4u;
+    struct baseos_native_display next;
+    memset(&next, 0, sizeof(next));
+    next.magic = BASEOS_NATIVE_DISPLAY_MAGIC;
+    next.version = 1;
+    next.bytes = sizeof(next);
+    next.panel = job.panel;
+    next.logo_bytes = job.logo->bytes;
+    next.logo_fnv = job.logo->fnv;
+    next.pixel_fnv = baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, (unsigned)pixel_bytes);
+    memcpy(next.generation, baseos_generation, sizeof(next.generation));
+    next.shown_ticks = native_ticks();
+    next.fnv = baseos_display_hash(&next);
+    memcpy((unsigned char *)record + 4, (const unsigned char *)&next + 4, sizeof(next) - 4);
+    asm volatile("dsb sy" ::: "memory");
+    record->magic = next.magic;
+    asm volatile("dsb sy" ::: "memory");
+}
+
+/* Run every display step whose wait has passed: 1 while waiting, 0 when the logo is
+ * lit (or nothing was started), -1 after a failed step. */
+int baseos_early_display_poll(void)
+{
+    while (job.stage != DISPLAY_IDLE && job.stage != DISPLAY_DONE) {
+        if (job.stage == DISPLAY_FAILED) return -1;
+        if (native_ticks() - job.since < job.wait) return 1;
+        if (job.stage == DISPLAY_STREAM) {
+            if (stream_run()) continue;
+            defer_us(50000);
+            job.stage = DISPLAY_PUBLISH;
+        } else if (job.stage == DISPLAY_PUBLISH) {
+            if (apply(baseos_display_publish, sizeof(baseos_display_publish) / sizeof(*baseos_display_publish)) ||
+                apply(baseos_display_enable, sizeof(baseos_display_enable) / sizeof(*baseos_display_enable))) {
+                job.stage = DISPLAY_FAILED;
+                return -1;
+            }
+            defer_us(100000);
+            job.stage = DISPLAY_BACKLIGHT;
+        } else {
+            if (scanline_advances() || apply(baseos_display_backlight,
+                    sizeof(baseos_display_backlight) / sizeof(*baseos_display_backlight))) {
+                job.stage = DISPLAY_FAILED;
+                return -1;
+            }
+            publish_record();
+            job.stage = DISPLAY_DONE;
+        }
+    }
+    return 0;
+}
+
+/* Wait out the remaining steps, with the same counter-stall bound as wait_us. */
+int baseos_early_display_finish(void)
+{
+    for (unsigned remaining = 100000000u; remaining; --remaining) {
+        int state = baseos_early_display_poll();
+        if (state <= 0) return state;
+    }
+    job.stage = DISPLAY_FAILED;
+    return -1;
+}
+
+/* Convert, release SRAM C, prepare DE/TCON, take the panel out of reset and start its
+ * stream. Returns the panel, -2 for a missing or malformed logo (cold path, nothing
+ * touched) or -1 after a display step failed. */
+int baseos_early_display_start(const struct baseos_native_logo *logo)
 {
     struct baseos_native_display *record = (void *)BASEOS_NATIVE_DISPLAY_ADDRESS;
     memset(record, 0, sizeof(*record));
@@ -147,26 +240,16 @@ int baseos_early_display(const struct baseos_native_logo *logo)
     release_display_sram();
     if (apply(baseos_display_prepare, sizeof(baseos_display_prepare) / sizeof(*baseos_display_prepare))) return -1;
     int panel = prepare_panel();
-    if (panel < 0 || initialize_panel((unsigned)panel) || wait_us(50000) ||
-        apply(baseos_display_publish, sizeof(baseos_display_publish) / sizeof(*baseos_display_publish)) ||
-        apply(baseos_display_enable, sizeof(baseos_display_enable) / sizeof(*baseos_display_enable)) ||
-        wait_us(100000) || scanline_advances() || apply(baseos_display_backlight,
-                              sizeof(baseos_display_backlight) / sizeof(*baseos_display_backlight))) return -1;
-    struct baseos_native_display next;
-    memset(&next, 0, sizeof(next));
-    next.magic = BASEOS_NATIVE_DISPLAY_MAGIC;
-    next.version = 1;
-    next.bytes = sizeof(next);
-    next.panel = (unsigned)panel;
-    next.logo_bytes = logo->bytes;
-    next.logo_fnv = logo->fnv;
-    next.pixel_fnv = baseos_logo_hash((void *)BASEOS_NATIVE_LOGO_PIXEL_ADDRESS, (unsigned)pixel_bytes);
-    memcpy(next.generation, baseos_generation, sizeof(next.generation));
-    next.shown_ticks = native_ticks();
-    next.fnv = baseos_display_hash(&next);
-    memcpy((unsigned char *)record + 4, (const unsigned char *)&next + 4, sizeof(next) - 4);
-    asm volatile("dsb sy" ::: "memory");
-    record->magic = next.magic;
-    asm volatile("dsb sy" ::: "memory");
-    return panel;
+    if (panel < 0) return -1;
+    job.stage = DISPLAY_STREAM;
+    job.panel = (unsigned)panel;
+    job.stream = panel ? baseos_panel_boe : baseos_panel_old;
+    job.count = panel ? sizeof(baseos_panel_boe) / sizeof(*baseos_panel_boe)
+                      : sizeof(baseos_panel_old) / sizeof(*baseos_panel_old);
+    job.next = 0;
+    job.port = (struct baseos_panel_spi9){{NULL, read32, write32, barrier}, 0};
+    job.since = native_ticks();
+    job.wait = 0;
+    job.logo = logo;
+    return baseos_early_display_poll() < 0 ? -1 : panel;
 }

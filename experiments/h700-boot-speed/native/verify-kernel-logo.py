@@ -253,12 +253,13 @@ def validate_warm_status(directory,props,display,pixels):
  assert len(source)==logo_bytes and fnv(source)==logo_fnv,'warm status source BMP differs'
  timing=props['/chosen','baseos,native-timing'];assert len(timing)==56
  stamps=struct.unpack('>7Q',timing)
- assert stamps[2]<=shown<=stamps[3],'warm shown tick lies outside the loader interval between image load and kernel unpack'
+ # v151: the logo is lit while the kernel decodes, so the window ends at FDT completion (stamps[5]).
+ assert stamps[2]<=shown<=stamps[5],'warm shown tick lies outside the loader interval between image load and FDT completion'
  command=props['/chosen','bootargs'].rstrip(b'\0').decode('ascii').split()
  assert [token for token in command if token.startswith('lcd_type=')]==['lcd_type='+('boe' if panel else 'old')]
  return dict(display_record_sha256=sha(raw),shown_ticks=shown,panel=panel,
              fixture_sha256=sha(source),fixture_path=str(fixture.resolve()),handoff_policy_sha256=sha(contract_path.read_bytes()),
-             exact_warm_metadata=True,native_display_interval=list(stamps[2:4]),panel_cmdline_exact=True)
+             exact_warm_metadata=True,native_display_interval=[stamps[2],stamps[5]],panel_cmdline_exact=True)
 
 
 def generated_case(directory,dtb_path,pixel_path,warm=False):
