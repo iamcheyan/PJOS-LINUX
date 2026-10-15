@@ -119,16 +119,22 @@ EOF
     test ! -f /tmp/reboot.log
   }
 
-  echo "== native and legacy updates cannot replace each other =="
+  echo "== a native payload updates a stock card; a native card needs one =="
   reset; make_payload rg40xxv "$SLOT_SECTORS" clean
   native_field 0000000000000000000000000000000000000000000000000000000000000000
-  refuse_unchanged "native payload on legacy card"
+  refuse_unchanged "zero native payload on legacy card"
+  reset; make_payload rg40xxv "$SLOT_SECTORS" clean
+  native_field 89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
+  baseos-update apply
+  test -f /tmp/flip.log
   reset; make_payload rg40xxv "$SLOT_SECTORS" clean; native_policy
   refuse_unchanged "legacy payload on native card"
 
-  echo "== exact native generation applies with FDT or stock fallback =="
-  for running in native stock; do
-    reset; make_payload rg40xxv "$SLOT_SECTORS" clean; native_policy; native_field "$NATIVE_HEX"
+  echo "== the same or another model generation applies with FDT or stock fallback =="
+  for running in native stock other; do
+    reset; make_payload rg40xxv "$SLOT_SECTORS" clean; native_policy
+    if [ "$running" = other ]; then native_field 89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
+    else native_field "$NATIVE_HEX"; fi
     [ "$running" = stock ] || native_fdt
     prefix="$(dd if=/dev/mmcblk0 bs=1M count=9 2>/dev/null | sha256sum)"
     suffix="$(dd if=/dev/mmcblk0 bs=1M skip=17 count=15 2>/dev/null | sha256sum)"
@@ -138,10 +144,10 @@ EOF
     [ "$(dd if=/dev/mmcblk0 bs=1M skip=17 count=15 2>/dev/null | sha256sum)" = "$suffix" ]
   done
 
-  echo "== wrong or malformed native generations never write the card =="
+  echo "== zero or malformed native generations never write the card =="
   reset; make_payload rg40xxv "$SLOT_SECTORS" clean; native_policy
   native_field 0000000000000000000000000000000000000000000000000000000000000000
-  refuse_unchanged "wrong installed generation"
+  refuse_unchanged "zero payload generation"
   reset; make_payload rg40xxv "$SLOT_SECTORS" clean; native_policy; native_field "$NATIVE_HEX"; native_fdt
   printf "%s" "fedcba9876543210fedcba9876543210" > /tmp/native-fdt/baseos,native-boot
   refuse_unchanged "wrong running generation"

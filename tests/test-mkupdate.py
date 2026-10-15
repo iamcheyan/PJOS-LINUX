@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATION = bytes(range(32))
+UPDATER = b"#!/bin/sh\n# the slot's own updater\n"
 
 
 class UpdatePackage(unittest.TestCase):
@@ -37,6 +38,8 @@ class UpdatePackage(unittest.TestCase):
         helper = self.root / "usr/sbin/native-health"
         helper.write_bytes(b"#!/bin/sh\nexit 0\n")
         helper.chmod(0o755)
+        (self.root / "usr/sbin/baseos-update").write_bytes(UPDATER)
+        (self.root / "usr/sbin/baseos-update").chmod(0o755)
 
     def package(self):
         slot = self.directory / "rootfs.img"
@@ -66,7 +69,10 @@ class UpdatePackage(unittest.TestCase):
         result, slot = self.package()
         self.assertEqual(result.returncode, 0, result.stderr)
         with tarfile.open(self.output) as archive:
-            self.assertEqual(archive.getnames(), ["manifest", "rootfs.img.gz"])
+            # Native payloads carry their own updater last, after what older updaters read.
+            self.assertEqual(archive.getnames(), ["manifest", "rootfs.img.gz"] + (["baseos-update"] if generation else []))
+            if generation:
+                self.assertEqual(archive.extractfile("baseos-update").read(), UPDATER)
             manifest = dict(line.split("=", 1) for line in archive.extractfile("manifest").read().decode().splitlines())
             payload = gzip.decompress(archive.extractfile("rootfs.img.gz").read())
         self.assertEqual(payload, slot.read_bytes())
@@ -86,6 +92,11 @@ class UpdatePackage(unittest.TestCase):
     def test_native_raw_generation_and_helper_are_read_from_ext4(self):
         self.native()
         self.accepted(GENERATION.hex())
+
+    def test_native_rootfs_without_updater_refused(self):
+        self.native()
+        (self.root / "usr/sbin/baseos-update").unlink()
+        self.refused("must contain /usr/sbin/baseos-update")
 
     def test_empty_short_long_or_hex_marker_refused(self):
         for data in (b"", GENERATION[:-1], GENERATION + b"\0", GENERATION.hex().encode()):
