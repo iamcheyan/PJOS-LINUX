@@ -1,6 +1,6 @@
 {
   "passed": true,
-  "scope": "Compiled vendor panel acquisition, health refusal and both BOE laboratory functional qualification; physical personal old-panel acceptance still pending.",
+  "scope": "Compiled vendor panel acquisition, health refusal, both BOE laboratory functional qualification and personal old-panel installation with user-confirmed normal Slot picture.",
   "root_cause": "Native sampled PE6 before PI15 power/PI14 reset, selected mux0 instead of vendor mux6 and ignored model-specific pull-up policy; personal stockold became nativeboe.",
   "panel_probe": {
     "path": "/tmp/h700-panel-probe-v2/verification.json",
@@ -159,10 +159,12 @@
     }
   },
   "personal_device": {
-    "current": "stock old; user confirmed normal Slot",
+    "current": "corrected native old; user confirmed normal Slot",
     "old_native_acceptance_withdrawn": true,
-    "reinstall_pending": true,
-    "physical_old_panel_qualified": false
+    "reinstall_pending": false,
+    "physical_old_panel_qualified": true,
+    "confirmation": "Yes, normal Slot screen",
+    "scope": "One corrected native verification boot and user picture confirmation; no personal benchmark."
   },
   "measurement_scope": "Functional USB warm boots only; original five-pair benchmarks predate added195ms vendor panel sequence. No new paired speedup or physical-button measurement.",
   "new_rgsp_generation": "b875b0e05d7aa35fa88c329db5ed45287499769208fa3edd63ecbe6e6ffc57d5"

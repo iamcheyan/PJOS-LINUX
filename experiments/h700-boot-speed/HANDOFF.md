@@ -2,18 +2,33 @@
 
 ## Active checkpoint — read this before the historical notes
 
-The per-card step 1 implementation is committed as `205f677`, but **personal
-RGSP native acceptance is withdrawn**. Its stock `lcd_type=old` became `boe`
+Step 1 is committed as `205f677`, with the panel fix in `ad95638`. **The
+corrected personal RGSP release is installed and the user confirmed normal Slot.**
+Acceptance of the earlier native release remains withdrawn: its stock `lcd_type=old` became `boe`
 under native and the physical screen was black. Linux, GPU/DE and Slot checks
 missed the panel mismatch. Verified 60 Hz did not restore it. Stock fallback
 restored `old`, and the user confirmed: **"Yes, normal Slot screen."**
 
-RGSP is now usable on stock, boot `c371afa0-b510-4630-8eac-d741b79a9703`.
-The exact owned RTC latch stays set so future boots stay stock. Recovery wrote
-no firmware. Slot, games and settings are preserved, including `high_refresh=1`.
-The user's explicit request to fix this supersedes the earlier instruction to
-leave RGSP alone. Keep it usable on stock while correcting and qualifying the
-probe on host and lab devices. **Step 2 is paused for the display fix.**
+The corrected release is now installed on personal RGSP, generation
+`b875b0e05d7aa35fa88c329db5ed45287499769208fa3edd63ecbe6e6ffc57d5`.
+Its single verification boot `c1f941f9-3144-4b73-8956-6721f2287f4e` preserved
+`lcd_type=old`, passed production acknowledgment and exact startup/media checks,
+and runs the unchanged Slot binary. The user confirmed: **"Yes, normal Slot screen."**
+RGSP is now off limits to further agent tests, writes and reboots. Continue
+step 2 on the two labs while the user uses RGSP normally.
+
+The corrected code is committed as `ad95638`. Qualification
+`work/h700-loader/rgsp-user-install/panel-acceptance-review-v1/release-qualified-v3`
+binds all eight fresh panel-aware lab reports and commit `ad95638`, SHA256
+`002ed30516288fdb4ad3de0ca95b692bce3742540f8dc5332b3d2b751e6ab4f7`.
+The 20-case stock transition restored only the pinned original primary while
+holding the old stock latch, verified the untouched secondary, then cleared
+only the exact owned latch; it issued no reboot. The ordinary corrected installer
+then performed one verification boot. Local journals are
+`rgsp-user-install/panel-stock-transition-v2/hardware-v1/run.json` and
+`rgsp-user-install/panel-install-v2/install-journal.json`. Compact install proof:
+`evidence/rgsp-panel-install-v2.json`. Earlier recovery restored the normal stock
+picture with `high_refresh=1`; the refresh preference has not been disabled.
 
 Native omitted PI15 power and PI14 reset with the vendor 30/15/50/100 ms waits,
 then used PE6 function0 instead of function6. Pull-up policy also varies by model.
@@ -22,8 +37,8 @@ compares actual operations with all eleven original U-Boots. The new health
 helper requires exact per-card `/etc/baseos/native-panel` policy and matching
 command line before watchdog acknowledgment. Fresh builds, all eleven linked
 model proofs and all eight new lab recovery/ordinary-boot/suspend reports pass.
-The original kernel, monitor, image and DTB remain byte-exact. Personal
-old-panel installation and physical acceptance are the next gate. Evidence is under
+The original kernel, monitor, image and DTB remain byte-exact. The personal
+old-panel installation passed its protocol and the user confirmed the picture. Evidence is under
 `work/h700-loader/rgsp-user-install/black-screen-v1`,
 `work/h700-loader/panel-health-v1` and
 `work/h700-loader/rgsp-user-install/panel-acceptance-review-v1`.
@@ -34,8 +49,7 @@ Their eight fresh hardware reports are under
 `noack`, `native-cycle-1`, `native-cycle-2`, and `sleep`. Every report binds actual
 panel command lines to its native/recovery/resume boot IDs. Both labs are BOE;
 these reports do not establish physical old-panel coverage. Compact proof:
-`evidence/panel-acquisition-fix.json`. RG40 also passed its following native boot;
-SP's following boot is being checked. The initial failed noack reports remain
+`evidence/panel-acquisition-fix.json`. Both labs also passed the following native boot. The initial failed noack reports remain
 under `noack-first-transient-state`; their native witnesses preserved RTC words,
 but the stock route normalized vendor GP2/6. SP also had a dirty FAT flag.
 Read-only fsck found no structural errors; backed-up metadata changed only byte65

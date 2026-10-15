@@ -5,11 +5,11 @@ loader while preserving the vendor kernel ABI, monitor, SCP, display, input,
 GPU, Wi-Fi and power behavior across all eleven models. No user configuration
 may be required for DRAM or panel revisions.
 
-Step 1 is committed as `205f677`. RGSP daily-use acceptance is withdrawn:
-native chose `boe` for its `old` panel, leaving a black screen. Stock fallback
-restored the normal Slot screen, confirmed by the user. Keep RGSP usable on
-stock while correcting and requalifying automatic panel acquisition on host
-and lab devices. Step 2 is paused; generic fleet qualification remains open.
+Step 1 is committed as `205f677`, with the old-panel acquisition fix in
+`ad95638`. Both corrected lab chains pass recovery, ordinary boots, sleep/wake
+and the following boot. The corrected RGSP install preserved `lcd_type=old`,
+and the user confirmed normal Slot. Leave personal RGSP untouched for daily
+use and continue step 2 on the labs. Generic fleet qualification remains open.
 The authoritative checkpoint and evidence locations are in [HANDOFF.md](HANDOFF.md).
 
 ## 1. Qualify and ship the native boot chain
@@ -38,7 +38,7 @@ The authoritative checkpoint and evidence locations are in [HANDOFF.md](HANDOFF.
   commit the native chain locally with a detailed message (`205f677`). No push.
 - [x] Correct panel power/reset/strap acquisition for all models, enforce
   stock/native panel equality before acknowledgment, and requalify both labs.
-- [ ] Install the corrected RGSP release and establish physical-screen
+- [x] Install the corrected RGSP release and establish physical-screen
   acceptance before leaving it for daily use.
 
 The selected 128 KiB raw capsule contains exact stock boot0 and an adopt-only
@@ -58,7 +58,7 @@ now reject that path and preserve init, ADB, SSH and unrelated services.
 
 ## 2. Read the critical path sequentially
 
-Paused for the RGSP panel regression. After that fix, package the kernel and a cpio
+The RGSP panel fix is installed and physically confirmed. Package the kernel and a cpio
 containing the library squashfs image into a contiguous boot payload, load
 libraries from RAM, and add boot-image A/B selection. Preserve root ext4,
 rootfs slots and update semantics. Measure the added sequential bytes against
