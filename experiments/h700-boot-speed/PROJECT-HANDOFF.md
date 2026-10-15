@@ -12,10 +12,14 @@ card from 1.0.0 to 1.5.0 to 1.5.1.
   card holds; if the device falls back to stock, it retrains DRAM once, like a
   freshly flashed card. The generation and cookie then become per-model and can
   live in the rootfs image.
-- Panel type can differ between units of one model, and the SPL/loader already
-  detects it at every boot. Do not bake `/etc/baseos/native-panel` into the
-  image; record it from the first native boot, or derive the health check from
-  the live detection.
+- A card may move between units and variants of the same model, and the user
+  only picks the model's BaseOS. DRAM and panel must be detected on every boot,
+  and nothing on the card may record one unit's variant. DRAM is already chosen
+  at runtime by the SPL's bank selector, and the pristine boot0 carries no
+  trained words. The panel is already read from the PE6 strap after power and
+  reset. Remove the stored `/etc/baseos/native-panel` policy. Native health
+  should instead require the kernel `lcd_type` to equal the panel the loader
+  detected (its FDT display/native record) on that boot.
 - Ship the model's capsule, firmware, image and recovery TOC inside the
   `.bosupd`. Extend `baseos-boot-migrate`, which already moves 1.0.0–1.3.x cards
   to the 1.4.0 boot files, with the guarded native write: hold the stock latch,
