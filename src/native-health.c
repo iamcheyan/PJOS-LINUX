@@ -20,7 +20,9 @@
 
 #define FDT_GENERATION "/sys/firmware/devicetree/base/chosen/baseos,native-boot"
 #define INSTALLED_GENERATION "/etc/baseos/native-generation"
-#define INSTALLED_PANEL "/etc/baseos/native-panel"
+#define BOOT_DISPLAY "/sys/firmware/devicetree/base/chosen/baseos,boot-display"
+#define DISPLAY_MAGIC UINT32_C(0x31505344)
+#define DISPLAY_BYTES 80
 #define BOOT_MODE "/sys/class/power_supply/axp2202-battery/boot_mode"
 #define CMDLINE "/proc/cmdline"
 #define ACK_LOCK "/run/baseos-native-health.lock"
@@ -107,26 +109,71 @@ static int read_text(const char *path, char *buffer, size_t capacity)
     return 1;
 }
 
-static int panel_matches(void)
+static uint32_t le32(const uint8_t *bytes)
 {
-    char expected[5];
-    if (!read_text(INSTALLED_PANEL, expected, sizeof(expected)) ||
-        (strcmp(expected, "old\n") && strcmp(expected, "boe\n"))) return 0;
+    return bytes[0] | (uint32_t)bytes[1] << 8 | (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
+}
+
+/* The panel the loader drove this boot, from its display record (the A32
+ * loader's struct baseos_native_display, little-endian). 0 old, 1 boe,
+ * -1 no record (no logo was shown), -2 a record that cannot be trusted. */
+static int loader_panel(const uint8_t running[32])
+{
+    uint8_t record[DISPLAY_BYTES + 1];
+    int fd = open(BOOT_DISPLAY, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return errno == ENOENT ? -1 : -2;
+    size_t used = 0;
+    while (used < sizeof(record)) {
+        ssize_t count = read(fd, record + used, sizeof(record) - used);
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) { close(fd); return -2; }
+        if (!count) break;
+        used += (size_t)count;
+    }
+    close(fd);
+    if (used != DISPLAY_BYTES) return -2;
+    uint32_t hash = UINT32_C(2166136261);
+    for (size_t i = 0; i < DISPLAY_BYTES; i++)
+        hash = (hash ^ (i >= 12 && i < 16 ? 0 : record[i])) * UINT32_C(16777619);
+    uint32_t panel = le32(record + 16);
+    int shown = 0, reserved = 0;
+    for (size_t i = 64; i < 72; i++) shown |= record[i];
+    for (size_t i = 72; i < 80; i++) reserved |= record[i];
+    if (le32(record) != DISPLAY_MAGIC || le32(record + 4) != 1 || le32(record + 8) != DISPLAY_BYTES ||
+        le32(record + 12) != hash || panel > 1 || le32(record + 20) < 54 || !shown || reserved ||
+        memcmp(record + 32, running, 32)) return -2;
+    return (int)panel;
+}
+
+/* The kernel's own lcd_type: exactly one token, old or boe. 0 old, 1 boe. */
+static int kernel_panel(void)
+{
     char command[4096];
-    if (!read_text(CMDLINE, command, sizeof(command))) return 0;
+    if (!read_text(CMDLINE, command, sizeof(command))) return -1;
     const size_t key = sizeof("lcd_type=") - 1;
-    int found = 0;
+    int found = -1;
     for (char *word = command; *word;) {
         while (isspace((unsigned char)*word)) word++;
         char *end = word;
         while (*end && !isspace((unsigned char)*end)) end++;
         if ((size_t)(end - word) >= key && !memcmp(word, "lcd_type=", key)) {
-            if (found || (size_t)(end - word) != key + 3 || memcmp(word + key, expected, 3)) return 0;
-            found = 1;
+            if (found >= 0 || (size_t)(end - word) != key + 3) return -1;
+            if (!memcmp(word + key, "old", 3)) found = 0;
+            else if (!memcmp(word + key, "boe", 3)) found = 1;
+            else return -1;
         }
         word = end;
     }
     return found;
+}
+
+/* No per-card panel file: the panel is detected on every boot. The kernel's
+ * lcd_type must be one the loader could have chosen, and when the loader
+ * published a display record it must name that same panel. */
+static int panel_matches(const uint8_t running[32])
+{
+    int kernel = kernel_panel(), loader = loader_panel(running);
+    return kernel >= 0 && loader != -2 && (loader == -1 || loader == kernel);
 }
 
 static int charger_boot(void)
@@ -288,14 +335,95 @@ read_done:
     return result;
 }
 
+/* Stock latch for boot-area writes (baseos-boot-migrate). While the pair is
+ * nonzero the capsule always starts the embedded stock boot0, so a reset in
+ * the middle of a write boots stock. Holding converges any pair to
+ * (cookie(installed), pending); once nonzero it never passes through zero.
+ * Releasing clears only that exact pair, cookie first, as attempt_ack does. */
+enum latch_mode { LATCH_SHOW, LATCH_HOLD, LATCH_RELEASE };
+
+static int write_word(struct attempt_io *io, enum attempt_word word, uint32_t value,
+                      struct attempt_pair expected)
+{
+    io->write(io->context, word, value);
+    io->fence(io->context);
+    return pair_equal(pair_read(io), expected);
+}
+
+static int stock_latch(enum latch_mode mode)
+{
+    uint8_t installed[32];
+    uint32_t cookie;
+    if (!read_generation(INSTALLED_GENERATION, installed) || !(cookie = generation_cookie(installed))) {
+        fprintf(stderr, "native-health: absent or malformed installed generation\n");
+        return 3;
+    }
+    struct registers registers;
+    if (!map_registers(&registers, mode != LATCH_SHOW)) return 1;
+    struct attempt_io io = {(void *)registers.rtc, rtc_read, rtc_write, rtc_fence};
+    const struct attempt_pair held = {cookie, ATTEMPT_PENDING}, empty = {0, 0};
+    struct attempt_pair pair = pair_read(&io);
+    int result = 0;
+    if (mode == LATCH_SHOW) {
+        printf("%08x %08x %s\n", (unsigned)pair.cookie, (unsigned)pair.marker,
+               pair_equal(pair, held) ? "held" : pair_equal(pair, empty) ? "idle" : "other");
+        goto done;
+    }
+    /* An armed watchdog means a native attempt still owns the pair. */
+    if (registers.timer[WDT_MODE] & 1) { result = 4; goto done; }
+    if (mode == LATCH_HOLD) {
+        if (pair_equal(pair, held)) goto done;
+        if (pair_equal(pair, empty)) {
+            result = attempt_commit(&io, cookie) == IO_COMPLETE ? 0 : 5;
+            goto done;
+        }
+        io.fence(io.context);
+        if (!pair_equal(pair_read(&io), pair)) { result = 5; goto done; }
+        if (pair.marker != ATTEMPT_PENDING) {
+            pair.marker = ATTEMPT_PENDING;
+            if (!write_word(&io, ATTEMPT_MARKER, ATTEMPT_PENDING, pair)) { result = 5; goto done; }
+        }
+        if (pair.cookie != cookie && !write_word(&io, ATTEMPT_COOKIE, cookie, held)) result = 5;
+        goto done;
+    }
+    if (pair_equal(pair, empty)) goto done;
+    if (!pair_equal(pair, held)) { result = 5; goto done; }
+    io.fence(io.context);
+    const struct attempt_pair clearing = {0, ATTEMPT_PENDING};
+    if (!pair_equal(pair_read(&io), held) || !write_word(&io, ATTEMPT_COOKIE, 0, clearing) ||
+        !write_word(&io, ATTEMPT_MARKER, 0, empty)) result = 5;
+done:
+    if (mode != LATCH_SHOW)
+        printf("native-health: stock latch %s\n", result ? "unchanged or unverified" :
+               mode == LATCH_HOLD ? "held" : "released");
+    unmap_registers(&registers);
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     int charger = argc == 2 && !strcmp(argv[1], "--accept-charger");
     int write_ack = charger || (argc == 2 && !strcmp(argv[1], "--accept"));
     int check = argc == 2 && !strcmp(argv[1], "--check");
-    if (!write_ack && !check) {
-        fprintf(stderr, "usage: native-health --check|--accept|--accept-charger\n");
+    enum latch_mode latch = LATCH_SHOW;
+    int latching = argc == 2 && (!strcmp(argv[1], "--stock-latch") ||
+        (!strcmp(argv[1], "--hold-stock") && (latch = LATCH_HOLD)) ||
+        (!strcmp(argv[1], "--release-stock") && (latch = LATCH_RELEASE)));
+    if (!write_ack && !check && !latching) {
+        fprintf(stderr, "usage: native-health --check|--accept|--accept-charger|"
+                        "--stock-latch|--hold-stock|--release-stock\n");
         return 2;
+    }
+    if (latching) {
+        int lock = open(ACK_LOCK, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (lock < 0 || flock(lock, LOCK_EX | LOCK_NB)) {
+            if (lock >= 0) close(lock);
+            fprintf(stderr, "native-health: another supervisor owns the pair\n");
+            return 4;
+        }
+        int result = stock_latch(latch);
+        close(lock);
+        return result;
     }
     uint8_t running[32], installed[32];
     if (!read_generation(FDT_GENERATION, running) || !read_generation(INSTALLED_GENERATION, installed) ||
@@ -303,8 +431,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "native-health: absent, malformed or mismatched generation\n");
         return 3;
     }
-    if (!panel_matches()) {
-        fprintf(stderr, "native-health: absent, malformed or mismatched panel policy\n");
+    if (!panel_matches(running)) {
+        fprintf(stderr, "native-health: kernel lcd_type is malformed or differs from the loader's panel\n");
         return 3;
     }
     if (charger && !charger_boot()) {

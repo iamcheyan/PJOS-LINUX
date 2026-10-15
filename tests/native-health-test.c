@@ -88,7 +88,7 @@ static int device_open(const char *name, int flags, ...)
 {
     if (startup_fixture && (!strcmp(name, FDT_GENERATION) || !strcmp(name, INSTALLED_GENERATION) ||
                             !strcmp(name, BOOT_MODE) || !strcmp(name, CMDLINE) ||
-                            !strcmp(name, "/etc/baseos/native-panel"))) return open(name, flags);
+                            !strcmp(name, BOOT_DISPLAY))) return open(name, flags);
     if (!strcmp(name, "/dev/mem")) { memory_opens++; return 1000; }
     if (!strcmp(name, "/dev/mali0")) { probes++; return gpu_missing ? -1 : 1001; }
     if (!strcmp(name, "/dev/fb0")) return 1002;
@@ -98,7 +98,7 @@ static int device_open(const char *name, int flags, ...)
     else if (!strcmp(name, INSTALLED_GENERATION)) redirect = file_path("installed");
     else if (!strcmp(name, BOOT_MODE)) redirect = file_path("boot-mode");
     else if (!strcmp(name, CMDLINE)) redirect = file_path("cmdline");
-    else if (!strcmp(name, "/etc/baseos/native-panel")) redirect = file_path("panel");
+    else if (!strcmp(name, BOOT_DISPLAY)) redirect = file_path("display-record");
     else if (!strcmp(name, ACK_LOCK)) redirect = file_path("lock");
     else assert(!"unexpected path, network or frontend dependency");
     if (flags & O_CREAT) return open(redirect, flags, 0600);
@@ -238,7 +238,7 @@ static void initialize(void)
     put_file("installed", generation, 32);
     put_file("boot-mode", "0\n", 2);
     put_file("cmdline", "console=ttyS0 lcd_type=old\n", sizeof("console=ttyS0 lcd_type=old\n") - 1);
-    put_file("panel", "old\n", 4);
+    unlink(file_path("display-record"));
 }
 static int run(const char *mode)
 {
@@ -261,11 +261,41 @@ static void unchanged(void)
     assert(rtc[0x138 / 4] == generation_cookie(generation) && rtc[0x13c / 4] == ATTEMPT_PENDING);
 }
 
+static void seal_record(uint8_t record[80])
+{
+    memset(record + 12, 0, 4);
+    uint32_t hash = 2166136261u;
+    for (unsigned i = 0; i < 80; i++) hash = (hash ^ record[i]) * 16777619u;
+    memcpy(record + 12, &hash, 4);
+}
+static void make_record(uint8_t record[80], uint32_t panel, const uint8_t owner[32])
+{
+    const uint32_t words[] = {0x31505344u, 1, 80, 0, panel, 921654, 0x12345678u, 0x9abcdef0u};
+    memset(record, 0, 80);
+    memcpy(record, words, sizeof(words));
+    memcpy(record + 32, owner, 32);
+    const uint64_t shown = 36312000;
+    memcpy(record + 64, &shown, 8);
+    seal_record(record);
+}
+static void put_record(uint32_t panel, const uint8_t owner[32])
+{
+    uint8_t record[80];
+    make_record(record, panel, owner);
+    put_file("display-record", record, 80);
+}
+
+static void settle(void)
+{
+    memcpy(previous_rtc, rtc, sizeof(rtc));
+    memcpy(previous_timer, timer, sizeof(timer));
+}
+
 static void cleanup(void)
 {
     assert(!unlink(file_path("fdt")) && !unlink(file_path("installed")));
     assert(!unlink(file_path("boot-mode")) && !unlink(file_path("cmdline")));
-    assert(!unlink(file_path("panel")));
+    unlink(file_path("display-record"));
     unlink(file_path("lock"));
     assert(!rmdir(directory));
 }
@@ -293,17 +323,22 @@ int main(int argc, char **argv)
     assert(argc == 1);
     const char *panel_modes[] = {"--check", "--accept", "--accept-charger"};
     for (unsigned i = 0; i < sizeof(panel_modes) / sizeof(panel_modes[0]); i++) {
-        /* The regression: healthy GPU/DE/input, wrong panel must not ack. */
-        initialize(); put_file("boot-mode", "1\n", 2);
+        /* The regression: healthy GPU/DE/input, but the kernel was told another
+         * panel than the one the loader drove. That must not ack. */
+        initialize(); put_file("boot-mode", "1\n", 2); put_record(1, generation);
+        assert(run(panel_modes[i]) == 3 && !memory_opens); unchanged();
+        initialize(); put_file("boot-mode", "1\n", 2); put_record(0, generation);
         put_file("cmdline", "lcd_type=boe\n", sizeof("lcd_type=boe\n") - 1);
         assert(run(panel_modes[i]) == 3 && !memory_opens); unchanged();
-        initialize(); put_file("boot-mode", "1\n", 2); put_file("panel", "boe\n", 4);
-        assert(run(panel_modes[i]) == 3 && !memory_opens); unchanged();
-        initialize(); put_file("boot-mode", "1\n", 2); put_file("panel", "boe\n", 4);
+        initialize(); put_file("boot-mode", "1\n", 2); put_record(1, generation);
         put_file("cmdline", "quiet\tlcd_type=boe\tloglevel=0\n", sizeof("quiet\tlcd_type=boe\tloglevel=0\n") - 1);
         assert(run(panel_modes[i]) == 0);
         if (!strcmp(panel_modes[i], "--check")) unchanged();
         else assert(change_count == 3 && !rtc[0x138 / 4] && !rtc[0x13c / 4] && !timer[WDT_MODE]);
+        /* No logo, no record: the loader's own lcd_type stands. */
+        initialize(); put_file("boot-mode", "1\n", 2);
+        put_file("cmdline", "lcd_type=boe\n", sizeof("lcd_type=boe\n") - 1);
+        assert(run(panel_modes[i]) == 0);
     }
     const char *bad_panels[] = {"quiet\n", "lcd_type=old lcd_type=old\n", "lcd_type=old lcd_type=boe\n",
                                "lcd_type=boe lcd_type=old\n", "lcd_type=old-extra\n", "xlcd_type=old\n",
@@ -311,22 +346,39 @@ int main(int argc, char **argv)
     for (unsigned i = 0; i < sizeof(bad_panels) / sizeof(bad_panels[0]); i++) {
         initialize(); put_file("cmdline", bad_panels[i], strlen(bad_panels[i]));
         assert(run("--accept") == 3 && !memory_opens); unchanged();
-    }
-    const char *bad_policies[] = {"", "old", "old\n\n", "boe\r\n", " old\n", "OLD\n", "boe "};
-    for (unsigned i = 0; i < sizeof(bad_policies) / sizeof(bad_policies[0]); i++) {
-        initialize(); put_file("panel", bad_policies[i], strlen(bad_policies[i]));
+        initialize(); put_file("cmdline", bad_panels[i], strlen(bad_panels[i])); put_record(0, generation);
         assert(run("--accept") == 3 && !memory_opens); unchanged();
     }
-    initialize(); put_file("panel", "old\000", 4);
+    /* A damaged or foreign record is not trusted, whatever lcd_type says. */
+    for (unsigned field = 0; field < 11; field++) {
+        initialize(); put_record(0, generation);
+        uint8_t record[80]; make_record(record, 0, generation);
+        switch (field) {
+        case 0: record[0] ^= 1; break;                       /* magic */
+        case 1: record[4] = 2; break;                        /* version */
+        case 2: record[8] = 79; break;                       /* size field */
+        case 3: record[12] ^= 1; break;                      /* checksum */
+        case 4: record[16] = 2; break;                       /* panel out of range */
+        case 5: memset(record + 20, 0, 4); record[20] = 53; break;     /* logo shorter than a BMP header */
+        case 6: memset(record + 64, 0, 8); break;            /* never shown */
+        case 7: record[72] = 1; break;                       /* reserved */
+        case 8: record[32] ^= 1; break;                      /* another generation */
+        case 9: put_file("display-record", record, 79); break;
+        default: put_file("display-record", record, 80); { int fd = open(file_path("display-record"), O_WRONLY | O_APPEND);
+                 assert(fd >= 0 && write(fd, "", 1) == 1 && !close(fd)); } break;
+        }
+        if (field != 3 && field < 9) seal_record(record);
+        if (field < 9) put_file("display-record", record, 80);
+        assert(run("--accept") == 3 && !memory_opens); unchanged();
+    }
+    initialize(); put_file("display-record", "", 0);
     assert(run("--accept") == 3 && !memory_opens); unchanged();
-    initialize(); assert(!unlink(file_path("panel")));
+    initialize(); put_record(0, generation);
+    char record_target[256]; assert(snprintf(record_target, sizeof(record_target), "%s/record-target", directory) > 0);
+    assert(!rename(file_path("display-record"), record_target) && !symlink(record_target, file_path("display-record")));
     assert(run("--accept") == 3 && !memory_opens); unchanged();
-    initialize(); put_file("panel-target", "old\n", 4);
-    char panel_target[256]; assert(snprintf(panel_target, sizeof(panel_target), "%s/panel-target", directory) > 0);
-    assert(!unlink(file_path("panel")) && !symlink(panel_target, file_path("panel")));
-    assert(run("--accept") == 3 && !memory_opens); unchanged();
-    assert(!unlink(panel_target));
-    puts("native-health panel policy matrix passed; mismatches leave MMIO unopened");
+    assert(!unlink(record_target));
+    puts("native-health panel matrix passed; mismatches leave MMIO unopened");
     initialize(); assert(run("--accept") == 0);
     assert(change_count == 3 && changes[0].area == 0 && changes[0].index == 0x138 / 4 && !changes[0].value);
     assert(changes[1].area == 0 && changes[1].index == 0x13c / 4 && !changes[1].value);
@@ -405,6 +457,46 @@ int main(int argc, char **argv)
     assert(rtc[0x138 / 4] == 0x11111111 && rtc[0x13c / 4] == 0x22222222);
     initialize(); injected = CHANGE_WDT_DURING_DISARM; assert(run("--accept") == 5 && timer[WDT_MODE] == 0x91 && change_count == 3);
     assert(!rtc[0x138 / 4] && !rtc[0x13c / 4]);
+    /* Stock latch for boot-area writes: no FDT needed, only the installed generation. */
+    const uint32_t cookie = generation_cookie(generation);
+    initialize(); timer[WDT_MODE] = 0; rtc[0x138 / 4] = rtc[0x13c / 4] = 0; assert(!unlink(file_path("fdt"))); settle();
+    assert(run("--hold-stock") == 0 && change_count == 2);
+    assert(changes[0].index == 0x138 / 4 && changes[0].value == cookie);
+    assert(changes[1].index == 0x13c / 4 && changes[1].value == ATTEMPT_PENDING);
+    change_count = 0; assert(run("--hold-stock") == 0 && !change_count);
+    assert(run("--stock-latch") == 0 && !change_count);
+    assert(run("--release-stock") == 0 && change_count == 2);
+    assert(changes[0].index == 0x138 / 4 && !changes[0].value && changes[1].index == 0x13c / 4 && !changes[1].value);
+    assert(!rtc[0x138 / 4] && !rtc[0x13c / 4]);
+    change_count = 0; assert(run("--release-stock") == 0 && !change_count);
+    /* Taking over another generation's latch never lets the pair pass through zero. */
+    const uint32_t foreign[][2] = {{0x2064f435u, ATTEMPT_PENDING}, {0, ATTEMPT_PENDING}, {0x2064f435u, 0},
+                                   {0x11111111u, 0x22222222u}, {0, 0x22222222u}};
+    for (unsigned i = 0; i < sizeof(foreign) / sizeof(foreign[0]); i++) {
+        initialize(); timer[WDT_MODE] = 0; rtc[0x138 / 4] = foreign[i][0]; rtc[0x13c / 4] = foreign[i][1];
+        settle();
+        uint32_t seen[2] = {foreign[i][0], foreign[i][1]};
+        assert(run("--release-stock") == 5 && !change_count);
+        assert(run("--hold-stock") == 0 && change_count >= 1 && change_count <= 2);
+        for (unsigned c = 0; c < change_count; c++) {
+            seen[changes[c].index == 0x13c / 4] = changes[c].value;
+            assert(seen[0] || seen[1]);
+        }
+        assert(rtc[0x138 / 4] == cookie && rtc[0x13c / 4] == ATTEMPT_PENDING);
+    }
+    /* An armed watchdog is a native attempt in progress: hands off. */
+    initialize(); rtc[0x138 / 4] = rtc[0x13c / 4] = 0; settle();
+    assert(run("--hold-stock") == 4 && !change_count && !rtc[0x138 / 4]);
+    initialize(); assert(run("--release-stock") == 4 && !change_count && rtc[0x138 / 4] == cookie && rtc[0x13c / 4] == ATTEMPT_PENDING);
+    initialize(); timer[WDT_MODE] = 0; rtc[0x138 / 4] = rtc[0x13c / 4] = 0; settle(); injected = DROP_MARKER;
+    assert(run("--hold-stock") == 5);
+    initialize(); timer[WDT_MODE] = 0; settle(); injected = DROP_COOKIE;
+    assert(run("--release-stock") == 5 && rtc[0x13c / 4] == ATTEMPT_PENDING);
+    initialize(); timer[WDT_MODE] = 0; settle(); busy = 1; assert(run("--hold-stock") == 4 && !memory_opens);
+    initialize(); timer[WDT_MODE] = 0; settle(); assert(!unlink(file_path("installed")));
+    assert(run("--hold-stock") == 3 && !memory_opens); put_file("installed", generation, 32);
+    initialize(); assert(run("--bogus") == 2 && !memory_opens);
+    puts("native-health stock latch passed: exact pair, never zero while held");
     cleanup();
     puts("native-health behavior passed: file/MMIO model only; no devices");
     return 0;

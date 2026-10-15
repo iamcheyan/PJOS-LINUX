@@ -1,6 +1,7 @@
 """Execute rcS with the real health CLI and modeled hardware in a disposable chroot."""
 import argparse
 import ast
+import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,18 @@ namespace = {"__file__": str(policy)}
 exec(compile(ast.Module(body=definitions, type_ignores=[]), str(policy), "exec"), namespace)
 Boot = namespace["Boot"]
 GENERATION = bytes.fromhex("33dc8a21142807a21e6f9dc5ae861b37a9f55337705c0ae86495eb3f9c0d8513")
+DISPLAY = "sys/firmware/devicetree/base/chosen/baseos,boot-display"
+
+
+def display_record(panel, generation=GENERATION):
+    """The loader's 80-byte display record, as the A32 loader publishes it."""
+    record = bytearray(struct.pack("<8I", 0x31505344, 1, 80, 0, panel, 921654, 0x12345678, 0x9abcdef0))
+    record += generation + struct.pack("<Q2I", 36312000, 0, 0)
+    value = 2166136261
+    for byte in record:
+        value = (value ^ byte) * 16777619 & 0xffffffff
+    struct.pack_into("<I", record, 12, value)
+    return bytes(record)
 
 
 def boot_fixture(args, *, native=True, **env):
@@ -32,7 +45,7 @@ while [ ! -e /run/release-charger ]; do /test/busybox sleep 0.01; done
     if native:
         boot.write("sys/firmware/devicetree/base/chosen/baseos,native-boot", GENERATION)
         boot.write("etc/baseos/native-generation", GENERATION)
-        boot.write("etc/baseos/native-panel", "old\n")
+        boot.write(DISPLAY, display_record(0))
         boot.write("proc/cmdline", boot.read("proc/cmdline") + " lcd_type=old\n")
     return boot
 
@@ -74,11 +87,11 @@ def main():
             boot.close()
         print("PASS: native acceptance precedes updater", reboot_at)
 
-    for fault in ("wrong-panel", "missing-policy", "duplicate-token", "missing-token"):
+    for fault in ("wrong-panel", "foreign-record", "duplicate-token", "missing-token"):
         boot = boot_fixture(args, mode="0")
         try:
-            if fault == "missing-policy":
-                (boot.root / "etc/baseos/native-panel").unlink()
+            if fault == "foreign-record":
+                boot.write(DISPLAY, display_record(0, bytes(32)))
             else:
                 commands = {"wrong-panel": "lcd_type=boe\n",
                             "duplicate-token": "lcd_type=old lcd_type=old\n",
@@ -101,7 +114,7 @@ def main():
 
     boot = boot_fixture(args, mode="0")
     try:
-        boot.write("etc/baseos/native-panel", "boe\n")
+        boot.write(DISPLAY, display_record(1))
         boot.write("proc/cmdline", "quiet lcd_type=boe\n")
         boot.start()
         assert boot.proc.wait(timeout=4) == 0, boot.calls()
