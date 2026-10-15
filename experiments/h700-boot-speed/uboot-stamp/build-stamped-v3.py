@@ -164,6 +164,9 @@ def verify(u: bytes, info: dict) -> dict:
         reached = []
         m.replace(int(s["original_target"], 16), lambda: reached.append(1) or 0)
         m.uc.mem_write(SCRATCH, b"\xEE" * (BLOCK_WORDS * 4))
+        if s["slot"] == 0 and "entry_stub" in info:
+            # Later instruments retain the true entry stamp in slot zero.
+            m.uc.emu_start(LINK + int(info["entry_stub"], 16), LINK + 0x640)
         result = m.call(int(s["stub"], 16), [])
         lo, hi = struct.unpack("<II", m.read(int(s["slot_address"], 16), 8))
         require(reached == [1] and result == 0 and (lo | hi) != 0 and lo != 0xEEEEEEEE,

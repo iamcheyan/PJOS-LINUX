@@ -16,6 +16,11 @@ ROOT=${BASEOS_BOOT_TEST_ROOT:-}
 if [ -n "$ROOT" ]; then
 	[ "${BASEOS_BOOT_TESTING:-}" = 1 ] && [ -f "$ROOT/.boot-migration-test" ] || exit 1
 fi
+# Installed native boot policy also applies when recovery boots stock Linux.
+# Preserve its boot areas even if the marker is malformed or a broken link.
+if [ -e "$ROOT/etc/baseos/native-generation" ] || [ -L "$ROOT/etc/baseos/native-generation" ]; then
+	exit 0
+fi
 STATE="$ROOT/data/boot-pair-v2"
 # The first migration's directory is only ever read here: it may hold the
 # user's sole durable copy of the original pair.

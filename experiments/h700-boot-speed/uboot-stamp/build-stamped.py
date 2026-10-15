@@ -40,6 +40,8 @@ STAMP_BASE = 0x40000100
 MAGIC = 0x5354414D                      # "STAM" little-endian word, at STAMP_BASE - 8
 HELP_TEXT, HELP_LEN = 0x92FD7, 2119     # sunxi_nand_test long help (.rodata)
 HELP_FIELD = 0xE6210 + 20               # its cmd_tbl entry's help pointer
+COMMAND_ENTRY = 0xE6210
+REL_DYN_END = 0xFDAA0
 STUB_AREA = (HELP_TEXT + 4) & ~3        # 0x92FD8, first aligned byte after the NUL we write
 # Layout constants read from the binary and checked below.
 IMAGE_COPY_END_LIT, BSS_LITS, REL_DYN_LITS = 0x13C8, (0xFC4, 0xFC8), (0x13CC, 0x13D0)
@@ -140,7 +142,7 @@ def check_layout(u: bytes) -> dict:
     tail = len(u)
     while u[tail - 1] == 0xFF:
         tail -= 1
-    require(tail == rel[1] == 0xFDAA0, "0xFF padding does not start at __rel_dyn_end")
+    require(tail == rel[1] == REL_DYN_END, "0xFF padding does not start at __rel_dyn_end")
     require(bss[0] <= tail and ITEM_SIZE <= bss[1], "padding is expected to lie inside .bss")
     # Every absolute address in the image has an R_ARM_RELATIVE entry in .rel.dyn.
     pointers: dict[int, list[int]] = {}
@@ -151,7 +153,7 @@ def check_layout(u: bytes) -> dict:
     end = HELP_TEXT + HELP_LEN
     require(u[HELP_TEXT - 1] == 0 and u[end] == 0 and u.index(b"\0", HELP_TEXT) == end, "help text bounds")
     require(word(u, HELP_FIELD) - LINK == HELP_TEXT and
-            u[word(u, 0xE6210) - LINK:].startswith(b"sunxi_nand_test\0"), "not the sunxi_nand_test entry")
+            u[word(u, COMMAND_ENTRY) - LINK:].startswith(b"sunxi_nand_test\0"), "not the sunxi_nand_test entry")
     inside = {p: s for p, s in pointers.items() if HELP_TEXT <= p < end}
     require(inside == {HELP_TEXT: [HELP_FIELD]}, f"other references into the help text: {inside}")
     # PC-relative loads/adr (Thumb 16/32-bit, ARM) into the help text: over-approximate scan.

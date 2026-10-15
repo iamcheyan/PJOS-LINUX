@@ -16,9 +16,13 @@ Usage: mkupdate.py IMAGE TARGET VERSION BUILD OUTPUT
 import gzip
 import hashlib
 import io
+import re
+import shutil
 import struct
+import subprocess
 import sys
 import tarfile
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -49,6 +53,55 @@ def rootfs_extent(image: Path) -> tuple[int, int]:
     return start, end - start + 1
 
 
+def native_generation(slot: Path) -> bytes | None:
+    """Read the installed policy from ext4, never from arbitrary image bytes."""
+    debugfs = shutil.which("debugfs")
+    if not debugfs:
+        die("debugfs is required to inspect rootfs boot compatibility (use build-update.sh)")
+
+    def inode(path):
+        result = subprocess.run(
+            [debugfs, "-R", f"stat {path}", str(slot)], capture_output=True, check=False
+        )
+        output = result.stdout.decode("utf-8", "replace")
+        error = result.stderr.decode("utf-8", "replace")
+        if result.returncode:
+            die(f"cannot inspect rootfs {path}: {error.strip()}")
+        match = re.search(r"^Inode:\s+\d+\s+Type:\s+(\S+)\s+Mode:\s+([0-7]+)", output, re.M)
+        if not match:
+            if "File not found by ext2_lookup" in error:
+                return None
+            die(f"cannot inspect rootfs {path}: {error.strip() or output.strip()}")
+        size = re.search(r"^User:.*?\bSize:\s+(\d+)", output, re.M)
+        if not size:
+            die(f"cannot read rootfs inode size for {path}")
+        return match[1], int(match[2], 8), int(size[1])
+
+    for path in ("/etc", "/etc/baseos"):
+        record = inode(path)
+        if record is None:
+            return None
+        if record[0] != "directory":
+            die(f"rootfs boot policy path is not a directory: {path}")
+    marker = "/etc/baseos/native-generation"
+    record = inode(marker)
+    if record is None:
+        return None
+    if record[0] != "regular" or record[2] != 32:
+        die("rootfs native-generation must be a regular raw32-byte file")
+    result = subprocess.run([debugfs, "-R", f"cat {marker}", str(slot)], capture_output=True, check=False)
+    if result.returncode or len(result.stdout) != 32:
+        die("cannot read the rootfs raw32-byte native generation")
+    for path in ("/usr", "/usr/sbin"):
+        record = inode(path)
+        if record is None or record[0] != "directory":
+            die(f"native helper path is not a directory: {path}")
+    helper = inode("/usr/sbin/native-health")
+    if helper is None or helper[0] != "regular" or not helper[1] & 0o111 or not helper[2]:
+        die("native rootfs must contain a regular executable /usr/sbin/native-health")
+    return result.stdout
+
+
 def main() -> int:
     if len(sys.argv) != 6:
         die("usage: mkupdate.py IMAGE TARGET VERSION BUILD OUTPUT")
@@ -77,23 +130,27 @@ def main() -> int:
     }
     window = max(len(stamp) for stamp in stamps)
     tail = b""
-    with image.open("rb") as handle, gzip.GzipFile(
-        fileobj=compressed, mode="wb", compresslevel=6, mtime=0
-    ) as gz:
-        handle.seek(start * SECTOR)
-        remaining = size
-        while remaining:
-            chunk = handle.read(min(CHUNK, remaining))
-            if not chunk:
-                die("image is shorter than the rootfs partition it declares")
-            remaining -= len(chunk)
-            digest.update(chunk)
-            gz.write(chunk)
-            haystack = tail + chunk
-            for stamp, seen in stamps.items():
-                if not seen and stamp in haystack:
-                    stamps[stamp] = True
-            tail = chunk[-window:]
+    with tempfile.NamedTemporaryFile(prefix="baseos-update-rootfs-") as slot:
+        with image.open("rb") as handle, gzip.GzipFile(
+            fileobj=compressed, mode="wb", compresslevel=6, mtime=0
+        ) as gz:
+            handle.seek(start * SECTOR)
+            remaining = size
+            while remaining:
+                chunk = handle.read(min(CHUNK, remaining))
+                if not chunk:
+                    die("image is shorter than the rootfs partition it declares")
+                remaining -= len(chunk)
+                digest.update(chunk)
+                gz.write(chunk)
+                slot.write(chunk)
+                haystack = tail + chunk
+                for stamp, seen in stamps.items():
+                    if not seen and stamp in haystack:
+                        stamps[stamp] = True
+                tail = chunk[-window:]
+        slot.flush()
+        generation = native_generation(Path(slot.name))
 
     for stamp, seen in stamps.items():
         if not seen:
@@ -110,7 +167,10 @@ def main() -> int:
             ("image-size", size),
             ("image-sha256", digest.hexdigest()),
         )
-    ).encode()
+    )
+    if generation is not None:
+        manifest += f"native-generation={generation.hex()}\n"
+    manifest = manifest.encode()
 
     payload = compressed.getvalue()
     output.parent.mkdir(parents=True, exist_ok=True)

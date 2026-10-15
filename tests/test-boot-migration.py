@@ -52,6 +52,21 @@ def boot0_checksum(blob):
 
 
 class Migration(unittest.TestCase):
+    def test_native_installed_policy_preserves_all_boot_areas_without_native_fdt(self):
+        for marker in (b"native-generation".ljust(32, b"\0"), b"", b"malformed", None):
+            with self.subTest(marker=marker):
+                self.build()
+                policy = self.root / "etc/baseos/native-generation"
+                policy.parent.mkdir()
+                if marker is None:
+                    policy.symlink_to("missing-generation")
+                else:
+                    policy.write_bytes(marker)
+                self.run_migration()
+                self.assert_untouched()
+                self.assertEqual(self.ops(), [])
+                self.assertFalse(self.state.exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

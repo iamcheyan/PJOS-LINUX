@@ -28,7 +28,7 @@ device tree. The kernel's standby code reads it from there.
 
 | Target | Primary set | Alternates in the header |
 |---|---|---|
-| rg28xx | DDR3 at 792 MHz | DDR3 |
+| rg28xx | LPDDR4 at 672 MHz | DDR3 at 792 MHz |
 | rg34xx, rg35xxplus, rg35xxsp | LPDDR4 at 672 MHz | LPDDR3, LPDDR4 |
 | rg34xxsp, rg35xxh, rg35xxpro, rg40xxh, rg40xxv, rgcubexx, rgsp | LPDDR3 at 672 MHz | LPDDR3, LPDDR4 |
 
@@ -36,6 +36,14 @@ Proof on the RG34XX SP: its header's primary set is LPDDR3 (`dram_para1`
 0x1919, `dram_para2` 0x9988eeee), but the running kernel's `/dram` node holds
 type 8 (LPDDR4) with `dram_para1` 0x0e0e and `dram_para2` 0x7887bbbb, the
 alternate set.
+
+The fresh lab inventory also confirms LPDDR3 at 672 MHz on the RG40XX V,
+with about 1 GiB before kernel reservations. The RG34XX SP has 2 GiB LPDDR4.
+`compatibility.py` generates the complete parameter and panel contract in
+`../evidence/compatibility.json`. It reads all eleven prepared firmware images,
+both vendor PE6 traces, and pinned live inventories. The old RG28XX primary-type
+row was incorrect. Its prepared header contains LPDDR4 as the primary set and
+DDR3 as an alternate.
 
 ## Panel: U-Boot reads one GPIO strap
 
@@ -58,7 +66,12 @@ maps the PIO registers, so it may read the strap on its own; nobody has
 checked what it does when the token is missing. The RG28XX and CubeXX builds
 print `lcd_type` as well, but their strap read was not located.
 
-## Nothing else is detected
+The completed traces emit `old` for PE6 high and `boe` for PE6 low on nine
+models. RG28XX emits `old` at both levels, while CubeXX emits `boe` at both.
+A shared PE6-to-token rule would change RG28XX and CubeXX behavior. Other
+detection inputs still need review before claiming every physical panel revision.
+
+## Other hardware settings
 
 Keys, sticks, the second USB port of the RG35XX H and Pro, and the battery
 capacity are static per target in the device tree and kernel. The `dtbo` item
@@ -67,6 +80,11 @@ carries no board information. The RG34XX SP's and RG40XX V's device trees
 enable the on-chip ADC for their sticks; the RG SP's does not.
 
 ## What a replacement bootloader must do
+
+The current user request replaces boot0 as well as U-Boot. The retained-boot0
+design below describes the measured checkpoint. A complete replacement also
+needs automatic DRAM type, rank, width, and size detection from SRAM. The
+generic mainline LPDDR4 configuration alone does not meet that requirement.
 
 The vendor U-Boot is 32-bit code that boot0 loads together with the monitor
 (BL31) and the device tree from the TOC1 package, and that enters the arm64
