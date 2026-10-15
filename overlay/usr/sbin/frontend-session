@@ -22,7 +22,14 @@ CARD_MISSING=0
 # disks owned by the USB host. Keep this before update-trial confirmation.
 # The marker is boot-pair-v2: a card that finished the earlier gzip migration
 # (boot-gzip-v1) runs the helper once more to receive the faster pair.
-if [ ! -e /data/boot-pair-v2/complete ] && [ ! -s /run/usb-storage-device ] \
+# The native loader has one marker per generation, named after it.
+boot_steps_done=1
+[ -e /data/boot-pair-v2/complete ] || boot_steps_done=0
+if [ -r /usr/share/baseos/native/generation ]; then
+	read -r native_generation < /usr/share/baseos/native/generation || native_generation=
+	[ -e "/data/boot-native-v1/done-$native_generation" ] || boot_steps_done=0
+fi
+if [ "$boot_steps_done" = 0 ] && [ ! -s /run/usb-storage-device ] \
 	&& [ -x /usr/sbin/baseos-boot-migrate ]; then
 	if ! /usr/sbin/baseos-boot-migrate; then
 		# Failure with an unverified restore must not trigger a reboot or trial
