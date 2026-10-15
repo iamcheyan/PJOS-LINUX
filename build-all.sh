@@ -62,7 +62,8 @@ for target in $TARGETS; do
   "$HERE/build-rootfs.sh" "$target"
   "$HERE/test-boot-qemu.sh" "$target"
   # The model's native loader, built fresh from the prepared stock boot0 (needs
-  # clang, the rustup ld.lld, python3 with capstone and the running
+  # clang, the rustup ld.lld, a Python with capstone and unicorn (set
+  # BASEOS_NATIVE_PYTHON) and the running
   # baseos-h700-mainline container). The image carries it written in place,
   # and the update payload carries it for its first boot to install.
   native="$HERE/work/$target/native-release"
