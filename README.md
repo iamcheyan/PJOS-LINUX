@@ -9,7 +9,7 @@ handles the hardware and starts your choice of frontend:
 
 ## Startup time
 
-![Total BaseOS startup time across releases, from about 6.7 seconds to 3.3 seconds](assets/boot-times.svg)
+![Total BaseOS startup time across releases, from about 6.7 seconds to 3.16 seconds](assets/boot-times.svg)
 
 Includes kernel loading. Frontend loading comes on top.
 
