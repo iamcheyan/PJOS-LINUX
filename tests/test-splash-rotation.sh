@@ -85,7 +85,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   # Each message is its own run, drawn over whatever is on screen. A later
   # pill must look exactly as if it had been the only one: no trace of a
   # wider pill before it, at either orientation.
-  long="INSTALLING NEW BOOT METHOD: KEEP POWER ON"
+  long="BOOT UPDATE FAILED: KEEP POWER ON"
   short="ADD FRONTEND TO SD CARD"
   for geo in "640 480 0" "480 640 90"; do
     set -- $geo

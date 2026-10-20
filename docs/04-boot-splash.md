@@ -76,7 +76,7 @@ separately replacing the boot-resource artwork.
 | card unavailable | `INSERT SD CARD` | none |
 | installer cannot run | `INSTALL FAILED` | none |
 | no installed frontend or installer | `ADD FRONTEND TO SD CARD` | none |
-| installing the new boot method | `INSTALLING NEW BOOT METHOD: KEEP POWER ON` | none |
+| installing the new boot method | `SPEEDING UP BOOT` | none |
 | boot areas written but not verified | `BOOT UPDATE FAILED: KEEP POWER ON` | none |
 | preparing the USB storage gadget | `STARTING USB STORAGE` | none |
 | user storage exported over USB | `USB STORAGE: EJECT BEFORE RESTART` | none |

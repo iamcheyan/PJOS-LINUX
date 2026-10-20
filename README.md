@@ -43,7 +43,7 @@ To update BaseOS, copy your model's `.bosupd` to the root of your frontend card
 and restart. Keep power connected during the v1.4.0 update's one-time startup
 optimisation, and let it finish without switching off. From v1.5.2 the new
 boot method installs at any battery level; it takes a few seconds on the first
-start after the update, while the screen shows "INSTALLING NEW BOOT METHOD".
+start after the update, while the screen shows "SPEEDING UP BOOT".
 
 If something about startup looks wrong, `baseos-boot.log` at the root of the
 card says which startup ran and why.
