@@ -79,6 +79,72 @@ splash() {
 
 field() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
 
+raw_generation() {
+	[ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c < "$1" 2>/dev/null)" = 32 ] || return 1
+	generation_hex="$(od -An -v -tx1 "$1" 2>/dev/null | tr -d " \n")"
+	[ "${#generation_hex}" -eq 64 ] || return 1
+	printf "%s" "$generation_hex"
+}
+
+boot_compatible() {
+	if [ -e /etc/baseos/boot-payload-format ] || [ -L /etc/baseos/boot-payload-format ] \
+		|| [ -e /etc/baseos/native-abi ] || [ -L /etc/baseos/native-abi ] \
+		|| [ -e /etc/baseos/boot-payload-id ] || [ -L /etc/baseos/boot-payload-id ]; then
+		EV_REASON="this card has an unfinished sequential boot release"; return 1
+	fi
+	native_fields="$(grep -c "^native-generation=" "$manifest")"
+	payload_generation="$(field "$manifest" native-generation)"
+	case "$native_fields" in
+		0) ;;
+		1)
+			case "$payload_generation" in *[!0-9a-f]*) EV_REASON="malformed payload native generation"; return 1 ;; esac
+			[ "${#payload_generation}" -eq 64 ] || { EV_REASON="malformed payload native generation"; return 1; }
+			;;
+		*) EV_REASON="duplicate payload native generation"; return 1 ;;
+	esac
+	installed=/etc/baseos/native-generation
+	running=/sys/firmware/devicetree/base/chosen/baseos,native-boot
+	if [ -L /etc ] || [ -L /etc/baseos ]; then
+		EV_REASON="installed boot policy path is a symlink"; return 1
+	fi
+	if [ -e /etc/baseos ] && [ ! -d /etc/baseos ]; then
+		EV_REASON="installed boot policy path is not a directory"; return 1
+	fi
+	if [ -e "$installed" ] || [ -L "$installed" ]; then
+		installed_generation="$(raw_generation "$installed")" || {
+			EV_REASON="malformed installed native generation"; return 1;
+		}
+		if [ ! -f /usr/sbin/native-health ] || [ -L /usr/sbin/native-health ] || [ ! -x /usr/sbin/native-health ]; then
+			EV_REASON="installed native health helper is unavailable"; return 1
+		fi
+		# Native files belong to the model and travel inside the rootfs; the
+		# new slot's first boot installs its own loader. A payload without
+		# them would leave this card's native loader with no health check.
+		if [ "$native_fields" -ne 1 ]; then
+			EV_REASON="payload carries no native boot files for this native system"; return 1
+		fi
+		case "$payload_generation" in *[1-9a-f]*) ;; *) EV_REASON="zero payload native generation"; return 1 ;; esac
+	else
+		# A stock card takes a native payload: its first boot installs the loader.
+		if [ "$native_fields" -ne 0 ]; then
+			case "$payload_generation" in *[1-9a-f]*) ;; *) EV_REASON="zero payload native generation"; return 1 ;; esac
+		fi
+		if [ -e "$running" ] || [ -L "$running" ]; then
+			EV_REASON="native FDT has no installed boot generation"; return 1
+		fi
+		return 0
+	fi
+	if [ -e "$running" ] || [ -L "$running" ]; then
+		running_generation="$(raw_generation "$running")" || {
+			EV_REASON="malformed running native generation"; return 1;
+		}
+		if [ "$running_generation" != "$installed_generation" ]; then
+			EV_REASON="running and installed native boot generations differ"; return 1
+		fi
+	fi
+	return 0
+}
+
 cleanup() {
 	[ "$OWN_MOUNTED" -eq 0 ] || umount "$OWN_MNT" 2>/dev/null
 	return 0
@@ -172,6 +238,7 @@ evaluate() {
 		[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
 		*) EV_REASON="no usable image-sha256"; return 2 ;;
 	esac
+	boot_compatible || return 2
 
 	# Only ever move forward. Without this an old payload the user left on the
 	# card becomes "applicable" again the moment you update past it, so the

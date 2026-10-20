@@ -88,6 +88,13 @@ case "$boot_mode" in
 		;;
 esac
 if [ "$boot_mode" = 1 ]; then
+	# Native loader acceptance precedes charger waits and intentional poweroff.
+	# A failed check leaves its pending attempt/watchdog for stock recovery.
+	if [ -e /sys/firmware/devicetree/base/chosen/baseos,native-boot ]; then
+		if ! /usr/sbin/native-health --accept-charger; then
+			while :; do /bin/sleep 60; done
+		fi
+	fi
 	# This blocks rcS (and therefore init's respawns) until explicit boot
 	# intent. No GPU, network, card mount or update-trial work has begun.
 	while ! /usr/sbin/baseos-charger; do /bin/sleep 60; done
@@ -115,6 +122,14 @@ if ! /bin/mount -t ext4 -o rw,noatime /dev/mmcblk0p6 /data 2>/dev/null; then
 fi
 /bin/mkdir -p /data/bluetooth /data/bluealsa /data/dropbear
 /bin/ln -sfn /data/bluetooth /var/lib/bluetooth
+
+# Native loader health is independent of root-slot trial confirmation. Finish
+# it before either updater command can reboot; USB/no-frontend boots qualify.
+if [ -e /sys/firmware/devicetree/base/chosen/baseos,native-boot ]; then
+	if ! /usr/sbin/native-health --accept; then
+		while :; do /bin/sleep 60; done
+	fi
+fi
 
 # A freshly updated slot is on trial until a frontend session starts. Count the
 # boots that never got that far and restore the previous slot if this one
