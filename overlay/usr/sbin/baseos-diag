@@ -545,9 +545,11 @@ report() {
 		echo "Install log (last 30 lines, copy counters removed):"
 		install_log_plain | tail -n 30 | sed 's/^/  /'
 	fi
+	# sdc1 is the Wi-Fi slot; without Wi-Fi (RG28XX) it only logs timeouts.
 	echo "Kernel messages (selected):"
 	dmesg 2>/dev/null | grep -i -E 'dram|ddr|memory:|mmc0|sunxi-mmc|disp|lcd|tcon|axp|pmu|watchdog|wdt|error|fail|panic|oops' \
-		| grep -v -i -E 'command line|wlan|bluetooth|bt_|rtl8|8821' | tail -n 25 | sed 's/^/  /'
+		| grep -v -i -E 'command line|wlan|bluetooth|bt_|rtl8|8821' \
+		| grep -v -E 'sdc1.*RTO|sdc1.*(timeout|smc 1 p1 err)' | tail -n 25 | sed 's/^/  /'
 }
 
 # ------------------------------------------------------------ the boot log
