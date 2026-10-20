@@ -167,7 +167,10 @@ class Diagnostics(unittest.TestCase):
         self.tool("bin/mountpoint", '#!/bin/sh\n[ ! -e "$BASEOS_DIAG_ROOT/no-card" ]\n')
         self.tool("bin/dmesg", '#!/bin/sh\ncat "$BASEOS_DIAG_ROOT/dmesg"\n')
         (root / "dmesg").write_text(
+            "[    0.000000] Kernel command line: root=/dev/mmcblk0p5 snum=5c001040f4438852493 disp_reserve=1 "
+            "androidboot.serialno=5c001040f4438852493 wifi_mac=aa:bb:cc:dd:ee:ff\n"
             "[    0.000000] Memory: 1003284K/1048576K available\n"
+            "[    0.500000] disp: serial=5c001040f4438852493 panel probe failed\n"
             "[    1.200000] sunxi-mmc sdc0: sdc set ios:clk 50000000Hz bm PIO pm UP vdd 21 width 4 timing SD-HS(SDR25)\n"
             "[    1.300000] axp2202-battery: probe ok\n"
             "[    1.400000] wlan0: address 12:34:56:78:9a:bc registered\n"
@@ -448,6 +451,7 @@ class Diagnostics(unittest.TestCase):
         self.assertIn("  stock latch cleared; the native loader starts at the next boot", block)
         self.assertIn("  [    0.000000] Memory: 1003284K/1048576K available", block)
         self.assertNotIn("unrelated line", block)
+        self.assertIn("  [    0.500000] disp: serial=(hidden) panel probe failed", block)
         self.assertTrue(text.endswith("--- end of diagnostics ---\n"))
         self.assert_private(text)
         self.sample("stock-fallback")
@@ -523,6 +527,7 @@ class Diagnostics(unittest.TestCase):
         self.assertIn("(asked for by hand) ---", out)
         self.assertIn("Added to", err)
         self.assertTrue(self.log.read_text().endswith(out))
+        self.assert_private(out)
 
     def test_by_hand_without_a_card_prints_only(self):
         (self.root / "no-card").touch()

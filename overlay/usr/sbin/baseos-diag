@@ -48,7 +48,10 @@ TICKS_PER_SECOND=24000000
 hexof() { od -An -v -tx1 "$1" 2>/dev/null | tr -d ' \n'; }
 first_line() { [ -r "$1" ] && head -n 1 "$1" 2>/dev/null; }
 short() { printf '%.8s' "$1"; }
-mask_private() { sed -E 's/([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}/xx:xx:xx:xx:xx:xx/g'; }
+mask_private() {
+	sed -E -e 's/([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}/xx:xx:xx:xx:xx:xx/g' \
+		-e 's/(snum|serialno|serial|specialstr)=[^ ]*/\1=(hidden)/g'
+}
 usb_storage_on() { [ -s "$ROOT/run/usb-storage-device" ]; }
 card_usable() {
 	! usb_storage_on && mountpoint -q "$CARD" 2>/dev/null && ( : >> "$CARD_LOG" ) 2>/dev/null
@@ -544,7 +547,7 @@ report() {
 	fi
 	echo "Kernel messages (selected):"
 	dmesg 2>/dev/null | grep -i -E 'dram|ddr|memory:|mmc0|sunxi-mmc|disp|lcd|tcon|axp|pmu|watchdog|wdt|error|fail|panic|oops' \
-		| grep -v -i -E 'wlan|bluetooth|bt_|rtl8|8821' | tail -n 25 | sed 's/^/  /'
+		| grep -v -i -E 'command line|wlan|bluetooth|bt_|rtl8|8821' | tail -n 25 | sed 's/^/  /'
 }
 
 # ------------------------------------------------------------ the boot log
