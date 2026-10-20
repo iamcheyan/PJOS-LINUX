@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Execute candidate retries, ARM stack unwind and runtime timing dispatch.
 
-Training success and detected geometry are modeled. Actual upstream rank/width
-retry, timeout unwind adapter and timing register writes execute from SRAM.
+Training success and detected geometry are modeled, and DRAM is a small model
+that can alias (real size smaller than detected) or drop every write. Actual
+upstream rank/width retry, timeout unwind adapter, the layout guard, the memory
+check and timing register writes execute from SRAM.
 """
 import argparse
 import hashlib
@@ -13,6 +15,44 @@ from pathlib import Path
 
 import unicorn as u
 from unicorn import arm_const, arm64_const
+
+
+DRAM_BASE = 0x40000000
+PAGE = 0x1000
+
+
+class Dram:
+    """DRAM behind MMIO pages: addresses wrap at the real size; broken drops writes."""
+
+    def __init__(self, uc):
+        self.uc, self.words, self.pages = uc, {}, set()
+        self.real, self.broken, self.accessed = 1 << 30, False, set()
+
+    def page(self, address):
+        page = address & ~(PAGE - 1)
+        if page in self.pages: return
+        self.pages.add(page)
+        def read(uc, offset, size, user):
+            address = page + offset
+            self.accessed.add(page)
+            if self.broken: return 0
+            return sum(self.words.get((address + i - DRAM_BASE) % self.real, 0) << (8 * i) for i in range(size))
+        def write(uc, offset, size, value, user):
+            address = page + offset
+            self.accessed.add(page)
+            if self.broken: return
+            for i in range(size): self.words[(address + i - DRAM_BASE) % self.real] = value >> (8 * i) & 0xff
+        self.uc.mmio_map(page, PAGE, read, None, write, None)
+
+    def load(self, address, blob):
+        for i, byte in enumerate(blob): self.words[(address + i - DRAM_BASE) % self.real] = byte
+
+    def dump(self, address, size):
+        return bytes(self.words.get((address + i - DRAM_BASE) % self.real, 0) for i in range(size))
+
+
+def layout_size(cols, rows, ranks, full):
+    return (1 << (cols + rows + 3)) * (4 if full else 2) * ranks
 
 
 def verify(directory):
@@ -45,6 +85,10 @@ def verify(directory):
         m.reg_write(LR, return_address)
         if native and "baseos_dram_power" in symbols:
             m.mem_write(symbols["baseos_dram_power"], struct.pack("<I", 1))
+        m.dram = Dram(m)
+        for size in (512 << 20, 1 << 30, 2 << 30):
+            m.dram.page(DRAM_BASE)
+            m.dram.page(DRAM_BASE + size // 2)
         return m
 
     def read_word(m, address): return struct.unpack("<I", m.mem_read(address, 4))[0]
@@ -94,6 +138,84 @@ def verify(directory):
             cases.append({"working_type": working_type, "timeout_exit": timeout, "attempts": tries,
                           "core_calls": attempted, "outcome": outcome[0], "modeled_voltage_writes_mv": voltages})
 
+    # Layout guard and memory check: every candidate trains; geometry and DRAM
+    # behaviour are scripted per candidate. A rejected layout must never reach
+    # mctl_calc_size, and the selection must fall through to the next bank.
+    count = len(manifest["candidate_types"])
+    good = (10, 15, 1, 1)  # 1 GiB, the RG28XX/RG40XX H layout 0x30fa/0x04000000
+    scenarios = {
+        "nothing-aliased-32bit": [dict(layout=(11, 17, 1, 1)), dict(layout=good)],
+        "nothing-aliased-16bit": [dict(layout=(11, 17, 1, 0)), dict(layout=good)],
+        "4GiB-outside-window": [dict(layout=(10, 17, 1, 1)), dict(layout=good)],
+        "2GiB-accepted": [dict(layout=(10, 16, 1, 1), real=2 << 30)],
+        "2GiB-two-ranks-accepted": [dict(layout=(10, 15, 2, 1), real=2 << 30)],
+        "size-too-large-aliases": [dict(layout=good, real=512 << 20), dict(layout=good)],
+        "data-path-broken": [dict(layout=good, broken=True), dict(layout=good)],
+        "every-bank-nothing-aliased": [dict(layout=(11, 17, 1, 1))] * count,
+    }
+    guard_cases = []
+    for name, script in scenarios.items():
+        if len(script) > count: continue
+        m = machine()
+        sizes, outcome, current = [], [], {"index": -1}
+        saved = bytes(range(16)) + bytes(range(0xf0, 0x100))
+        def apply(index):
+            step = script[index] if index < len(script) else dict(layout=good)
+            m.dram.real = step.get("real", 1 << 30)
+            m.dram.broken = step.get("broken", False)
+            return step
+        def code(uc, address, size, user):
+            if address == symbols["mctl_core_init"]:
+                index = (uc.reg_read(R0) - symbols["dram_candidates"]) // 48
+                if index != current["index"]:
+                    current["index"] = index
+                    apply(index)
+                    m.dram.load(DRAM_BASE, saved)
+                return_value(1)
+            elif address == symbols["mctl_auto_detect_dram_size"]:
+                step = apply(current["index"])
+                cols, rows, ranks, full = step["layout"]
+                uc.mem_write(uc.reg_read(R0 + 1), bytes((cols, rows, ranks, full)))
+                return_value(0)
+            elif address == symbols["mctl_calc_size"]:
+                cols, rows, ranks, full = uc.mem_read(uc.reg_read(R0), 4)
+                sizes.append((current["index"], layout_size(cols, rows, ranks, full)))
+                return_value(layout_size(cols, rows, ranks, full))
+            elif address == symbols["baseos_set_master_priority"]: return_value(0)
+            elif native and address == symbols.get("axp_set_dcdc3"): return_value(0)
+            elif native and address == symbols.get("udelay"): return_value(0)
+            elif address in (symbols["panic"], return_address):
+                outcome.append("failed-all" if address == symbols["panic"] else "selected")
+                uc.emu_stop()
+        def return_value(value):
+            m.reg_write(R0, value)
+            m.reg_write(PC, m.reg_read(LR))
+        m.hook_add(u.UC_HOOK_CODE, code)
+        m.emu_start(symbols["sunxi_dram_init"], 0x58000 if native else 0x28000, count=200000)
+        expect = next((i for i, step in enumerate(script) if layout_size(*step["layout"]) <= 2 << 30
+                       and not step.get("broken") and step.get("real", 1 << 30) >= layout_size(*step["layout"])), None)
+        if expect is None and len(script) < count: expect = len(script)
+        assert outcome == (["selected"] if expect is not None else ["failed-all"]), (name, outcome)
+        # A layout outside the window is refused before mctl_calc_size probes it.
+        probed = [index for index, _ in sizes]
+        assert all(layout_size(*script[i]["layout"]) <= 2 << 30 for i in probed if i < len(script)), (name, sizes)
+        tries = read_word(m, symbols["dram_probe_attempts"])
+        if expect is not None:
+            assert tries == expect + 1, (name, tries)
+            selected_size = layout_size(*(script[expect]["layout"] if expect < len(script) else good))
+            assert m.reg_read(R0) == selected_size and m.reg_read(SP) == stack, name
+            # The memory check puts back what it touched.
+            assert m.dram.dump(DRAM_BASE, 32) == saved, name
+            if native and "trained_vendor_params" in symbols:
+                words = struct.unpack("<32I", m.mem_read(symbols["trained_vendor_params"], 128))
+                cols, rows, ranks, full = script[expect]["layout"] if expect < len(script) else good
+                assert words[6] == (3 << 12 | rows << 4 | cols), (name, hex(words[6]))
+                assert words[7] == (selected_size >> 20 << 16 | (0x1000 if ranks == 2 else 0) | (0 if full else 1)), name
+        else:
+            assert tries == count and not sizes, (name, tries, sizes)
+        guard_cases.append({"case": name, "outcome": outcome[0], "attempts": tries,
+                            "selected": expect, "size_probes": [[i, hex(size)] for i, size in sizes]})
+
     # Execute the real timing register writes, including the mixed-clock RG28XX case.
     timings = []
     for kind in (3, 7, 8):
@@ -116,7 +238,8 @@ def verify(directory):
             assert refresh >> 16 == expected, (kind, clock, hex(refresh), expected)
             timings.append({"type": kind, "clock_mhz": clock, "rfshtmg": hex(refresh)})
     report = {sha_key: manifest[sha_key], "native_aarch64": native, "training_modeled": True,
-              "geometry_modeled": True, "retry_cases": cases, "timing_cases": timings}
+              "geometry_modeled": True, "retry_cases": cases, "guard_cases": guard_cases,
+              "timing_cases": timings}
     (directory / "selection-verification.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

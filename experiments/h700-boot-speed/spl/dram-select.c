@@ -49,6 +49,49 @@ void timing_lpddr4(const struct dram_para *);
 u32 dram_probe_attempts;
 u32 dram_probe_selected_type;
 
+/* Size detection on a bank whose training "passed" without a working data path
+ * sees no aliasing and reports the largest layout (11 columns, 17 rows, at
+ * least 4 GiB). mctl_calc_size then probes at 3/4 of that size, outside the
+ * DRAM window, and the bus hangs until the watchdog. Refuse any layout whose
+ * probe would leave the 32-bit window (so at most 2 GiB) before anything probes. */
+static int baseos_layout_in_window(const struct dram_config *config)
+{
+    u64 size = (1ull << (config->cols + config->rows + 3)) *
+               (config->bus_full_width ? 4 : 2) * config->ranks;
+    return (u64)CFG_SYS_SDRAM_BASE + size / 4 * 3 <= 0xfffffffcull;
+}
+
+/* Before accepting a bank: the first words and the words halfway up must hold
+ * their own values. Catches a broken data path and a size detected too large
+ * (the upper half would land on the lower). The old contents are put back. */
+static int baseos_memory_holds(unsigned long size)
+{
+    volatile u32 *low = (volatile u32 *)(unsigned long)CFG_SYS_SDRAM_BASE;
+    volatile u32 *high = (volatile u32 *)((unsigned long)CFG_SYS_SDRAM_BASE + size / 2);
+    u32 saved_low[4], saved_high[4];
+    int good = 1;
+    unsigned int i;
+
+    for (i = 0; i < 4; i++) {
+        saved_low[i] = low[i];
+        saved_high[i] = high[i];
+    }
+    for (i = 0; i < 4; i++) {
+        low[i] = 0x5aa5c33cu ^ (i * 0x11111111u);
+        high[i] = ~(0x5aa5c33cu ^ (i * 0x11111111u));
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+    for (i = 0; i < 4; i++)
+        if (low[i] != (0x5aa5c33cu ^ (i * 0x11111111u)) ||
+            high[i] != ~(0x5aa5c33cu ^ (i * 0x11111111u))) good = 0;
+    for (i = 0; i < 4; i++) {
+        high[i] = saved_high[i];
+        low[i] = saved_low[i];
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+    return good;
+}
+
 void mctl_set_timing_params(const struct dram_para *para)
 {
     switch (para->type) {
@@ -84,9 +127,10 @@ unsigned long sunxi_dram_init(void)
 #endif
         mctl_auto_detect_rank_width(para, &config);
         mctl_auto_detect_dram_size(para, &config);
+        if (!baseos_layout_in_window(&config)) continue;
         if (!mctl_core_init(para, &config)) continue;
         unsigned long size = mctl_calc_size(&config);
-        if (!size) continue;
+        if (!size || !baseos_memory_holds(size)) continue;
         /* Kept in the same translation unit as upstream's static helper. */
         baseos_set_master_priority();
         dram_probe_selected_type = para->type;
