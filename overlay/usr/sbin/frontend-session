@@ -31,7 +31,7 @@ if [ -r /usr/share/baseos/native/generation ]; then
 fi
 if [ "$boot_steps_done" = 0 ] && [ ! -s /run/usb-storage-device ] \
 	&& [ -x /usr/sbin/baseos-boot-migrate ]; then
-	if ! /usr/sbin/baseos-boot-migrate; then
+	if ! BASEOS_BOOT_LOG="$LOG" /usr/sbin/baseos-boot-migrate; then
 		# Failure with an unverified restore must not trigger a reboot or trial
 		# confirmation. ADB started by rcS stays available for recovery.
 		while :; do sleep 3600; done

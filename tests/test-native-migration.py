@@ -165,7 +165,9 @@ class NativeMigration(unittest.TestCase):
         splash.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$BASEOS_BOOT_TEST_ROOT/splash.log"\n')
         splash.chmod(0o755)
         self.inject("")
+        self.boot_log = self.root / "card-boot.log"
         self.env = dict(os.environ, BASEOS_BOOT_TESTING="1", BASEOS_BOOT_TEST_ROOT=str(self.root),
+                        BASEOS_BOOT_LOG=str(self.boot_log),
                         PATH=f"{self.root}/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 
     def write_native_manifest(self, **override):
@@ -247,6 +249,14 @@ class NativeMigration(unittest.TestCase):
     def log(self):
         path = self.state / "install.log"
         return path.read_text() if path.exists() else ""
+
+    def result(self):
+        path = self.root / "run/baseos-native-result"
+        return path.read_text().strip() if path.exists() else None
+
+    def boot_log_lines(self):
+        text = self.boot_log.read_text() if self.boot_log.exists() else ""
+        return [line.split(" ", 1)[1] for line in text.splitlines()]
 
     def done(self):
         path = self.state / f"done-{GENERATION.hex()}"
@@ -332,6 +342,13 @@ class NativeMigration(unittest.TestCase):
                          self.before_boot[FIRMWARE_OFFSET:FIRMWARE_OFFSET + FIRMWARE_SIZE])
         self.assertEqual((self.state / "secondary-before.bin").read_bytes(), self.make_boot0())
         self.assertIn("INSTALLING FAST STARTUP: KEEP POWER ON", (self.root / "splash.log").read_text())
+        # One plain line in the boot log, the same outcome for this boot's loader
+        # line, and no copy counters in the install log.
+        self.assertEqual(self.boot_log_lines(),
+                         ["Fast loader install: installed and checked; it is used from the next start"])
+        self.assertTrue(self.result().startswith("installed "), self.result())
+        for noise in ("records in", "records out", " copied, "):
+            self.assertNotIn(noise, self.log())
 
     def test_from_13x_original_files(self):
         """The pair step installs the 1.4.0 files and keeps the originals, then the native step runs."""
@@ -454,10 +471,15 @@ class NativeMigration(unittest.TestCase):
             self.assertEqual(self.pair(), f"{fnv(GENERATION)} {PENDING}")
             self.assertIsNone(self.done())
             self.assertIn("FAILED at firmware", self.log())
+            self.assertEqual(self.boot_log_lines()[-1],
+                             f"Fast loader install: failed at firmware (try {attempt} of 3; the stock loader"
+                             " stays in use and the next start tries again)")
             # Nothing after the failed area was written.
             self.assertEqual(self.disk.read_bytes(), self.before_disk)
         self.run_migration()
         self.assertEqual(self.done(), "gave up after 3 failed attempts; the device stays on stock startup")
+        self.assertEqual(self.result().split()[0], "gave-up")
+        self.assertEqual(len(self.boot_log_lines()), 4)
         self.assertEqual(self.pair(), f"{fnv(GENERATION)} {PENDING}")
 
     def test_unwritable_package_is_restored(self):
@@ -513,6 +535,8 @@ class NativeMigration(unittest.TestCase):
         self.assertEqual(self.ops(), [])
         self.assertEqual(self.pair(), f"{fnv(GENERATION)} {PENDING}")
         self.assertEqual(self.done(), "native boot failed health; the device stays on stock startup")
+        self.assertEqual(self.result().split()[0], "start-failed")
+        self.assertIn("fast loader's start failed", self.boot_log_lines()[0])
 
     def test_card_moved_into_a_unit_with_a_foreign_latch(self):
         self.flash(primary="this", package="this", pair=f"11111111 {PENDING}")
@@ -550,12 +574,17 @@ class NativeMigration(unittest.TestCase):
         self.assertIsNone(self.done())
         self.assertEqual(self.writes(), [])
         self.assertIn("waiting for external power", self.log())
+        # A wait is not an attempt: it is named only in this boot's loader line.
+        self.assertEqual(self.result(), "deferred waiting for external power or at least 50% battery (battery 20%)")
+        self.assertEqual(self.boot_log_lines(), [])
 
     def test_damaged_native_files_are_never_written(self):
         self.flash()
         (self.native / "image.bin").write_bytes(self.image[:-1] + b"\0")
         self.run_migration()
         self.assertEqual(self.done(), "skipped: native files failed verification")
+        self.assertEqual(self.boot_log_lines(),
+                         ["Fast loader install: not possible on this card: native files failed verification"])
         self.assertEqual(self.writes(), [])
 
 
