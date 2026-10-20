@@ -84,7 +84,7 @@ def read() -> None:
     lab.require(at >= 0, "stamp magic not found in the tail of the device tree")
     words = struct.unpack("<34I", tree[at:at + 136])
     magic, stamps = words[0], [(words[2 + 2 * n] | words[3 + 2 * n] << 32) for n in range(16)]
-    log = lab.sh("grep -h 'boot stages' /mnt/sdcard/baseos-boot.log /mnt/SDCARD/baseos-boot.log 2>/dev/null | tail -1; cat /proc/sys/kernel/random/boot_id", 30)
+    log = lab.sh("grep -h -e 'boot stages' -e 'Startup: .* before Linux' /mnt/sdcard/baseos-boot.log /mnt/SDCARD/baseos-boot.log 2>/dev/null | tail -1; cat /proc/sys/kernel/random/boot_id", 30)
     print("magic", f"{magic:#x}", "(expected 0x5354414d)")
     print("boot log:", log.strip())
     previous = None
@@ -97,7 +97,8 @@ def read() -> None:
     for token in log.split():
         pass
     import re
-    m = re.search(r"pre-kernel ([0-9.]+) s", log)
+    # 1.5.2 and later: "Startup: X s before Linux, ..."; earlier: "pre-kernel X s".
+    m = re.search(r"pre-kernel ([0-9.]+) s", log) or re.search(r"Startup: ([0-9.]+) s before Linux", log)
     if m and previous:
         pre_kernel = float(m.group(1))
         print(f"  kernel clock origin (boot log)      {pre_kernel:9.4f} s  +{(pre_kernel - previous / COUNTER_HZ) * 1000:8.1f} ms")

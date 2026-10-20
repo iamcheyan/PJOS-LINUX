@@ -75,6 +75,21 @@ native_step() {
 	WORK=
 	unverified=0
 	nlog() { { printf '%s\n' "native: $*" >&3; } 2>/dev/null || :; }
+	# nresult KIND TEXT: the outcome of this run in one line. It goes to
+	# /run for this boot's loader line, and, unless it is a plain wait, to the
+	# boot log frontend-session passes in BASEOS_BOOT_LOG. KIND is installed,
+	# in-place, failed, start-failed, skipped, gave-up or deferred.
+	defer_kind=deferred attempt_number=
+	nresult() {
+		result_kind=$1
+		shift
+		{ printf '%s %s\n' "$result_kind" "$*" > "$ROOT/run/baseos-native-result"; } 2>/dev/null || :
+		[ "$result_kind" != deferred ] && [ -n "${BASEOS_BOOT_LOG:-}" ] || return 0
+		[ ! -s "$ROOT/run/usb-storage-device" ] || return 0
+		up=
+		{ read -r up _ < /proc/uptime; } 2>/dev/null || up=
+		{ printf '%s Fast loader install: %s\n' "${up:-0}" "$*" >> "$BASEOS_BOOT_LOG"; } 2>/dev/null || :
+	}
 	nsplash() {
 		[ ! -x "$ROOT/usr/bin/baseos-splash" ] || "$ROOT/usr/bin/baseos-splash" --important -1 "$*" 2>/dev/null || :
 	}
@@ -94,18 +109,26 @@ native_step() {
 		printf '%s\n' "$1" > "$DONE.tmp" && sync && mv "$DONE.tmp" "$DONE" && sync
 		nlog "$1"
 	}
-	ndefer() { nlog "deferred; $*"; exit 0; }
-	nskip() { done_with "skipped: $*"; exit 0; }
+	ndefer() {
+		nlog "deferred; $*"
+		if [ "$defer_kind" = failed ]; then
+			nresult failed "$*${attempt_number:+ (try $attempt_number of 3)}; the stock loader stays in use and the next start tries again"
+		else
+			nresult deferred "$*"
+		fi
+		exit 0
+	}
+	nskip() { done_with "skipped: $*"; nresult skipped "not possible on this card: $*"; exit 0; }
 	nsha() { sha256sum "$1" 2>&3 | cut -d ' ' -f 1; }
 	nmatches() { [ "${#2}" -eq 64 ] && [ "$(nsha "$1")" = "$2" ]; }
 	# read_at DEVICE OFFSET BYTES FILE; write_at DEVICE OFFSET FILE. Direct I/O
 	# from a 1 MiB buffer, whole sectors only: the card's bytes, not the cache's,
 	# and no read-modify-write of a neighbouring sector.
 	read_at() {
-		dd if="$1" of="$4" bs=1M skip="$2" count="$3" iflag=direct,skip_bytes,count_bytes 2>&3
+		dd if="$1" of="$4" bs=1M skip="$2" count="$3" iflag=direct,skip_bytes,count_bytes status=none 2>&3
 	}
 	write_at() {
-		dd if="$3" of="$1" bs=1M seek="$2" oflag=direct,seek_bytes conv=notrunc,fsync 2>&3
+		dd if="$3" of="$1" bs=1M seek="$2" oflag=direct,seek_bytes conv=notrunc,fsync status=none 2>&3
 	}
 	# is_at DEVICE OFFSET BYTES SHA256
 	is_at() { read_at "$1" "$2" "$3" "$WORK/readback" && nmatches "$WORK/readback" "$4"; }
@@ -187,13 +210,15 @@ native_step() {
 		# Health refuses another generation before startup gets here.
 		[ "$running" = "$NATIVE_GENERATION" ] || ndefer 'running a different native loader'
 	fi
-	powered=0 capacity=0
-	for supply in "$ROOT"/sys/class/power_supply/*; do
-		[ ! -r "$supply/online" ] || { read -r online < "$supply/online" || online=0; [ "$online" != 1 ] || powered=1; }
-		[ ! -r "$supply/capacity" ] || read -r capacity < "$supply/capacity" || capacity=0
-	done
-	case "$capacity" in ''|*[!0-9]*) capacity=0 ;; esac
-	[ "$powered" -eq 1 ] || [ "$capacity" -ge 50 ] || ndefer 'waiting for external power or at least 50% battery'
+	# No battery check: the install takes a few seconds. Writes happen only
+	# while the stock latch is held, and a restart then starts stock: the
+	# firmware and kernel image sit where stock never reads, and the capsule
+	# body goes in before its header, so a half-written capsule fails BootROM's
+	# checksum and BootROM takes the stock copy at the secondary sector. The
+	# one exception is the U-Boot package, when it has to change (cards coming
+	# from 1.4.0 or older): it is the stock path's only copy, and power lost in
+	# the fraction of a second it takes to write leaves stock unable to start.
+	# Its previous contents stay in boot-native-v1/toc-before.bin.
 	nmatches "$NATIVE/capsule.bin" "$NATIVE_CAPSULE_SHA256" && nmatches "$NATIVE/firmware.bin" "$NATIVE_FIRMWARE_SHA256" \
 		&& nmatches "$NATIVE/image.bin" "$NATIVE_IMAGE_SHA256" && nmatches "$NATIVE/recovery-toc.bin" "$NATIVE_TOC_SHA256" \
 		&& [ "$(wc -c < "$NATIVE/capsule.bin")" -eq "$NATIVE_CAPSULE_SIZE" ] \
@@ -233,7 +258,13 @@ native_step() {
 	esac
 	nmatches "$WORK/firmware.cur" "$NATIVE_FIRMWARE_SHA256" && firmware=this || firmware=other
 	nmatches "$WORK/image.cur" "$NATIVE_IMAGE_SHA256" && image=this || image=other
-	nlog "found primary $primary, package $toc, firmware $firmware, image $image, pair $(latch)"
+	# Battery and charger at the install, for the diagnostics only.
+	capacity=unknown charger=no
+	for supply in "$ROOT"/sys/class/power_supply/*; do
+		[ ! -r "$supply/online" ] || { read -r online < "$supply/online" || online=0; [ "$online" != 1 ] || charger=yes; }
+		[ ! -r "$supply/capacity" ] || read -r capacity < "$supply/capacity" || capacity=unknown
+	done
+	nlog "found primary $primary, package $toc, firmware $firmware, image $image, pair $(latch), battery $capacity%, charger $charger"
 
 	if [ "$primary/$toc/$firmware/$image" = this/this/this/this ]; then
 		state=$(latch)
@@ -241,18 +272,22 @@ native_step() {
 			# This loader's own attempt failed: its SPL latched the pair and
 			# the watchdog chose stock. Retrying would only fail again.
 			done_with 'native boot failed health; the device stays on stock startup'
+			nresult start-failed "the files are in place, but the fast loader's start failed; this version stays on the stock loader"
 			exit 0
 		fi
 		if [ "$state" != idle ]; then
 			usb_free || ndefer 'a computer owns USB storage'
 			printf '%s\n' "$NATIVE_GENERATION" > "$NSTATE/latch" && sync
+			defer_kind=failed
 			"$HEALTH" --hold-stock >&3 2>&3 && [ "$(latch)" = held ] \
 				&& "$HEALTH" --release-stock >&3 2>&3 && [ "$(latch)" = idle ] \
-				|| ndefer 'could not clear the stock latch; stock startup continues'
+				|| ndefer 'could not clear the stock latch'
+			defer_kind=deferred
 			rm -f "$NSTATE/latch" && sync
 			nlog 'stock latch cleared'
 		fi
 		done_with "installed${running:+; running}"
+		nresult in-place "the files were already in place${running:+ and running}"
 		exit 0
 	fi
 	[ -z "$running" ] || ndefer 'native files differ while their own loader is running'
@@ -262,6 +297,7 @@ native_step() {
 	case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
 	if [ "$attempts" -ge 3 ]; then
 		done_with 'gave up after 3 failed attempts; the device stays on stock startup'
+		nresult gave-up "gave up after 3 failed tries; this version stays on the stock loader"
 		exit 0
 	fi
 	# First copies only: the areas as they were before any native install.
@@ -277,7 +313,9 @@ native_step() {
 			|| ndefer 'could not save and verify boot backups'
 	done
 	printf '%s\n' $((attempts + 1)) > "$NSTATE/attempts-$NATIVE_GENERATION" && sync
+	attempt_number=$((attempts + 1))
 	usb_free || ndefer 'a computer owns USB storage'
+	defer_kind=failed
 	nsplash 'INSTALLING FAST STARTUP: KEEP POWER ON'
 	trap '' HUP INT TERM
 	printf '%s\n' "$NATIVE_GENERATION" > "$NSTATE/latch" && sync
@@ -331,15 +369,18 @@ native_step() {
 	fi
 	if [ -n "$failed" ]; then
 		nlog "FAILED at $failed; keeping the stock latch, so the device keeps starting stock"
+		nresult failed "failed at $failed (try $attempt_number of 3; the stock loader stays in use and the next start tries again)"
 		exit 0
 	fi
 	if ! "$HEALTH" --release-stock >&3 2>&3 || [ "$(latch)" != idle ]; then
 		nlog 'everything verified, but the stock latch did not clear; stock startup continues'
+		nresult failed "written and checked, but the stock latch did not clear (try $attempt_number of 3)"
 		exit 0
 	fi
 	rm -f "$NSTATE/latch" && sync
 	nlog 'stock latch cleared; the native loader starts at the next boot'
 	done_with installed
+	nresult installed "installed and checked; it is used from the next start"
 	exit 0
 }
 if [ "$1" = native ]; then

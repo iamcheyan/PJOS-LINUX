@@ -11,6 +11,7 @@
 #   work/tools/charger-wait   (blocking charger recovery input)
 #   work/tools/boot-clock     (H700 hardware-counter boot-stage timing)
 #   work/tools/native-health  (native boot health acceptance)
+#   work/tools/baseos-regs    (read-only register view for baseos-diag)
 #   work/tools/axp-off        (cut power at the PMIC; rcK's last step)
 #   work/tools/sftp-server    (OpenSSH sftp subsystem child for dropbear)
 #   work/tools/e2fsck         (root filesystem repair, run only when flagged)
@@ -101,7 +102,8 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   gcc -static -O2 -Wall -Wextra -o /out/charger-wait /src/charger-wait.c
   gcc -static -O2 -Wall -Wextra -o /out/boot-clock /src/boot-clock.c
   gcc -std=c11 -static -O2 -Wall -Wextra -Werror -o /out/native-health /src/native-health.c
-  strip /out/axp-off /out/charger-wait /out/boot-clock /out/native-health
+  gcc -std=c11 -static -O2 -Wall -Wextra -Werror -o /out/baseos-regs /src/baseos-regs.c
+  strip /out/axp-off /out/charger-wait /out/boot-clock /out/native-health /out/baseos-regs
 '
 
 # e2fsck: the vendor initramfs used to check the root filesystem on every boot.

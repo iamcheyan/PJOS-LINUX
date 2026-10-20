@@ -239,14 +239,20 @@ static int display_ready(const struct fb_var_screeninfo *geometry)
     return ready;
 }
 
+/* What the last readiness check was still waiting for, for the failure message. */
+static const char *not_ready = "nothing checked yet";
+
 static int platform_ready(enum ready_mode mode)
 {
+    not_ready = "the system libraries (/lib/ld-linux-aarch64.so.1)";
     if (access("/lib/ld-linux-aarch64.so.1", F_OK)) return 0;
     if (mode == NORMAL_BOOT) {
+        not_ready = "the GPU (/dev/mali0)";
         int gpu = open("/dev/mali0", O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
         if (gpu < 0) return 0;
         close(gpu);
     }
+    not_ready = "the framebuffer (/dev/fb0)";
     int framebuffer = open("/dev/fb0", O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
     if (framebuffer < 0) return 0;
     struct fb_var_screeninfo geometry;
@@ -255,7 +261,10 @@ static int platform_ready(enum ready_mode mode)
         geometry.xres_virtual >= geometry.xres && geometry.yres_virtual >= geometry.yres &&
         (geometry.bits_per_pixel == 16 || geometry.bits_per_pixel == 24 || geometry.bits_per_pixel == 32);
     close(framebuffer);
-    if (!valid || !display_ready(&geometry)) return 0;
+    if (!valid) return 0;
+    not_ready = "the display engine (not running at the framebuffer's size)";
+    if (!display_ready(&geometry)) return 0;
+    not_ready = "the buttons (no working /dev/input/event*)";
     glob_t inputs = {0};
     if (glob("/dev/input/event*", 0, NULL, &inputs)) { globfree(&inputs); return 0; }
     valid = 0;
@@ -267,6 +276,7 @@ static int platform_ready(enum ready_mode mode)
         close(fd);
     }
     globfree(&inputs);
+    if (valid) not_ready = "nothing";
     return valid;
 }
 
@@ -450,6 +460,12 @@ int main(int argc, char **argv)
     }
     int result = accept_boot(write_ack, charger ? CHARGER_BOOT : NORMAL_BOOT, running, installed);
     if (lock >= 0) close(lock);
-    if (result) fprintf(stderr, "native-health: acceptance refused (%d); watchdog not reloaded\n", result);
+    if (result == 6)
+        fprintf(stderr, "native-health: acceptance refused (6): still waiting for %s after %d s; "
+                        "watchdog not reloaded\n", not_ready, READY_TIMEOUT_MS / 1000);
+    else if (result)
+        fprintf(stderr, "native-health: acceptance refused (%d: %s); watchdog not reloaded\n", result,
+                result == 4 ? "the start record or the watchdog is not this loader's" :
+                result == 5 ? "the start record did not clear" : "the chip registers cannot be read");
     return result;
 }
