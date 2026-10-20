@@ -179,7 +179,7 @@ card_snapshot() {
 }
 check_handoff_log() {
 	[ -s /run/boot-frontend-exec ]
-	grep -Eq '^[0-9.]+ Startup: ([0-9]+\.[0-9]{2} s before Linux, )?[0-9]+\.[0-9]{2} s Linux to menu(, [0-9]+\.[0-9]{2} s total)? \((Slot|NextUI|spruceOS|System/frontend|System/launch_frontend\.sh)(, after [0-9.]+ s waiting for the GPU)?\)$' "$1"
+	grep -Eq '^[0-9.]+ Startup: ([0-9]+\.[0-9]{2} s before Linux, )?[0-9]+\.[0-9]{2} s Linux to menu(, [0-9]+\.[0-9]{2} s total)? \((Slot|MinUI|spruceOS|custom frontend)(, after [0-9.]+ s waiting for the GPU)?\)$' "$1"
 	[ "$(grep -c ' Startup: ' "$1")" -eq "$2" ]
 }
 
@@ -534,7 +534,7 @@ run_session
 [ "$(cat /run/boot-frontend-exec)" = 2.31 ]
 [ "$(cat /run/boot-clock-handoff)" = '2.31 3.414 2.319 5.733' ]
 check_handoff_log "$BOOT_LOG" 1
-grep -Eqx '[0-9.]+ Startup: 3\.41 s before Linux, 2\.32 s Linux to menu, 5\.73 s total \(NextUI\)' "$BOOT_LOG"
+grep -Eqx '[0-9.]+ Startup: 3\.41 s before Linux, 2\.32 s Linux to menu, 5\.73 s total \(MinUI\)' "$BOOT_LOG"
 rm /tmp/update.log
 run_session
 [ "$status" -eq 0 ]
