@@ -125,8 +125,19 @@ fi
 
 # Native loader health is independent of root-slot trial confirmation. Finish
 # it before either updater command can reboot; USB/no-frontend boots qualify.
+# A refusal still ends in the watchdog's restart into stock, exactly as before;
+# its reason goes onto /data first, where the next start's log and
+# diagnostics pick it up. Only this failure path writes anything.
 if [ -e /sys/firmware/devicetree/base/chosen/baseos,native-boot ]; then
-	if ! /usr/sbin/native-health --accept; then
+	if ! native_health=$(/usr/sbin/native-health --accept 2>&1); then
+		native_health=$(printf '%s' "$native_health" | tr '\n' ' ')
+		read -r native_up _ < /proc/uptime 2>/dev/null || native_up=0
+		[ ! -d /data/boot-native-v1 ] \
+			|| printf 'native: a fast start reached Linux but failed its health check (%s s): %s\n' \
+				"$native_up" "$native_health" >> /data/boot-native-v1/install.log 2>/dev/null
+		printf '%s An earlier start with the fast loader reached Linux but failed its health check: %s\n' \
+			"$native_up" "$native_health" >> /data/baseos-boot.log 2>/dev/null
+		sync
 		while :; do /bin/sleep 60; done
 	fi
 fi

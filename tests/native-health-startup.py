@@ -67,10 +67,10 @@ def main():
     parser.add_argument("--helper", type=Path, required=True)
     args = parser.parse_args()
     source = args.rcs.read_text()
-    assert source.index("mali_kbase.ko") < source.index("native-health --accept;")
-    assert source.index("/dev/mmcblk0p6 /data") < source.index("native-health --accept;")
-    assert source.index("native-health --accept;") < source.index("baseos-update boot-check")
-    assert source.index("native-health --accept;") < source.index("baseos-update apply")
+    assert source.index("mali_kbase.ko") < source.index("native-health --accept 2>&1")
+    assert source.index("/dev/mmcblk0p6 /data") < source.index("native-health --accept 2>&1")
+    assert source.index("native-health --accept 2>&1") < source.index("baseos-update boot-check")
+    assert source.index("native-health --accept 2>&1") < source.index("baseos-update apply")
     assert source.index("native-health --accept-charger") < source.index("while ! /usr/sbin/baseos-charger")
 
     for reboot_at in ("boot-check", "apply"):
@@ -102,6 +102,22 @@ def main():
         finally:
             boot.close()
         print("PASS: healthy GPU/DE with", fault, "keeps native startup blocked")
+
+    # A refusal leaves its reason on /data for the next start, then waits for
+    # the watchdog as before.
+    boot = boot_fixture(args, mode="0", HEALTH_MODEL_GPU_MISSING="1")
+    try:
+        boot.write("data/boot-native-v1/install.log", b"native: installed\n")
+        boot.start()
+        assert_blocked(boot)
+        spool = boot.read("data/baseos-boot.log")
+        assert "An earlier start with the fast loader reached Linux but failed its health check: " in spool, spool
+        assert "still waiting for the GPU (/dev/mali0)" in spool, spool
+        record = boot.read("data/boot-native-v1/install.log")
+        assert record.startswith("native: installed\nnative: a fast start reached Linux but failed its health check"), record
+    finally:
+        boot.close()
+    print("PASS: a refused fast start records its reason on /data before waiting")
 
     boot = boot_fixture(args, mode="1")
     try:
