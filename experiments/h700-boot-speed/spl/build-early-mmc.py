@@ -22,6 +22,31 @@ def fnv(data):
     return value
 
 
+# DQ read/write bit delays (tpr11, tpr12) from U-Boot v2026.10's Anbernic H700
+# defconfigs, which ROCKNIX also boots LPDDR4 units with.
+LPDDR4_DEFAULT_DELAYS = (0x1b1f1e1c, 0x06060606)
+
+
+def dram_candidates(header):
+    """The pinned boot0's three DRAM banks, deduplicated, in boot0's order.
+
+    Every model's boot0 carries a generic LPDDR4 bank whose tpr11/tpr12 are 0:
+    vendor boot0 searches those delays itself, but mainline training programs
+    them as given, and with zero delays size detection finds no aliasing and
+    probes outside the DRAM window. Such banks get the mainline defaults; the
+    BL31 copy gets the same words, as vendor boot0 hands on its found delays.
+    """
+    candidates = []
+    for offset in (0x38, 0x9f4, 0xa74):
+        block = struct.unpack_from("<32I", header, offset)
+        assert block[0] in (672, 792) and block[1] in (3, 7, 8)
+        assert block[1] != 3 or not block[30] & 0x80, "vendor special DDR3 remap is unsupported"
+        if block[1] == 8 and block[28] == block[29] == 0:
+            block = block[:28] + LPDDR4_DEFAULT_DELAYS + block[30:]
+        if block not in candidates: candidates.append(block)
+    return candidates
+
+
 def native_dram(source, header):
     arch = source / "arch/arm/mach-sunxi"
     head = source / "arch/arm/include/asm/arch-sunxi/dram_sun50i_h616.h"
@@ -69,12 +94,7 @@ def native_dram(source, header):
     fields = {"clk": 0, "type": 1, "dx_odt": 2, "dx_dri": 3, "ca_dri": 4,
               "odt_en": 5, "tpr0": 22, "tpr2": 24, "tpr6": 26,
               "tpr10": 27, "tpr11": 28, "tpr12": 29}
-    candidates = []
-    for offset in (0x38, 0x9f4, 0xa74):
-        block = struct.unpack_from("<32I", header, offset)
-        assert block[0] in (672, 792) and block[1] in (3, 7, 8)
-        assert block[1] != 3 or not block[30] & 0x80, "vendor special DDR3 remap is unsupported"
-        if block not in candidates: candidates.append(block)
+    candidates = dram_candidates(header)
     (arch / "dram-candidates.h").write_text("static const struct dram_para dram_candidates[] = {\n" +
         "".join("  {" + ", ".join(f".{key}=0x{block[index]:x}u" for key,index in fields.items()) + "},\n"
                 for block in candidates) + "};\nstatic const unsigned int dram_vendor_candidates[][32] = {\n" +

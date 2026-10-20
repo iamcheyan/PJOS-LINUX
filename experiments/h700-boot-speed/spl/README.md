@@ -76,6 +76,17 @@ checkpoint, then try the next bank. The manifest lists these source changes.
 The pinned upstream LPDDR3 TPR6 shift is already 16. No ROCKNIX timing patch
 is needed on v2026.10.
 
+Every model's boot0 also carries a generic LPDDR4 bank with tpr11 = tpr12 = 0.
+Vendor boot0 searches those DQ delays; mainline programs them as given, so
+training "passes", size detection sees no aliasing and `mctl_calc_size` probes
+outside the DRAM window, which hangs until the watchdog starts stock (seen on
+1 GiB LPDDR4 units, 1.5.1). `build-early-mmc.py` fills such banks with the
+v2026.10 Anbernic H700 defaults 0x1b1f1e1c / 0x06060606; tuned banks are left
+alone (`test-dram-candidates.py`). The selector also refuses a detected layout
+whose size probe would leave the 32-bit window (more than 2 GiB) and, before
+accepting a bank, checks that the first words and the words halfway up hold
+their own values; either failure moves on to the next bank.
+
 `verify-dram-select.py` executes the selector, the real rank/width retry loop,
 the stack unwind, and the timing register writes. Training success and detected
 geometry are modeled. `verify-variants.py` builds and checks all eleven prepared
