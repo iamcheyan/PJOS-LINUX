@@ -316,7 +316,7 @@ native_step() {
 	attempt_number=$((attempts + 1))
 	usb_free || ndefer 'a computer owns USB storage'
 	defer_kind=failed
-	nsplash 'INSTALLING FAST STARTUP: KEEP POWER ON'
+	nsplash 'INSTALLING NEW BOOT METHOD: KEEP POWER ON'
 	trap '' HUP INT TERM
 	printf '%s\n' "$NATIVE_GENERATION" > "$NSTATE/latch" && sync
 	if ! "$HEALTH" --hold-stock >&3 2>&3 || [ "$(latch)" != held ]; then
