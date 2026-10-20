@@ -567,16 +567,28 @@ class NativeMigration(unittest.TestCase):
         self.run_migration()
         self.assertEqual(self.done(), "skipped: the secondary sector holds no stock boot0 to fall back on")
 
-    def test_low_battery_and_unfinished_pair_step_defer(self):
+    def test_unfinished_pair_step_defers(self):
+        # The boot pair step (cards from before 1.4.0) still waits for power;
+        # the fast loader install then waits for it.
         self.flash()
+        (self.pair_state / "complete").unlink()
         (self.root / "sys/class/power_supply/battery/capacity").write_text("20\n")
         self.run_migration()
         self.assertIsNone(self.done())
         self.assertEqual(self.writes(), [])
-        self.assertIn("waiting for external power", self.log())
+        self.assertIn("the boot pair step has not finished", self.log())
         # A wait is not an attempt: it is named only in this boot's loader line.
-        self.assertEqual(self.result(), "deferred waiting for external power or at least 50% battery (battery 20%)")
+        self.assertEqual(self.result(), "deferred the boot pair step has not finished")
         self.assertEqual(self.boot_log_lines(), [])
+
+    def test_low_battery_does_not_hold_the_install_back(self):
+        self.flash()
+        battery = self.root / "sys/class/power_supply/battery"
+        (battery / "capacity").write_text("3\n")
+        (battery / "online").write_text("0\n")
+        self.run_migration()
+        self.assert_native()
+        self.assert_installed_in_order()
 
     def test_damaged_native_files_are_never_written(self):
         self.flash()

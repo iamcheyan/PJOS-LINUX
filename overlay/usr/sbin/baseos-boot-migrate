@@ -210,13 +210,15 @@ native_step() {
 		# Health refuses another generation before startup gets here.
 		[ "$running" = "$NATIVE_GENERATION" ] || ndefer 'running a different native loader'
 	fi
-	powered=0 capacity=0
-	for supply in "$ROOT"/sys/class/power_supply/*; do
-		[ ! -r "$supply/online" ] || { read -r online < "$supply/online" || online=0; [ "$online" != 1 ] || powered=1; }
-		[ ! -r "$supply/capacity" ] || read -r capacity < "$supply/capacity" || capacity=0
-	done
-	case "$capacity" in ''|*[!0-9]*) capacity=0 ;; esac
-	[ "$powered" -eq 1 ] || [ "$capacity" -ge 50 ] || ndefer "waiting for external power or at least 50% battery (battery $capacity%)"
+	# No battery check: the install takes a few seconds. Writes happen only
+	# while the stock latch is held, and a restart then starts stock: the
+	# firmware and kernel image sit where stock never reads, and the capsule
+	# body goes in before its header, so a half-written capsule fails BootROM's
+	# checksum and BootROM takes the stock copy at the secondary sector. The
+	# one exception is the U-Boot package, when it has to change (cards coming
+	# from 1.4.0 or older): it is the stock path's only copy, and power lost in
+	# the fraction of a second it takes to write leaves stock unable to start.
+	# Its previous contents stay in boot-native-v1/toc-before.bin.
 	nmatches "$NATIVE/capsule.bin" "$NATIVE_CAPSULE_SHA256" && nmatches "$NATIVE/firmware.bin" "$NATIVE_FIRMWARE_SHA256" \
 		&& nmatches "$NATIVE/image.bin" "$NATIVE_IMAGE_SHA256" && nmatches "$NATIVE/recovery-toc.bin" "$NATIVE_TOC_SHA256" \
 		&& [ "$(wc -c < "$NATIVE/capsule.bin")" -eq "$NATIVE_CAPSULE_SIZE" ] \
