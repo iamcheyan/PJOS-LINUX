@@ -40,7 +40,9 @@ def words_of(text: str) -> list[int]:
 
 
 def pre_kernel_seconds(value: str) -> float:
-    match = re.search(r"pre-kernel\s+([0-9.]+)\s*s", value) or re.fullmatch(r"\s*([0-9.]+)\s*s?\s*", value)
+    match = (re.search(r"pre-kernel\s+([0-9.]+)\s*s", value)
+             or re.search(r"Startup:\s+([0-9.]+)\s*s before Linux", value)
+             or re.fullmatch(r"\s*([0-9.]+)\s*s?\s*", value))
     if not match:
         sys.exit(f"cannot read a pre-kernel time from {value!r}")
     return float(match.group(1))

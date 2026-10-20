@@ -253,10 +253,12 @@ EOF
   test "$(tail -1 /tmp/progress.txt)" -eq 98 || { echo "FAIL: bar should reach 98" >&2; exit 1; }
   echo "  progress: $(tr "\n" " " < /tmp/progress.txt)"
   grep -qx "trial=1.0.1" /data/update/state || { echo "FAIL: no trial state" >&2; exit 1; }
-  grep -q "update: inactive slot verified" /mnt/sdcard/baseos-boot.log \
+  grep -q "update: 1.0.1 written and checked; restarting into it" /mnt/sdcard/baseos-boot.log \
     || { echo "FAIL: update events missing from shared card log" >&2; exit 1; }
-  grep -q "records out" /mnt/sdcard/baseos-boot.log \
-    || { echo "FAIL: update command diagnostics missing from shared card log" >&2; exit 1; }
+  ! grep -q -e "records out" -e "records in" -e " copied, " /mnt/sdcard/baseos-boot.log \
+    || { echo "FAIL: raw dd output in the card log" >&2; exit 1; }
+  test "$(grep -c "update: " /mnt/sdcard/baseos-boot.log)" -eq 2 \
+    || { echo "FAIL: an update should take two log lines" >&2; cat /mnt/sdcard/baseos-boot.log >&2; exit 1; }
   echo "ok"
 
   grep -q "^$want 1.0.1 test$" /data/update/history \
@@ -427,7 +429,7 @@ EOF
   grep -q "RESTORING SYSTEM" /tmp/splash.log || { echo "FAIL: no restore pill" >&2; exit 1; }
   test ! -e /tmp/card-probes && test ! -e /mnt/sdcard/baseos-boot.log \
     || { echo "FAIL: pre-card boot check accessed the frontend card" >&2; exit 1; }
-  grep -q "update: update trial boot 2" /data/baseos-boot.log \
+  grep -q "update: trying 1.0.1, start 2 of 3" /data/baseos-boot.log \
     || { echo "FAIL: trial diagnostics missing from persistent early log" >&2; exit 1; }
   grep -q "restoring" /data/baseos-boot.log \
     || { echo "FAIL: rollback diagnostics missing from persistent early log" >&2; exit 1; }
@@ -491,7 +493,7 @@ EOF
   printf "trial=1.0.1\nattempts=1\n" > /data/update/state
   baseos-update boot-check
   grep -qx "attempts=2" /data/update/state || { echo "FAIL: logging blocked trial count" >&2; exit 1; }
-  grep -q "update: update trial boot 2" /tmp/baseos-boot.log \
+  grep -q "update: trying 1.0.1, start 2 of 3" /tmp/baseos-boot.log \
     || { echo "FAIL: unavailable early log did not fall back to RAM" >&2; exit 1; }
   test ! -e /tmp/card-probes || { echo "FAIL: fallback probed the frontend card" >&2; exit 1; }
   rmdir /data/baseos-boot.log

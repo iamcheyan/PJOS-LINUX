@@ -321,14 +321,13 @@ fi
 # Older rootfs images may lack the alias baked into current builds.
 [ "$(readlink /mnt/SDCARD)" = /mnt/sdcard ] || /bin/ln -sfn /mnt/sdcard /mnt/SDCARD
 
+# One header per boot. Everything else in the log belongs to the boot above it.
 . /usr/share/baseos/boot-log.sh
 select_boot_log
 read -r boot_id < /proc/sys/kernel/random/boot_id
-log "=== BaseOS boot $(date '+%Y-%m-%d %H:%M:%S') ($boot_id) ==="
+[ ! -r /etc/baseos-release ] || . /etc/baseos-release
+log "=== BaseOS boot $(date '+%Y-%m-%d %H:%M:%S'), BaseOS ${BASEOS_VERSION:-?} for ${BASEOS_TARGET:-?}, boot ${boot_id%%-*} ==="
 flush_early_boot_log
-if [ "$LOG" = /mnt/sdcard/baseos-boot.log ]; then
-	log "rcS reached card mount"
-fi
 
 # BaseOS settings always come from TF1, even when TF2 holds the frontend. Reuse
 # TF1 at /mnt/sdcard, or briefly mount it read-only for config and update scans.

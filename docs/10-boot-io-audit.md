@@ -17,7 +17,7 @@ image stored in the root filesystem.
   `/data/baseos-boot.log` as an early buffer (persistent when p6 mounted);
   rcS or the next successful session mount appends it to the card log and removes
   it only after success.
-  The routine “already expanded” check also logs its result.
+  The routine “already expanded” check logs nothing; only growth and errors do.
 - Session and ADB logs fall back to `/tmp/baseos-boot.log` for missing or
   unwritable cards. System-update diagnostics use the persistent `/data` buffer
   in that case. USB storage mode uses RAM and never writes to the host-owned

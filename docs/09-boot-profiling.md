@@ -20,10 +20,9 @@ controllers for a module to start. The unpacked kernel stays the same.
 
 `frontend-session` writes kernel uptime to `/run/boot-frontend-exec` immediately
 before its first frontend `exec`. The marker is retained across frontend
-respawns on tmpfs. The same value is appended once per boot to
-`/mnt/sdcard/baseos-boot.log` as `BaseOS boot time: ... s (kernel start to
-frontend handoff)`. This is on TF2 when it is the active frontend card, otherwise
-on TF1's BASEOS partition. Open the log from a computer to read it.
+respawns on tmpfs. Once per boot `/mnt/sdcard/baseos-boot.log` gets one
+`Startup:` line (below). This is on TF2 when it is the active frontend card,
+otherwise on TF1's BASEOS partition. Open the log from a computer to read it.
 
 After the frontend starts, read the marker and boot ID:
 
@@ -42,15 +41,21 @@ Every supported H700 target installs `boot-clock`. At the first handoff it reads
 24 MHz ARM generic counter and `CLOCK_MONOTONIC_RAW` together and logs:
 
 ```text
-BaseOS boot stages: pre-kernel ... s; post-kernel ... s; combined ... s (counter origin to frontend handoff; raw clock)
+Startup: 1.45 s before Linux, 1.42 s Linux to menu, 2.87 s total (NextUI)
 ```
 
-`pre-kernel` is the counter value at Linux's initial timekeeping origin,
+Releases before 1.5.2 logged the same three values as `BaseOS boot stages:
+pre-kernel ... s; post-kernel ... s; combined ... s`, plus a separate `BaseOS
+boot time:` line. The log rounds to 10 ms; `/run/boot-clock-handoff` keeps
+milliseconds. Without a usable counter the line is `Startup: ... s Linux to
+menu`.
+
+"Before Linux" (`pre-kernel`) is the counter value at Linux's initial timekeeping origin,
 calculated as counter seconds minus raw monotonic seconds. It includes kernel
 loading/decompression and the earliest kernel work before timekeeping starts.
-`post-kernel` is raw monotonic time at frontend handoff. It covers the rest of
+"Linux to menu" (`post-kernel`) is raw monotonic time at frontend handoff. It covers the rest of
 kernel initialization, the vendor initramfs on a card that still has one, and
-rootfs startup. `combined` is their sum, the raw
+rootfs startup. "Total" (`combined`) is their sum, the raw
 counter value at that handoff. The division is Linux's clock origin, not the
 first kernel instruction. Reading the counter does not change or reset it.
 
