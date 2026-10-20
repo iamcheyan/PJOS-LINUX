@@ -20,8 +20,16 @@ Runtime scripts call it through `baseos-splash` only for exceptional work or a
 state requiring action. Option-shaped arguments fail with exit status 2 without
 drawing.
 
-The pill preserves pixels outside its status surface. Text uses the bundled
-Lexend Light font and statically linked FreeType, with a bitmap-font fallback.
+The pill preserves pixels outside its status surface. Each message is a
+separate run, so a pill records the pixels it covered, and the pixels it drew,
+in `/run/baseos-splash-under` (only when `/run` is tmpfs; never on the card).
+The next pill puts that background back before drawing, so a narrower message
+after a wider one leaves no trace of the old pill's ends. The background is only
+restored while the screen still shows that exact pill; a record for another
+geometry, or one something else has drawn over, is ignored. The full-screen
+logo drops the record.
+
+Text uses the bundled Lexend Light font and statically linked FreeType, with a bitmap-font fallback.
 After drawing, `FBIOBLANK` and `FBIOPAN_DISPLAY` make the vendor display driver
 scan out the framebuffer. `FBSPLASH_TEST` renders PPM files for offline checks.
 
@@ -68,6 +76,8 @@ separately replacing the boot-resource artwork.
 | card unavailable | `INSERT SD CARD` | none |
 | installer cannot run | `INSTALL FAILED` | none |
 | no installed frontend or installer | `ADD FRONTEND TO SD CARD` | none |
+| installing the new boot method | `SPEEDING UP BOOT` | none |
+| boot areas written but not verified | `BOOT UPDATE FAILED: KEEP POWER ON` | none |
 | preparing the USB storage gadget | `STARTING USB STORAGE` | none |
 | user storage exported over USB | `USB STORAGE: EJECT BEFORE RESTART` | none |
 | USB storage cannot bind | `USB STORAGE FAILED: POWER OFF` | none |

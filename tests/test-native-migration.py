@@ -341,7 +341,7 @@ class NativeMigration(unittest.TestCase):
         self.assertEqual((self.state / "firmware-before.bin").read_bytes(),
                          self.before_boot[FIRMWARE_OFFSET:FIRMWARE_OFFSET + FIRMWARE_SIZE])
         self.assertEqual((self.state / "secondary-before.bin").read_bytes(), self.make_boot0())
-        self.assertIn("INSTALLING FAST STARTUP: KEEP POWER ON", (self.root / "splash.log").read_text())
+        self.assertIn("SPEEDING UP BOOT", (self.root / "splash.log").read_text())
         # One plain line in the boot log, the same outcome for this boot's loader
         # line, and no copy counters in the install log.
         self.assertEqual(self.boot_log_lines(),
