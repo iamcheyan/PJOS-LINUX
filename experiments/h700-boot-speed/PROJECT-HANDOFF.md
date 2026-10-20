@@ -1,5 +1,22 @@
 # H700 boot project: handoff at user stop, 2026-10-15
 
+## 1.5.2 (2026-10-20)
+
+- Fast start on LPDDR4 units whose factory memory bank has zero tuning words:
+  cause, fix and RG28XX trials are in
+  [DESIGN.md](DESIGN.md#zero-tuned-lpddr4-banks-152). Expected to fix the
+  RG40XX H and RG CubeXX field failures; only the RG28XX has run it.
+- The boot log names the loader that ran and why (`Loader:` line), and adds a
+  `--- Diagnostics ---` block from `baseos-diag` when useful. See
+  [docs/10](../../docs/10-boot-io-audit.md#runtime-policy). `baseos-regs`
+  reads the few chip registers the block needs; BaseOS has no `devmem`.
+- The fast loader install no longer waits for 50% battery: it takes a few
+  seconds, and its writes happen while the stock latch is held. The one
+  window without a fallback is the U-Boot package rewrite on cards coming from
+  1.4.0 or older. The 1.4.0 pair step still has its battery check.
+- A fast start that fails its health check records why in
+  `/data/boot-native-v1/install.log`.
+
 ## Next: per-model 1.5.1 release (user requirement, 2026-10-15)
 
 The user wants a v1.5.1 `.img` and `.bosupd` for all eleven models. They must build

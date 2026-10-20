@@ -183,6 +183,57 @@ or `disp_reserve`. Stamp generation and stage timings in the final kernel FDT.
 The final call is A32 `r0=0x8000ff04`, `r1=0x40080000`, `r2=0x44000000`,
 `r3=1`, with interrupts masked and caches/MMU cleaned and disabled.
 
+### Zero-tuned LPDDR4 banks (1.5.2)
+
+Field reports on 1.5.1 showed RG40XX H and RG CubeXX units falling back to
+the stock loader on every start (about 4.45 s before Linux instead of about
+1.46 s). Both were 1 GiB LPDDR4 units with layout 0x30fa/0x04000000. The lab
+RG28XX has the same memory, and the cause was reproduced and bisected on it.
+
+Every model's factory boot0 carries a generic LPDDR4 bank (at boot0 offset
+0xa74) whose tpr11 and tpr12 words are zero. Vendor boot0 searches for those
+DQ delays itself; mainline training uses them directly. With zero delays the
+PHY training still reports success, the size probe sees no aliasing and picks
+cols 11 / rows 17 (8 GiB), and `mctl_calc_size` then reads base + 6 GiB,
+outside the DRAM window. The SPL hangs there. A hang never falls through to
+the next bank, so the 16 s watchdog starts stock. Bounding the PHY polls does
+not help.
+
+RG28XX trials (warm restarts, one unit; each row changes one thing):
+
+| Candidate list | Result | Before Linux |
+|---|---|---:|
+| Generic bank as shipped | stock after the watchdog | 4.52 s |
+| + RG28XX's own tpr6/tpr11/tpr12 | fast | 1.46 s |
+| + mainline H700 tpr11/tpr12 only | fast | 1.46 s |
+| Full RG40XX H list (two LPDDR3 banks, then generic + mainline delays) | fast | 1.48 s |
+| + RG28XX para1/para2/tpr13, delays still zero | stock | 4.53 s |
+| Generic bank, then generic + mainline delays, polls bounded | stock, second bank never ran | 4.53 s |
+
+So tpr11/tpr12 decide it; tpr6, para1, para2 and tpr13 do not. LPDDR3 banks
+tried first on an LPDDR4 unit fail fast, in about 22 ms.
+
+The 1.5.2 SPL changes two things:
+
+1. At build time, any LPDDR4 bank with tpr11 = tpr12 = 0 gets the U-Boot
+   v2026.10 H700 defaults that ROCKNIX also ships, 0x1b1f1e1c / 0x06060606, in
+   the training table and in the copy passed to BL31. Tuned banks are not
+   changed (`spl/test-dram-candidates.py`).
+2. Before `mctl_calc_size`, the SPL refuses a layout whose probe would land
+   above 0xfffffffc (more than 2 GiB; this covers every cols 11 + rows 17
+   result). It then writes a 4-word pattern at base and halfway, checks it and
+   restores the contents. Either failure moves on to the next bank instead of
+   hanging. A hypothetical 3-4 GiB H700 unit would start the slow stock way.
+
+Effect per model: the rg28xx candidate table is byte-identical to 1.5.1 (its
+fallbacks are DDR3). The other ten models change only the generic LPDDR4
+bank's words 28/29. rg34xxsp, rg35xxh, rg35xxpro, rg40xxh, rg40xxv, rgcubexx
+and rgsp have no other LPDDR4 bank, so their LPDDR4 units depended on it. The
+lab RG28XX ran the production 1.5.2 loader fast (1.458-1.460 s) over warm
+restarts, sleep and a cold power-on, and a test list with the zero bank first
+showed the size check moving on to the filled bank (1.476-1.483 s). No RG40XX
+H or RG CubeXX has run it yet.
+
 ### Recovery and acceptance
 
 The independent judge's useful second graft is a second pinned stock source,

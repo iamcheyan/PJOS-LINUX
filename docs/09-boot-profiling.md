@@ -24,6 +24,17 @@ respawns on tmpfs. Once per boot `/mnt/sdcard/baseos-boot.log` gets one
 `Startup:` line (below). This is on TF2 when it is the active frontend card,
 otherwise on TF1's BASEOS partition. Open the log from a computer to read it.
 
+From 1.5.2 each boot's entry has one header with the version and model, the
+`Startup:` line, and a `Loader:` line: `fast`, or `stock` with the reason
+(for example a failed health check, or the install still pending). After an
+update, an install, a failed fast start or a change of loader it also has a
+`--- Diagnostics ---` block. Run `baseos-diag` over adb or SSH to print and
+log a block on demand. [Boot I/O](10-boot-io-audit.md#runtime-policy) lists
+when each part is written. A unit that keeps showing `stock` at about 4.5 s
+before Linux has a fast loader that cannot start it; the
+[LPDDR4 fix in 1.5.2](../experiments/h700-boot-speed/DESIGN.md#zero-tuned-lpddr4-banks-152)
+covers the case seen on RG40XX H and RG CubeXX units.
+
 After the frontend starts, read the marker and boot ID:
 
 ```sh
