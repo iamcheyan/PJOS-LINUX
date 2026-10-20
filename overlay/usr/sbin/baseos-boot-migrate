@@ -258,7 +258,13 @@ native_step() {
 	esac
 	nmatches "$WORK/firmware.cur" "$NATIVE_FIRMWARE_SHA256" && firmware=this || firmware=other
 	nmatches "$WORK/image.cur" "$NATIVE_IMAGE_SHA256" && image=this || image=other
-	nlog "found primary $primary, package $toc, firmware $firmware, image $image, pair $(latch)"
+	# Battery and charger at the install, for the diagnostics only.
+	capacity=unknown charger=no
+	for supply in "$ROOT"/sys/class/power_supply/*; do
+		[ ! -r "$supply/online" ] || { read -r online < "$supply/online" || online=0; [ "$online" != 1 ] || charger=yes; }
+		[ ! -r "$supply/capacity" ] || read -r capacity < "$supply/capacity" || capacity=unknown
+	done
+	nlog "found primary $primary, package $toc, firmware $firmware, image $image, pair $(latch), battery $capacity%, charger $charger"
 
 	if [ "$primary/$toc/$firmware/$image" = this/this/this/this ]; then
 		state=$(latch)

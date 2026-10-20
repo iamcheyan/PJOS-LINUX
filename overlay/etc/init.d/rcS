@@ -131,6 +131,10 @@ fi
 if [ -e /sys/firmware/devicetree/base/chosen/baseos,native-boot ]; then
 	if ! native_health=$(/usr/sbin/native-health --accept 2>&1); then
 		native_health=$(printf '%s' "$native_health" | tr '\n' ' ')
+		native_health=${native_health% }
+		case "$native_health" in *'mismatched generation'*)
+			native_health="$native_health (expected on the first start after an update: the fast loader on the card is the earlier version's; the stock start that follows installs the new one)" ;;
+		esac
 		read -r native_up _ < /proc/uptime 2>/dev/null || native_up=0
 		[ ! -d /data/boot-native-v1 ] \
 			|| printf 'native: a fast start reached Linux but failed its health check (%s s): %s\n' \

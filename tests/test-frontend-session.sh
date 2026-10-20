@@ -556,6 +556,28 @@ run_session
 check_handoff_log "$BOOT_LOG" 1
 ! grep -q ' s before Linux, ' "$BOOT_LOG"
 echo 'ok: failed counter sampling falls back to uptime-only handoff'
+# The diagnostics helper starts once per boot, in the background, after the
+# first handoff, with the log the session chose. Respawns do not start it again.
+reset
+slot_card
+rm -f /usr/sbin/boot-clock
+cat > /usr/sbin/baseos-diag <<'EOF'
+#!/bin/sh
+printf '%s %s\n' "$*" "$BASEOS_BOOT_LOG" >> /tmp/diag.log
+EOF
+chmod 755 /usr/sbin/baseos-diag
+run_session
+[ "$status" -eq 0 ]
+n=0
+while [ ! -s /tmp/diag.log ] && [ "$n" -lt 50 ]; do /bin/sleep 0.1; n=$((n + 1)); done
+[ "$(cat /tmp/diag.log)" = "--boot $BOOT_LOG" ]
+rm /tmp/update.log
+run_session
+/bin/sleep 0.3
+[ "$(wc -l < /tmp/diag.log)" -eq 1 ]
+! grep -q BASEOS_BOOT_LOG /tmp/frontend-env.log
+rm /usr/sbin/baseos-diag
+echo 'ok: diagnostics start once per boot, after the first handoff'
 
 # The migration guard must short-circuit before executing its helper on all
 # later boots. A pending migration runs before confirming a rootfs update.

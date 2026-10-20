@@ -10,7 +10,21 @@ image stored in the root filesystem.
 
 - Boot, session/installer, ADB and system-update diagnostics append to a single
   `/mnt/sdcard/baseos-boot.log` on the active frontend card (TF2, otherwise TF1).
-  Each boot starts a new heading; existing history is retained.
+  Each boot starts a new heading that names the BaseOS version and model.
+  Past 256 KiB, `baseos-diag --boot` drops the oldest whole boots, down to about
+  192 KiB, keeping the file name.
+- After the first handoff, `baseos-diag --boot` runs once in the background
+  (`nice`, `ionice -c 3`). It adds one `Loader:` line: fast, or stock and why
+  (from `/run/baseos-native-result`, the install step's files and the RTC
+  latch). It adds a read-only `--- Diagnostics ---` block on the first boot of a
+  build, when the install step ran, after a fast start failed its health check,
+  when the loader line changed, and every 20th boot while the fast loader is
+  installed but stock keeps starting. The block reads about 17 MB of boot areas,
+  20 s after the handoff. `baseos-diag` run by hand prints a block and appends
+  it. Nothing runs or is written while a computer owns USB storage.
+- A fast start that fails its health check writes its reason to
+  `/data/boot-native-v1/install.log` and the early buffer before it waits for
+  the watchdog. Healthy starts write nothing there.
 - The first kernel-to-frontend handoff time is recorded in that log and retained
   in `/run/boot-frontend-exec` across session respawns. Verbose profiling is off.
 - Update checks and storage expansion run before the card is mounted. They use

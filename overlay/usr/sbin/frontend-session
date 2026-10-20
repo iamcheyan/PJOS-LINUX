@@ -57,6 +57,14 @@ seconds() {
 	printf '%d.%02d' $((sec_cs / 100)) $((sec_cs % 100))
 }
 
+# Which loader started this boot, and a diagnostics block when it is useful:
+# read only, at the lowest priority, once per boot, after the menu is up.
+start_diagnostics() {
+	[ -x /usr/sbin/baseos-diag ] && [ ! -e /run/baseos-diag-boot ] || return 0
+	BASEOS_BOOT_LOG="$LOG" nice -n 19 ionice -c 3 /usr/sbin/baseos-diag --boot \
+		</dev/null >/dev/null 2>&1 &
+}
+
 important_splash() {
 	[ -x /usr/bin/baseos-splash ] \
 		&& /usr/bin/baseos-splash --important "$@" 2>/dev/null
@@ -218,6 +226,7 @@ if [ "$CARD_MISSING" -eq 0 ] && [ -f "$LAUNCH" ]; then
 		elif [ -n "$boot_uptime" ]; then
 			log "Startup: $(seconds "$boot_uptime") s Linux to menu ($frontend_name$gpu_wait)"
 		fi
+		start_diagnostics
 	else
 		log "Frontend started again: $frontend_name$gpu_wait"
 	fi
@@ -245,5 +254,6 @@ else
 	log "no frontend on card — waiting for the user to add one"
 	important_splash -1 "ADD FRONTEND TO SD CARD"
 fi
+[ "$CARD_MISSING" -eq 1 ] || start_diagnostics
 sleep 5
 exit 1
