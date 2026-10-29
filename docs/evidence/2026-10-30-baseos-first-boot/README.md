@@ -26,3 +26,15 @@
 - 游戏/媒体条目点击后只能提示 `No player configured`（BaseOS 上没有模拟器/播放器）
 
 细节见 [docs/13-pocketjs-on-baseos.md](../13-pocketjs-on-baseos.md)。
+
+### 01-home-cards
+
+![01-home-cards](01-home-cards.png)
+
+### 04-settings-real-values
+
+![04-settings-real-values](04-settings-real-values.png)
+
+### 05-system-overview
+
+![05-system-overview](05-system-overview.png)
