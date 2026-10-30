@@ -117,16 +117,58 @@ type ProviderInfo struct {
 	Capabilities []Capability `json:"capabilities"`
 }
 
-// KeyboardProvider is the provider contract. Phase 1 ships a stub; pjos-keyboard
-// is a remote provider that consumes the Input API. Future providers (Fcitx/Rime/
-// Mozc/Voice) implement the same hooks.
+// RenderSpec is what a provider needs to draw the keyboard. Returning it keeps
+// Render free of side effects, so a headless provider can hand back a spec
+// instead of driving a display.
+type RenderSpec struct {
+	Layout       Layout       `json:"layout"`
+	InputMode    InputMode    `json:"inputMode"`
+	Value        string       `json:"value"`
+	Placeholder  string       `json:"placeholder"`
+	Secure       bool         `json:"secure"`
+	Capabilities []Capability `json:"capabilities"`
+	Theme        Theme        `json:"theme"`
+	Visible      bool         `json:"visible"`
+	FocusedInput string       `json:"focusedInput"`
+}
+
+// KeyboardProvider is the provider contract from the framework design:
+// Show/Hide/Render/Submit. Phase 1 ships a stub; pjos-keyboard is a remote
+// provider that consumes the Input API. Future providers (Fcitx/Rime/Mozc/Voice)
+// implement the same methods. The On* hooks are state-change notifications the
+// Manager emits around those calls.
 type KeyboardProvider interface {
 	Name() string
 	Capabilities() []Capability
+	// Show makes the provider current and returns its render specification.
+	Show(req ShowRequest, st State) RenderSpec
+	// Hide tears the provider's presentation down.
+	Hide(st State)
+	// Render reports the current drawing without side effects.
+	Render(st State) RenderSpec
+	// Submit reports the composed value and releases the presentation.
+	Submit(value string, st State)
+
+	// State-change notifications (the provider is already active here).
 	OnShow(req ShowRequest, st State)
 	OnHide(st State)
 	OnKey(key string, st State)
 	OnSubmit(value string, st State)
+}
+
+// specFromState builds the provider-facing render specification.
+func specFromState(st State) RenderSpec {
+	return RenderSpec{
+		Layout:       st.Layout,
+		InputMode:    st.InputMode,
+		Value:        st.Value,
+		Placeholder:  st.Placeholder,
+		Secure:       st.Secure,
+		Capabilities: append([]Capability(nil), st.Capabilities...),
+		Theme:        st.Theme,
+		Visible:      st.Visible,
+		FocusedInput: st.FocusedInput,
+	}
 }
 
 // Store persists capability profiles and last state. Default is in-memory.
@@ -344,6 +386,17 @@ func (m *Manager) Providers() []ProviderInfo {
 	return out
 }
 
+// Render returns the active provider's drawing specification.
+func (m *Manager) Render() (RenderSpec, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.snapshot()
+	if p, ok := m.providers[m.active]; ok {
+		return p.Render(st), p.Name()
+	}
+	return specFromState(st), m.active
+}
+
 // SetProvider switches the active provider.
 func (m *Manager) SetProvider(name string) (State, error) {
 	m.mu.Lock()
@@ -386,11 +439,13 @@ func (m *Manager) validateLayout(l Layout) error {
 
 func (m *Manager) notifyShow(req ShowRequest) {
 	if p, ok := m.providers[m.active]; ok {
+		p.Show(req, m.snapshot())
 		p.OnShow(req, m.snapshot())
 	}
 }
 func (m *Manager) notifyHide() {
 	if p, ok := m.providers[m.active]; ok {
+		p.Hide(m.snapshot())
 		p.OnHide(m.snapshot())
 	}
 }
@@ -401,6 +456,7 @@ func (m *Manager) notifyKey(key string) {
 }
 func (m *Manager) notifySubmit(value string) {
 	if p, ok := m.providers[m.active]; ok {
+		p.Submit(value, m.snapshot())
 		p.OnSubmit(value, m.snapshot())
 	}
 }

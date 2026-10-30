@@ -277,3 +277,111 @@ func TestAPIProvidersList(t *testing.T) {
 		t.Fatalf("providers: %+v", body)
 	}
 }
+
+// --- provider contract: Show/Hide/Render/Submit ---
+
+func TestProviderRenderSpec(t *testing.T) {
+	m, _ := newTestManager()
+	if _, err := m.Show(ShowRequest{
+		Layout:       LayoutURL,
+		Placeholder:  "Address",
+		Capabilities: []Capability{CapDPad},
+		Theme:        ThemeOLED,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	spec, provider := m.Render()
+	if provider != "stub" {
+		t.Fatalf("provider: %q", provider)
+	}
+	if spec.Layout != LayoutURL || spec.InputMode != InputDPad || spec.Theme != ThemeOLED {
+		t.Fatalf("render spec: %+v", spec)
+	}
+	if !spec.Visible || spec.Placeholder != "Address" {
+		t.Fatalf("render spec visibility/placeholder: %+v", spec)
+	}
+	if len(spec.Capabilities) != 1 || spec.Capabilities[0] != CapDPad {
+		t.Fatalf("render spec capabilities: %v", spec.Capabilities)
+	}
+}
+
+func TestProviderRenderReflectsHiddenState(t *testing.T) {
+	m, _ := newTestManager()
+	_, _ = m.Show(ShowRequest{Layout: LayoutText})
+	if spec, _ := m.Render(); !spec.Visible {
+		t.Fatal("expected visible spec")
+	}
+	m.Hide()
+	if spec, _ := m.Render(); spec.Visible {
+		t.Fatal("expected hidden spec after Hide")
+	}
+}
+
+func TestProviderReceivesShowHideSubmit(t *testing.T) {
+	// A provider that implements the full contract must observe Show/Hide/Submit
+	// alongside the On* notifications.
+	rec := &recordingProvider{}
+	m := New(nil, rec)
+	if _, err := m.Show(ShowRequest{Layout: LayoutNumber}); err != nil {
+		t.Fatal(err)
+	}
+	m.SetProvider("recording")
+	if _, err := m.Show(ShowRequest{Layout: LayoutText}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = m.Key("7")
+	m.Submit("")
+	// Submit ends the composition directly; it does not detour through Hide.
+	want := []string{"show", "onShow", "onKey", "submit", "onSubmit"}
+	if len(rec.calls) != len(want) {
+		t.Fatalf("calls: %v", rec.calls)
+	}
+	for i, w := range want {
+		if rec.calls[i] != w {
+			t.Fatalf("call %d = %q want %q (all: %v)", i, rec.calls[i], w, rec.calls)
+		}
+	}
+
+	// Hide is observed when the keyboard is dismissed without submitting.
+	_, _ = m.Show(ShowRequest{Layout: LayoutText})
+	m.Hide()
+	tail := rec.calls[len(rec.calls)-2:]
+	if tail[0] != "hide" || tail[1] != "onHide" {
+		t.Fatalf("hide notifications missing: %v", rec.calls)
+	}
+}
+
+type recordingProvider struct{ calls []string }
+
+func (p *recordingProvider) Name() string               { return "recording" }
+func (p *recordingProvider) Capabilities() []Capability { return []Capability{CapTouch} }
+func (p *recordingProvider) Show(req ShowRequest, st State) RenderSpec {
+	p.calls = append(p.calls, "show")
+	return specFromState(st)
+}
+func (p *recordingProvider) Hide(st State)                    { p.calls = append(p.calls, "hide") }
+func (p *recordingProvider) Render(st State) RenderSpec       { return specFromState(st) }
+func (p *recordingProvider) Submit(value string, st State)    { p.calls = append(p.calls, "submit") }
+func (p *recordingProvider) OnShow(req ShowRequest, st State) { p.calls = append(p.calls, "onShow") }
+func (p *recordingProvider) OnHide(st State)                  { p.calls = append(p.calls, "onHide") }
+func (p *recordingProvider) OnKey(key string, st State)       { p.calls = append(p.calls, "onKey") }
+func (p *recordingProvider) OnSubmit(value string, st State)  { p.calls = append(p.calls, "onSubmit") }
+
+func TestAPIRenderEndpoint(t *testing.T) {
+	ts, _ := newTestServer()
+	defer ts.Close()
+
+	post(t, ts, "/api/keyboard/show", `{"layout":"url","capabilities":["DPad"],"theme":"oled"}`)
+	resp := get(t, ts, "/api/keyboard/render")
+	var body struct {
+		Provider string     `json:"provider"`
+		Render   RenderSpec `json:"render"`
+	}
+	json.Unmarshal(readBody(t, resp), &body)
+	if body.Provider != "stub" {
+		t.Fatalf("provider: %q", body.Provider)
+	}
+	if body.Render.Layout != LayoutURL || body.Render.InputMode != InputDPad || body.Render.Theme != ThemeOLED {
+		t.Fatalf("render: %+v", body.Render)
+	}
+}

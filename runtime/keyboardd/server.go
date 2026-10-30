@@ -45,6 +45,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/keyboard/key", s.key)
 	s.mux.HandleFunc("/api/keyboard/state", s.state)
 	s.mux.HandleFunc("/api/keyboard/providers", s.providers)
+	s.mux.HandleFunc("/api/keyboard/render", s.render)
 	s.mux.HandleFunc("/api/keyboard/provider", s.setProvider)
 }
 
@@ -142,6 +143,13 @@ func (s *Server) key(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOut(w, http.StatusOK, map[string]any{"state": st})
+}
+
+// render returns the active provider's drawing specification, so a UI host can
+// paint exactly what the provider would without re-deriving it from state.
+func (s *Server) render(w http.ResponseWriter, r *http.Request) {
+	spec, provider := s.mgr.Render()
+	jsonOut(w, http.StatusOK, map[string]any{"provider": provider, "render": spec})
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {

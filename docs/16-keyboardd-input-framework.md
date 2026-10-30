@@ -35,6 +35,7 @@ Loopback HTTP, JSON. Default address `127.0.0.1:8787` (`KEYBOARDD_ADDR`).
 | POST | `/api/keyboard/blur` | blur an input → auto-hide when none focused |
 | POST | `/api/keyboard/key` | inject a key/char |
 | GET | `/api/keyboard/state` | full state |
+| GET | `/api/keyboard/render` | active provider's drawing spec |
 | GET | `/api/keyboard/providers` | registered providers |
 | POST | `/api/keyboard/provider` | switch active provider |
 
@@ -93,6 +94,13 @@ A key while the keyboard is hidden answers **409**.
 type KeyboardProvider interface {
     Name() string
     Capabilities() []Capability
+
+    Show(req ShowRequest, st State) RenderSpec
+    Hide(st State)
+    Render(st State) RenderSpec
+    Submit(value string, st State)
+
+    // state-change notifications emitted around the calls above
     OnShow(req ShowRequest, st State)
     OnHide(st State)
     OnKey(key string, st State)
@@ -100,8 +108,13 @@ type KeyboardProvider interface {
 }
 ```
 
-`stub` is the in-tree provider: it records hooks and declares the full capability
-set. It is what headless/desktop hosts and the tests use, and it is the fallback if
+`Render` is side-effect free: it returns a `RenderSpec` (layout, input mode, value,
+placeholder, secure flag, capabilities, theme, visibility, focus) instead of
+driving a display, so a headless provider can answer it without a surface.
+`GET /api/keyboard/render` exposes the same spec.
+
+`stub` is the in-tree provider: it records hooks, returns a `RenderSpec`, draws
+nothing, and declares the full capability set. It is what headless/desktop hosts and the tests use, and it is the fallback if
 a real provider fails to load. `FcitxProvider`/`RimeProvider`/`MozcProvider`/
 `VoiceProvider` are future external integrations; Phase 1 implements no input
 methods (no pinyin/wubi/Japanese/voice/AI/prediction/emoji/swipe).

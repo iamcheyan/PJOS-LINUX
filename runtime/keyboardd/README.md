@@ -32,6 +32,7 @@ Desktop Debug Mode runs this binary alone — no full PJOS image required.
 | POST   | `/api/keyboard/blur`     | Blur input → maybe hide |
 | POST   | `/api/keyboard/key`      | Inject key/char         |
 | GET    | `/api/keyboard/state`    | Current state           |
+| GET    | `/api/keyboard/render`   | Active provider's spec  |
 | GET/POST | `/api/keyboard/providers` / `/provider` | provider management |
 
 CORS preflight is answered because the provider runs on another origin.
@@ -53,12 +54,16 @@ CORS preflight is answered because the provider runs on another origin.
 type KeyboardProvider interface {
     Name() string
     Capabilities() []Capability
-    OnShow(req ShowRequest, st State)
-    OnHide(st State)
-    OnKey(key string, st State)
-    OnSubmit(value string, st State)
+    Show(req ShowRequest, st State) RenderSpec
+    Hide(st State)
+    Render(st State) RenderSpec   // side-effect free drawing spec
+    Submit(value string, st State)
+    // notifications: OnShow/OnHide/OnKey/OnSubmit
 }
 ```
+
+`Render` returns a `RenderSpec` rather than touching a display, so the stub (and a
+headless host) can answer it without a surface.
 
 The default provider is `stub`. The real UI provider (`PocketKeyboardProvider`)
 lives in `pjos-keyboard` and consumes this API over HTTP, pushing keys back via

@@ -25,6 +25,18 @@ func (p *StubProvider) Name() string { return "stub" }
 
 func (p *StubProvider) Capabilities() []Capability { return AllCapabilities }
 
+// Show records the event and reports what a real provider would draw. The stub
+// draws nothing itself, which is why a headless host still works.
+func (p *StubProvider) Show(req ShowRequest, st State) RenderSpec {
+	return specFromState(st)
+}
+
+func (p *StubProvider) Hide(st State) {}
+
+func (p *StubProvider) Render(st State) RenderSpec { return specFromState(st) }
+
+func (p *StubProvider) Submit(value string, st State) {}
+
 func (p *StubProvider) OnShow(req ShowRequest, st State) {
 	p.events = append(p.events, ProviderEvent{Kind: "show", Layout: req.Layout})
 }
