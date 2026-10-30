@@ -149,6 +149,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
             "$R/usr/sbin/baseos-config" "$R/usr/sbin/baseos-mdns" "$R/usr/sbin/h700-speaker-amp-load" \
             "$R/usr/sbin/baseos-startup-sound" \
             "$R/usr/sbin/usb-gadget-adb" "$R/usr/sbin/usb-storage-mode" \
+            "$R/usr/sbin/keyboardd-launch.sh" \
             "$R/mnt/vendor/ctrl/setBluetooth.sh" \
             "$R/usr/share/udhcpc/default.script"
   mkdir -p "$R/usr/share/baseos"
@@ -167,6 +168,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
            /usr/sbin/baseos-config /usr/sbin/baseos-mdns /usr/sbin/h700-speaker-amp-load \
            /usr/sbin/baseos-startup-sound \
            /usr/sbin/usb-gadget-adb /usr/sbin/usb-storage-mode \
+           /usr/sbin/keyboardd-launch.sh \
            /mnt/vendor/ctrl/setBluetooth.sh; do
     [ -x "$R$s" ] || { echo "FATAL: $s is not executable in rootfs"; exit 1; }
   done

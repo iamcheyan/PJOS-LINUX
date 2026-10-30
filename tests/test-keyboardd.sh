@@ -17,6 +17,7 @@ mkdir -p "$OUT"
 
 docker run --rm -i --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   -v "$OUT/keyboardd":/usr/bin/keyboardd:ro \
+  -v "$HERE/overlay/usr/sbin/keyboardd-launch.sh":/usr/sbin/keyboardd-launch.sh:ro \
   alpine:3.20 sh -eu <<'TEST'
 apk add --no-cache curl >/dev/null
 export PATH=/usr/local/bin:/usr/bin:/bin:/sbin
@@ -66,5 +67,17 @@ test "$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "$base/api/keyboard/ke
 	-H 'Origin: http://127.0.0.1:5199' -H 'Access-Control-Request-Method: POST')" = 204
 
 kill $KP 2>/dev/null || true
+sleep 0.2
+
+# The boot glue must never block a boot, and must detach the service so the
+# frontend session can exec its launcher afterwards.
+KEYBOARDD_BIN=/nonexistent /usr/sbin/keyboardd-launch.sh
+test -z "$(curl -s -m 1 http://127.0.0.1:8787/api/health || true)"
+KEYBOARDD_ADDR=127.0.0.1:8787 /usr/sbin/keyboardd-launch.sh
+sleep 0.5
+test "$(get /api/health | grep -o '"status":"ok"')" = '"status":"ok"'
+# Second call is a no-op, not a second server.
+KEYBOARDD_ADDR=127.0.0.1:8787 /usr/sbin/keyboardd-launch.sh 2>&1 | grep -q 'already running'
+
 echo 'keyboardd integration tests passed'
 TEST

@@ -230,6 +230,14 @@ if [ "$CARD_MISSING" -eq 0 ] && [ -f "$LAUNCH" ]; then
 	else
 		log "Frontend started again: $frontend_name$gpu_wait"
 	fi
+	# Start the input-framework backend before handing the display to the
+	# frontend. keyboardd owns the on-screen keyboard, so every app reaches it
+	# through the Input API instead of drawing its own. It is optional: a
+	# missing binary or a failed start must never delay or block the frontend,
+	# and it is skipped in USB-storage mode (that path returned above).
+	if [ -x /usr/sbin/keyboardd-launch.sh ]; then
+		/usr/sbin/keyboardd-launch.sh > /tmp/keyboardd.log 2>&1 || :
+	fi
 	if [ "$LAUNCH_TYPE" = binary ]; then
 		# Binaries use the glibc AArch64 runtime. Use the system
 		# loader so a copied binary needs no executable bit or chmod on the

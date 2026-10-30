@@ -113,6 +113,24 @@ In-memory by default, so the zero-dependency build is pure standard library.
 persists state. Phase 1 needs no persistence; the hook exists for per-device
 profiles later.
 
+## Boot wiring
+
+`overlay/usr/sbin/frontend-session` runs `/usr/sbin/keyboardd-launch.sh` once a
+frontend is found, immediately before handing the display to it. USB-storage mode
+returns earlier, so the service never starts while the card is exported to a host.
+
+The glue is deliberately non-blocking:
+
+- a missing `/usr/bin/keyboardd` logs and exits 0 — the boot continues and the
+  frontend keeps whatever input it had;
+- the service is detached (`setsid`, stdin from `/dev/null`) because the session
+  `exec`s the frontend, which would otherwise take the shell's children down;
+- a second call detects the running process and does nothing.
+
+`build-rootfs.sh` chmods and guard-checks the glue alongside the other boot
+scripts, so a non-executable copy fails the rootfs build instead of silently
+skipping.
+
 ## Running it standalone (Desktop Debug)
 
 ```sh
@@ -130,7 +148,8 @@ if the binary exists and never touches other services or the display stack.
 - `go test ./...` — manager, layout validation, focus, provider switching, hooks,
   capability→mode, key composition, HTTP API, CORS.
 - `tests/test-keyboardd.sh` — builds the binary and drives the API from an
-  `alpine:3.20` container with curl (same pattern as the other runtime tests).
+  `alpine:3.20` container with curl (same pattern as the other runtime tests),
+  then exercises the boot glue: missing binary, first start, and idempotency.
 
 ## Not in scope here
 
