@@ -137,7 +137,7 @@ pocketjs 已有两个无头路径，但都不满足「Shell 本地开发」：
 | 现有路径 | 能力 | 缺什么 |
 |---|---|---|
 | `--headless`（`PKT/programs/linux-kms/src/main.rs:47`） | 跑 N 个逻辑 tick，不渲染 | 出不了像素 |
-| `sim`（`PKT/programs/sim/sim.ts:1-25` 的宪章，`:99-108` 的 `fnv1a`，`:416-422` 的 `SimPixels`） | 虚拟时钟 + 逐帧 FNV 哈希 + 最终 RGBA | 需要构造 `script`，且没有「人看」的形态 |
+| `sim`（`PKT/programs/sim/sim.ts:1-25` 的宪章，`:96-104` 的 `fnv1a`，`:414-421` 的 `SimPixels`） | 虚拟时钟 + 逐帧 FNV 哈希 + 最终 RGBA | 需要构造 `script`，且没有「人看」的形态 |
 | `tests/golden.ts`（`:93-190`） | 同 HostOps + 脚本输入 → 字节精确 PNG | 面向 CI golden，不是开发者循环 |
 | web/wasm（`PKT/platforms/web/wasm-ops.js:20-26` 造实例，`:130-137` 的 `capture(scale,mode)`，`:198-199` 的 5 种 render 形态） | 软件栅格化，能 `capture` 出像素 | 需要浏览器或 wasm 宿主 |
 
