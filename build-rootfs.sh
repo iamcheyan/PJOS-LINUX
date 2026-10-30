@@ -45,6 +45,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   -v "$WORK":/work -v "$TOOLS":/tools:ro \
   -v "$HERE/tools/strip_gpu_module.py":/build/strip_gpu_module.py:ro \
   -v "$HERE/overlay":/overlay:ro -v "$HERE/assets":/assets:ro \
+  -v "$HERE/work/pocketjs-runtime":/pocketjs-runtime:ro \
   -e BASEOS_TARGET="$PROFILE_TARGET" \
   -e BASEOS_DEVICE="$PROFILE_BASEOS_DEVICE" \
   -e BASEOS_MODEL="$PROFILE_MODEL" \
@@ -112,7 +113,27 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   # first — the same hazard the fbsplash applet has further down.
   rm -f "$R/usr/sbin/poweroff" "$R/usr/sbin/reboot"
   cp -R /overlay/. "$R/"
-  # Target identity is generated here; the overlay contains no device-specific
+  if [ -x /pocketjs-runtime/pocket-linux-kms ]; then
+    # BaseOS ships glibc 2.35; a run-time linked against a newer glibc loads
+    # nowhere but the build host. Only a static binary survives on the card.
+    python3 - <<'PY'
+import sys
+p = "/pocketjs-runtime/pocket-linux-kms"
+d = open(p, "rb").read()
+if d[:4] != b"\x7fELF":
+    sys.exit("FATAL: PocketJS runtime is not an ELF binary")
+if int.from_bytes(d[18:20], "little") != 183:
+    sys.exit("FATAL: PocketJS runtime is not aarch64")
+if b"/lib/ld-linux" in d or b"ld-musl" in d:
+    sys.exit("FATAL: PocketJS runtime is dynamically linked; build it with "
+             "build-pocketjs-runtime-musl.sh (glibc on the card is 2.35)")
+PY
+    mkdir -p "$R/usr/share/baseos/pocketjs"
+    install -m 0755 /pocketjs-runtime/pocket-linux-kms \
+      "$R/usr/share/baseos/pocketjs/pocket-linux-kms"
+  else
+    echo "WARNING: no PocketJS runtime input; SYSTEM will not carry one" >&2
+  fi
   # model data. BASEOS_DEVICE is the frontend family, while BASEOS_TARGET is
   # the exact hardware build target. BASEOS_PANEL_ROTATION_CCW is read by
   # fbsplash, which ships as one binary for every target.
@@ -149,7 +170,6 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
             "$R/usr/sbin/baseos-config" "$R/usr/sbin/baseos-mdns" "$R/usr/sbin/h700-speaker-amp-load" \
             "$R/usr/sbin/baseos-startup-sound" \
             "$R/usr/sbin/usb-gadget-adb" "$R/usr/sbin/usb-storage-mode" \
-            "$R/usr/sbin/keyboardd-launch.sh" \
             "$R/mnt/vendor/ctrl/setBluetooth.sh" \
             "$R/usr/share/udhcpc/default.script"
   mkdir -p "$R/usr/share/baseos"
@@ -168,7 +188,6 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
            /usr/sbin/baseos-config /usr/sbin/baseos-mdns /usr/sbin/h700-speaker-amp-load \
            /usr/sbin/baseos-startup-sound \
            /usr/sbin/usb-gadget-adb /usr/sbin/usb-storage-mode \
-           /usr/sbin/keyboardd-launch.sh \
            /mnt/vendor/ctrl/setBluetooth.sh; do
     [ -x "$R$s" ] || { echo "FATAL: $s is not executable in rootfs"; exit 1; }
   done

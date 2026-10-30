@@ -57,6 +57,28 @@ seconds() {
 	printf '%d.%02d' $((sec_cs / 100)) $((sec_cs % 100))
 }
 
+# Install the runtime paired with this SYSTEM before the external frontend
+# starts. Use a same-directory temporary file and atomic rename so a power loss
+# cannot leave a truncated executable on the user's card.
+if mountpoint -q "$SD" 2>/dev/null \
+    && [ -x /usr/share/baseos/pocketjs/pocket-linux-kms ]; then
+    runtime="$SD/System/pocketjs/bin/pocket-linux-kms"
+    if [ -f "$SD/System/launch_frontend.sh" ] && [ -d "${runtime%/*}" ]; then
+        if ! cmp -s /usr/share/baseos/pocketjs/pocket-linux-kms "$runtime"; then
+            runtime_tmp="$runtime.baseos-new"
+            if cp /usr/share/baseos/pocketjs/pocket-linux-kms "$runtime_tmp" \
+                && chmod 0755 "$runtime_tmp" \
+                && cmp -s /usr/share/baseos/pocketjs/pocket-linux-kms "$runtime_tmp" \
+                && mv -f "$runtime_tmp" "$runtime"; then
+                log "installed SYSTEM-matched PocketJS evdev runtime on frontend card"
+            else
+                rm -f "$runtime_tmp"
+                log "WARNING: failed to install PocketJS runtime; keeping card copy"
+            fi
+        fi
+    fi
+fi
+
 # Which loader started this boot, and a diagnostics block when it is useful:
 # read only, at the lowest priority, once per boot, after the menu is up.
 start_diagnostics() {
@@ -229,14 +251,6 @@ if [ "$CARD_MISSING" -eq 0 ] && [ -f "$LAUNCH" ]; then
 		start_diagnostics
 	else
 		log "Frontend started again: $frontend_name$gpu_wait"
-	fi
-	# Start the input-framework backend before handing the display to the
-	# frontend. keyboardd owns the on-screen keyboard, so every app reaches it
-	# through the Input API instead of drawing its own. It is optional: a
-	# missing binary or a failed start must never delay or block the frontend,
-	# and it is skipped in USB-storage mode (that path returned above).
-	if [ -x /usr/sbin/keyboardd-launch.sh ]; then
-		/usr/sbin/keyboardd-launch.sh > /tmp/keyboardd.log 2>&1 || :
 	fi
 	if [ "$LAUNCH_TYPE" = binary ]; then
 		# Binaries use the glibc AArch64 runtime. Use the system
