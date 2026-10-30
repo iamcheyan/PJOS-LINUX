@@ -6,9 +6,9 @@ frontends. Applications never render a keyboard themselves; they call the
 layout validation, the composed value, and provider loading/switching.
 
 The full contract — endpoints, state, provider interface, capability model — is in
-[`docs/13-keyboardd-input-framework.md`](../../docs/13-keyboardd-input-framework.md).
-The provider UI lives in the separate the `pjos-keyboard` repository repository; the
-coordination and app-integration docs live in the PJOS input-framework coordination repository.
+[`docs/16-keyboardd-input-framework.md`](../../docs/16-keyboardd-input-framework.md).
+The provider UI lives in the separate `pjos-keyboard` repository; the coordination
+and app-integration docs live in the PJOS input-framework repository.
 
 ## Run
 
