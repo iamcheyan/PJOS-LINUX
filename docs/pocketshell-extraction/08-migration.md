@@ -49,7 +49,9 @@ P4 是本次迁移的核心手法：因为 Shell 今天已经能跑（BaseOS 上
 |---|---|
 | 产出 | `docs/pocketshell-extraction/01..08 + README.md` |
 | 不碰 | 源码、build、overlay、任何其他仓 |
-| 验证 | `git status --short` 为空；`git show --stat HEAD` 只含 `docs/pocketshell-extraction/` |
+| 已完成判据 | `git status --short` 为空；`git diff --name-only <base>..HEAD` 只含 `docs/pocketshell-extraction/`；分支已推送且远端 SHA 等于本地 HEAD |
+| 验证命令 | 见 §4.0 |
+| 零影响依据 | 只新增文档；无任何构建或运行时读取它 |
 | 回滚 | revert 即可，无运行时影响 |
 
 ---
@@ -217,6 +219,23 @@ P4 是本次迁移的核心手法：因为 Shell 今天已经能跑（BaseOS 上
 ## 4. 验证命令
 
 > 说明：本节命令是为**后续阶段**准备的。本阶段（M0）不执行它们；`[待建]` 标记的路径在 M1–M6 完成后才存在。凡引用现有路径的命令，已在本 worktree 里核对过文件存在性。
+
+### 4.0 M0：本阶段（可立即执行）
+
+```sh
+# 1. 只有文档新增：不得出现任何源码 / build / overlay 路径
+git diff --name-only dc99d57..HEAD | grep -v '^docs/pocketshell-extraction/' && exit 1
+
+# 2. 工作树干净
+test -z "$(git status --porcelain)"
+
+# 3. 分支已推送且远端等于本地
+test "$(git rev-parse HEAD)" = \
+     "$(GH_CONFIG_DIR=$HOME/.config/gh git ls-remote origin refs/heads/feature/pocketshell-extraction | cut -f1)"
+
+# 4. 文档自检：九个域各有签名与错误语义、接口代码块无平台词汇、表格列数一致
+bun run docs-check   # [待建] 上述三项断言的可执行版本，见 07 §2.2 与本文 §5
+```
 
 ### 4.1 M2：Shell 在 mock 上渲染
 
