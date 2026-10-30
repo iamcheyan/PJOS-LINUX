@@ -19,7 +19,21 @@ func NewServer(mgr *Manager) *Server {
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// ServeHTTP applies the CORS preflight/response headers the keyboard provider
+// needs: the provider UI (Vite dev server, PocketJS host, or a shell page) runs
+// on a different origin than keyboardd, so JSON POSTs are preflighted.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	h.Set("Access-Control-Allow-Headers", "Content-Type")
+	h.Set("Access-Control-Max-Age", "600")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.mux.ServeHTTP(w, r)
+}
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/api/health", s.health)
@@ -62,7 +76,7 @@ func (s *Server) focus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		InputID      string      `json:"inputId"`
+		InputID string `json:"inputId"`
 		ShowRequest
 	}
 	if err := decode(r, &req); err != nil {
