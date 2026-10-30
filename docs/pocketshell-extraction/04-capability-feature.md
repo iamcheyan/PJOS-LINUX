@@ -213,7 +213,7 @@ sequenceDiagram
   AD-->>RT: api, capabilities, features, limits
   RT->>RT: validate（版本、词表、三态、依赖一致性）
   alt 无效
-    RT-->>SH: reject E_INVALID_MANIFEST（附原因）
+    RT-->>SH: reject invalid（附具体原因，见 §3.8）
   else 有效
     RT->>SH: negotiate(shell.requires.json)
     SH->>SH: ok? 进入主界面 : 进入「不兼容」界面
