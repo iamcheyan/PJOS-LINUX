@@ -1,0 +1,17 @@
+#!/bin/sh
+# BaseOS exposes the usable mixer level as 'digital volume'; the PocketShell
+# bridge asks for ALSA's usual 'Master' control.
+set -u
+control=${2-}
+case "${1-}" in
+    get)
+        [ "$control" = Master ] && control="digital volume"
+        exec /bin/amixer get "$control"
+        ;;
+    set)
+        shift 2
+        [ "$control" = Master ] && control="digital volume"
+        exec /bin/amixer set "$control" "$@"
+        ;;
+esac
+exec /bin/amixer "$@"

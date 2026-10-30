@@ -1,0 +1,194 @@
+#!/bin/sh
+# PocketShell library scanner for BaseOS (BusyBox sh/awk, no Python).
+# Indexes the same content roots as the ROCKNIX scanner and writes
+# library.json with sections/games|music|videos|books.
+set -u
+STATE_DIR=${POCKETSHELL_GAMES_STATE:-/storage/pocketshell/library}
+LIBRARY=$STATE_DIR/library.json
+TAB=$(printf '\t')
+ROWS=${TMPDIR:-/tmp}/pocketshell-games.$$.rows
+SORTED=$ROWS.sorted
+trap 'rm -f "$ROWS" "$SORTED" "$LIBRARY.new"' EXIT HUP INT TERM
+: > "$ROWS"
+
+skip_dir() {
+    case "$1" in
+        .*|images|media|gamelist|downloaded_images|videos|manuals|cheats|system|saves) return 0 ;;
+    esac
+    return 1
+}
+
+allowed() {
+    section=$1
+    ext=$2
+    case "$section:$ext" in
+        games:gba|games:gbc|games:gb|games:nes|games:sfc|games:smc|games:md|games:gen|games:sms|games:gg|games:pce|games:ngp|games:ngc|games:ws|games:wsc|games:lnx|games:a26|games:a78|games:cue|games:chd|games:pbp|games:iso|games:zip|games:7z|games:cso|games:rvz|games:gcm|games:n64|games:z64|games:v64|games:nds|games:3ds|games:cia|games:xci|games:nsp|games:vb|games:min|games:col|games:int|games:pocket) return 0 ;;
+        music:mp3|music:flac|music:ogg|music:opus|music:m4a|music:aac|music:wav|music:wma|music:ape|music:dsf) return 0 ;;
+        videos:mp4|videos:mkv|videos:webm|videos:avi|videos:mov|videos:m4v|videos:ts|videos:mpg|videos:mpeg) return 0 ;;
+        books:epub|books:pdf|books:txt|books:md|books:mobi|books:azw3|books:cbz|books:cbr) return 0 ;;
+    esac
+    return 1
+}
+
+rank_for() {
+    case "$1" in
+        games) echo 1 ;;
+        music) echo 2 ;;
+        videos) echo 3 ;;
+        books) echo 4 ;;
+    esac
+}
+
+emit_file() {
+    path=$1
+    section=$2
+    group=$3
+    rank=$4
+    [ -f "$path" ] || return 0
+    base=${path##*/}
+    case "$base" in .*) return 0 ;; esac
+    lower=$(printf '%s' "$base" | tr 'A-Z' 'a-z')
+    ext=${lower##*.}
+    [ "$ext" = "$lower" ] && return 0
+    allowed "$section" "$ext" || return 0
+    title=${base%.*}
+    case "$title$path" in *"$TAB"*) return 0 ;; esac
+    size=$(wc -c < "$path" 2>/dev/null | tr -d ' ')
+    [ -n "$size" ] || size=0
+    kind=rom
+    [ "$ext" = pocket ] && kind=pocketjs
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$rank" "$section" "$group" "$title" "$path" "$size" "$kind" >> "$ROWS"
+}
+
+scan_dir() {
+    directory=$1
+    section=$2
+    group=$3
+    rank=$4
+    [ -d "$directory" ] || return 0
+    for path in "$directory"/*; do
+        [ -e "$path" ] || continue
+        emit_file "$path" "$section" "$group" "$rank"
+    done
+}
+
+scan_games_root() {
+    root=$1
+    [ -d "$root" ] || return 0
+    scan_dir "$root" games misc 1
+    for directory in "$root"/*; do
+        [ -d "$directory" ] || continue
+        name=${directory##*/}
+        skip_dir "$name" && continue
+        scan_dir "$directory" games "$name" 1
+    done
+}
+
+scan_plain() {
+    section=$1
+    rank=$2
+    shift 2
+    for root in "$@"; do
+        scan_dir "$root" "$section" all "$rank"
+    done
+    for mount in /media/*; do
+        [ -d "$mount" ] || continue
+        scan_dir "$mount/content/$section" "$section" all "$rank"
+    done
+}
+
+scan() {
+    mkdir -p "$STATE_DIR" || return 1
+    : > "$ROWS"
+    scan_games_root /storage/content/games
+    for root in /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
+        scan_games_root "$root"
+    done
+    for mount in /media/*; do
+        [ -d "$mount" ] || continue
+        scan_games_root "$mount/content/games"
+        scan_games_root "$mount/roms"
+    done
+    scan_plain music 2 /storage/content/music /storage/music /storage/roms/music
+    scan_plain videos 3 /storage/content/videos /storage/videos
+    scan_plain books 4 /storage/content/books /storage/books
+
+    LC_ALL=C sort -t "$TAB" -k1,1n -k2,2 -k3,3 -k4,4f "$ROWS" > "$SORTED"
+    generated=$(date +%s 2>/dev/null || printf '0')
+    awk -F '\t' -v generated="$generated" '
+        function esc(s, t) {
+            t = s
+            gsub(/\\/, "\\\\", t)
+            gsub(/"/, "\\\"", t)
+            gsub(/\t/, "\\t", t)
+            gsub(/\r/, "", t)
+            gsub(/\n/, "\\n", t)
+            return t
+        }
+        {
+            rank = $1; section = $2; group = $3
+            key = rank SUBSEP section SUBSEP group
+            if (!(key in count)) {
+                n++
+                order[n] = key
+                orank[n] = rank
+                osec[n] = section
+                ogrp[n] = group
+                seclist[rank] = section
+                have[section] = 1
+            }
+            count[key]++
+            cnt = count[key]
+            items[key SUBSEP cnt] = sprintf("{\"title\":\"%s\",\"path\":\"%s\",\"size\":%s,\"kind\":\"%s\"}", esc($4), esc($5), $6, $7)
+            total++
+        }
+        END {
+            printf "{\"generated\":%d,\"sections\":{", generated
+            first_section = 1
+            for (r = 1; r <= 4; r++) {
+                section = seclist[r]
+                if (section == "" || !(section in have)) continue
+                if (!first_section) printf ","
+                first_section = 0
+                printf "\"%s\":[", esc(section)
+                first_group = 1
+                for (i = 1; i <= n; i++) {
+                    if (orank[i] != r) continue
+                    if (!first_group) printf ","
+                    first_group = 0
+                    key = order[i]
+                    cnt = count[key]
+                    printf "{\"name\":\"%s\",\"count\":%d,\"items\":[", esc(ogrp[i]), cnt
+                    for (j = 1; j <= cnt; j++) {
+                        if (j > 1) printf ","
+                        printf "%s", items[key SUBSEP j]
+                    }
+                    printf "]}"
+                }
+                printf "]"
+            }
+            printf "},\"total\":%d}\n", total
+        }
+    ' "$SORTED" > "$LIBRARY.new" || return 1
+    mv "$LIBRARY.new" "$LIBRARY" || return 1
+    awk -F '\t' '
+        !seen[$2]++ { list = list (n++ ? "," : "") "\"" $2 "\"" }
+        END { printf "{\"total\":%d,\"sections\":[%s]}\n", NR, list }
+    ' "$SORTED"
+}
+
+case "${1:-scan}" in
+    scan) scan ;;
+    watch)
+        trap 'exit 0' TERM INT
+        while :; do
+            scan >/dev/null 2>&1 || :
+            sleep 10
+        done
+        ;;
+    *)
+        echo "usage: pocketshell-games scan|watch" >&2
+        exit 2
+        ;;
+esac

@@ -22,19 +22,44 @@ BUILD="$ROCKNIX/build.ROCKNIX-H700.aarch64/build/pocketjs-runtime-$VERSION"
 # the 360x240@2 profile exported from the main ROCKNIX checkout; some feature
 # worktrees carry a 720x480@1 variant that does not match it.
 PROFILE="${PJOS_PROFILE_RS:-$HOME/development/rocknix/build.ROCKNIX-H700.aarch64/build/pocketjs-runtime-e6770376626a4de5c93eaa6fb048e7e9ffb81f9f/generated/pocket_profile.rs}"
+# The PocketShell bridge (patch-runtime.py + pocketshell-*.rs) lives in the main
+# ROCKNIX checkout; feature worktrees carry only the build scripts. Pointing this
+# at a tree without it silently produced a bridge-less runtime (dead battery and
+# service status), so the path is asserted below.
+BRIDGE_SCRIPTS="${PJOS_BRIDGE_SCRIPTS:-$HOME/development/rocknix/projects/ROCKNIX/packages/apps/pocketjs-runtime/scripts}"
 CARGO_CACHE="$ROCKNIX/build.ROCKNIX-H700.aarch64/toolchain/cargo_home"
 OUT="$HERE/work/pocketjs-runtime/pocket-linux-kms"
 
 [ -f "$TARBALL" ] || { echo "missing $TARBALL" >&2; exit 1; }
+[ -f "$BRIDGE_SCRIPTS/patch-runtime.py" ] || { echo "missing $BRIDGE_SCRIPTS/patch-runtime.py (set PJOS_BRIDGE_SCRIPTS)" >&2; exit 1; }
 [ -f "$PROFILE" ] || { echo "missing profile export $PROFILE (run the host build first)" >&2; exit 1; }
 
-mkdir -p "$HERE/work/pocketjs-runtime"
+mkdir -p "$HERE/work/pocketjs-runtime" "$HERE/work/bridge-scripts"
+# Work from a copy: the committed ROCKNIX script has one doubly-escaped char
+# literal ("ends_with('\\n')"), which rustc rejects as a two-codepoint char.
+# Fixing it in a copy keeps the ROCKNIX checkout untouched.
+rm -rf "$HERE/work/bridge-scripts"
+cp -R "$BRIDGE_SCRIPTS" "$HERE/work/bridge-scripts"
+python3 - "$HERE/work/bridge-scripts/pocketshell-launcher.rs" <<'PYFIX'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+fixed = text.replace("ends_with('\\\\n')", "ends_with('\\n')")
+if fixed != text:
+    p.write_text(fixed)
+    print("normalized escaped newline literal in", p.name)
+else:
+    print("no escaped newline literal to normalize in", p.name)
+PYFIX
 
 docker run --rm --platform linux/arm64 \
-  -e DEBIAN_FRONTEND=noninteractive \
+  -e DEBIAN_FRONTEND=noninteractive -e PJOS_RUN_TESTS="${PJOS_RUN_TESTS:-0}" \
   -v "$TARBALL:/in/src.tar.gz:ro" \
   -v "$PROFILE:/in/pocket_profile.rs:ro" \
   -v "$HERE/src/apply-pocketjs-input.py:/in/apply-input.py:ro" \
+  -v "$HERE/src/apply-pocketjs-bridge.py:/in/apply-bridge.py:ro" \
+  -v "$HERE/src/pocketjs-narrow-workspace.py:/in/narrow.py:ro" \
+  -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
   -v "$CARGO_CACHE:/cargo-cache" \
   -v "$HERE/work/pocketjs-runtime:/out" \
   debian:bookworm sh -euc '
@@ -57,30 +82,17 @@ docker run --rm --platform linux/arm64 \
 
     # Same workspace narrowing the ROCKNIX recipe performs: the Linux KMS host
     # plus the bindings shim that pulls rquickjs in.
-    python3 - <<PY
-import re, tomllib
-from pathlib import Path
-root = Path("/work/src")
-lock = tomllib.loads((root / "Cargo.lock").read_text())
-quickjs = [p for p in lock["package"] if p["name"] == "rquickjs" and p.get("source", "").startswith("registry+")]
-assert len(quickjs) == 1, "expected one pinned rquickjs"
-shim = root / "programs/rocknix-bindings"
-(shim / "src").mkdir(parents=True, exist_ok=True)
-(shim / "src/lib.rs").write_text("")
-(shim / "Cargo.toml").write_text(
-    "[package]\nname = \"rocknix-pocketjs-bindings\"\nversion = \"0.0.0\"\nedition = \"2021\"\n"
-    "[dependencies]\n"
-    "rquickjs = { version = \"=" + quickjs[0]["version"] + "\", features = [\"bindgen\"] }\n")
-text = (root / "Cargo.toml").read_text()
-for key in ["members", "default-members"]:
-    text, n = re.subn(r"(?ms)^" + key + r" = \[.*?^\]",
-                      key + " = [\"programs/linux-kms\", \"programs/rocknix-bindings\"]", text, count=1)
-    assert n == 1, key
-(root / "Cargo.toml").write_text(text)
-print("workspace narrowed")
-PY
+    python3 /in/narrow.py /work/src
 
     python3 /in/apply-input.py /work/src
+
+    # The card launcher talks to the host through the PocketShell bridge
+    # (__launcher / __pocketshell: battery, volume, services, library). Building
+    # bare upstream drops it, which reads on the panel as a dead battery gauge.
+    python3 /in/rocknix-scripts/patch-runtime.py /work/src
+    python3 /in/apply-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
+    ls /work/src/engine/guest-rquickjs/src/
 
     export LIBCLANG_PATH=/usr/lib/llvm-14/lib
     export POCKETJS_PROFILE_RS=/in/pocket_profile.rs
@@ -89,15 +101,35 @@ PY
     export AR_aarch64_unknown_linux_musl=ar
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
     export RUSTFLAGS="-C target-feature=+crt-static"
+    if [ "${PJOS_RUN_TESTS:-0}" = 1 ]; then
+      echo "running pocket-linux-evdev tests"
+      cargo test --offline -p pocket-linux-evdev 2>&1 | tail -20
+    fi
+
     cargo build --release --offline \
       --manifest-path /work/src/Cargo.toml \
       --target aarch64-unknown-linux-musl \
       --package pocket-linux-kms --package rocknix-pocketjs-bindings
 
     install -m 0755 /work/target/aarch64-unknown-linux-musl/release/pocket-linux-kms /out/pocket-linux-kms
+    echo "built binary: $(stat -c %s /out/pocket-linux-kms) bytes; __launcher=$(grep -c __launcher /out/pocket-linux-kms || true)"
     file /out/pocket-linux-kms || true
   '
 
 echo
 echo "runtime: $OUT"
 sha256sum "$OUT"
+
+# Assert what the card will actually run. A bridge-less build compiles, admits
+# packages and draws the UI, so the missing host bridge only shows up later as a
+# dead battery gauge; catch it here instead.
+for marker in __launcher __pocketshell power_supply; do
+    grep -qa "$marker" "$OUT" || { echo "FATAL: runtime is missing the host bridge ($marker)" >&2; exit 1; }
+done
+if head -c 4 "$OUT" | od -An -tx1 | grep -q "7f 45 4c 46"; then :; else
+    echo "FATAL: runtime is not an ELF binary" >&2; exit 1
+fi
+if grep -qa "/lib/ld-linux" "$OUT" || grep -qa "ld-musl" "$OUT"; then
+    echo "FATAL: runtime is dynamically linked; BaseOS glibc is 2.35" >&2; exit 1
+fi
+echo "runtime checks: bridge present, static aarch64"

@@ -1,0 +1,38 @@
+#!/bin/sh
+# BaseOS replacement for the ROCKNIX heya-control used by the settings bridge.
+# Wi-Fi is only changed through an existing wpa_supplicant control socket;
+# Bluetooth is reported unsupported when bluetoothctl cannot talk to D-Bus.
+set -u
+case "${1-}" in
+    volume)
+        value=${2-}
+        case "$value" in ''|*[!0-9]*) exit 2 ;; esac
+        [ "$value" -le 100 ] || exit 2
+        exec /bin/amixer -q set "digital volume" "${value}%"
+        ;;
+    wifi)
+        state=${2-}
+        case "$state" in on|off) ;; *) exit 2 ;; esac
+        for iface in wlan0 wlan1; do
+            if wpa_cli -i "$iface" ping >/dev/null 2>&1; then
+                case "$state" in
+                    on) wpa_cli -i "$iface" reconnect >/dev/null 2>&1 ;;
+                    off) wpa_cli -i "$iface" disconnect >/dev/null 2>&1 ;;
+                esac
+                exit $?
+            fi
+        done
+        echo "wi-fi control socket unavailable" >&2
+        exit 1
+        ;;
+    bluetooth)
+        state=${2-}
+        case "$state" in on|off) ;; *) exit 2 ;; esac
+        command -v bluetoothctl >/dev/null 2>&1 || exit 1
+        bluetoothctl power "$state" >/dev/null 2>&1
+        exit 1
+        ;;
+    *)
+        exit 2
+        ;;
+esac

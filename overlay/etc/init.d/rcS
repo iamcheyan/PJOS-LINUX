@@ -387,6 +387,14 @@ if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-startup-sound ]; then
 	/usr/sbin/baseos-startup-sound </dev/null >/run/startup-sound.log 2>&1 &
 fi
 
+# Dim the panel after a period without input (default 30 s). Only the
+# backlight is written: nothing is suspended or stopped, so playback, downloads
+# and the frontend keep running while the screen is dark. Any keypress restores
+# the saved level.
+if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-screen-idle ]; then
+	/usr/sbin/baseos-screen-idle </dev/null >/dev/null 2>&1 &
+fi
+
 # Dev image extras (serial getty is in inittab; this starts SSH).
 [ -x /etc/init.d/dev ] && /etc/init.d/dev &
 

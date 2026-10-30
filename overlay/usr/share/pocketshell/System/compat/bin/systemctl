@@ -1,0 +1,28 @@
+#!/bin/sh
+# BaseOS has no systemd. Implement only the probes the PocketShell bridge uses.
+set -u
+case "${1-}" in
+    is-active)
+        case "${2-}" in
+            ssh.service|dropbear.service)
+                pidof dropbear >/dev/null 2>&1 && { echo active; exit 0; }
+                exit 3
+                ;;
+            adbd.service|adbusb.service)
+                pidof adbd >/dev/null 2>&1 && { echo active; exit 0; }
+                exit 3
+                ;;
+            *)
+                exit 3
+                ;;
+        esac
+        ;;
+    try-restart)
+        # No sleep daemon exists on BaseOS; the setting is persisted by the
+        # launcher bridge and there is nothing to restart.
+        exit 0
+        ;;
+    *)
+        exit 2
+        ;;
+esac

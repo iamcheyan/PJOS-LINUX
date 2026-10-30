@@ -50,8 +50,15 @@ mkdir -p "$dst"
 if mount -t vfat -o rw "$CARD" "$dst" 2>/dev/null; then
 	[ -f "$README" ] && cp "$README" "$dst/README.txt"
 	[ -f /usr/share/baseos/baseos.conf ] && cp /usr/share/baseos/baseos.conf "$dst/baseos.conf"
+	if [ -d /usr/share/pocketshell/System ]; then
+		cp -a /usr/share/pocketshell/System "$dst/System"
+	fi
 	sync
 	umount "$dst" 2>/dev/null
 fi
 
-log "storage expanded to fill the card; empty and ready for a frontend"
+if [ -d /usr/share/pocketshell/System ]; then
+	log "storage expanded; baked PocketJS System/ copied to the card"
+else
+	log "storage expanded to fill the card; empty and ready for a frontend"
+fi

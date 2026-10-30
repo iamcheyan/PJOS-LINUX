@@ -1,0 +1,138 @@
+#!/bin/sh
+# Turn the panel backlight off after a period without input, and restore it on
+# the next keypress. Only the backlight is touched: nothing is suspended,
+# unmounted, throttled or stopped, so playback, downloads and the frontend keep
+# running while the screen is dark.
+#
+# Configuration, in this order of precedence:
+#   /storage/.config/baseos/screen-idle.conf   timeout = 30s      (BaseOS)
+#   /storage/.config/pocketjs/runtime.conf     [sleep] timeout=30s (launcher UI)
+# Accepted values are the launcher's own vocabulary: never, 10s, 30s, 1m, 5m,
+# 15m, 30m, 1h. With no configuration at all the default is 30 seconds, so a
+# fresh card behaves like a phone instead of staying lit forever.
+#
+# BaseOS has no /sys/class/backlight: the vendor kernel exposes panel brightness
+# through the display attribute node. The path is probed rather than assumed so
+# a kernel that moves it degrades to "no blanking" instead of writing garbage.
+set -u
+
+STAMP=/run/screen-idle.stamp
+LOG=/tmp/baseos-screen-idle.log
+DEFAULT_TIMEOUT=30s
+# Candidate backlight nodes, most specific first.
+BACKLIGHT_NODES="
+/sys/class/disp/disp/attr/enhance_bright
+/sys/class/disp/disp/attr/lcd_bright
+"
+
+log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >>"$LOG" 2>/dev/null || :; }
+
+seconds() {
+    case "$1" in
+    never|off|none) echo 0 ;;
+    *s) echo "${1%s}" ;;
+    *m) echo $(( ${1%m} * 60 )) ;;
+    *h) echo $(( ${1%h} * 3600 )) ;;
+    ''|*[!0-9]*) echo 30 ;;
+    *) echo "$1" ;;
+    esac
+}
+
+configured_timeout() {
+    value=
+    if [ -r /storage/.config/baseos/screen-idle.conf ]; then
+        value=$(sed -n 's/^[[:space:]]*timeout[[:space:]]*=[[:space:]]*//p' \
+            /storage/.config/baseos/screen-idle.conf | head -1)
+    fi
+    if [ -z "$value" ] && [ -r /storage/.config/pocketjs/runtime.conf ]; then
+        value=$(awk '
+            /^\[/ { section = $0 }
+            section == "[sleep]" && /timeout[[:space:]]*=/ {
+                sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+            }' /storage/.config/pocketjs/runtime.conf)
+    fi
+    [ -n "$value" ] || value=$DEFAULT_TIMEOUT
+    seconds "$value"
+}
+
+find_backlight() {
+    for node in $BACKLIGHT_NODES; do
+        [ -w "$node" ] && { echo "$node"; return 0; }
+    done
+    for node in /sys/class/backlight/*/brightness; do
+        [ -w "$node" ] && { echo "$node"; return 0; }
+    done
+    return 1
+}
+
+BL=$(find_backlight) || { log "no writable backlight node; idle blanking disabled"; exit 0; }
+log "backlight node: $BL"
+
+# Read the resting level once. Never restore to 0: a saved 0 would leave the
+# panel dark after the first wake.
+saved=$(cat "$BL" 2>/dev/null || echo 0)
+case "$saved" in ''|*[!0-9]*) saved=0 ;; esac
+if [ "$saved" -eq 0 ]; then
+    max=$(cat "$(dirname "$BL")/max_brightness" 2>/dev/null || echo 255)
+    case "$max" in ''|*[!0-9]*) max=255 ;; esac
+    saved=$(( max > 1 ? max / 2 : 1 ))
+fi
+log "resting level: $saved"
+
+touch "$STAMP" 2>/dev/null || : >"$STAMP"
+
+# One blocking reader per input device: each 24-byte input_event that arrives
+# refreshes the idle stamp. evdev allows several readers, so this does not steal
+# events from the runtime.
+spawn_readers() {
+    for dev in /dev/input/event*; do
+        [ -e "$dev" ] || continue
+        case " $READERS " in *" $dev "*) continue ;; esac
+        (
+            while :; do
+                timeout 3600 dd if="$dev" bs=24 count=1 of=/dev/null 2>/dev/null
+                touch "$STAMP" 2>/dev/null || :
+            done
+        ) &
+        READERS="$READERS $dev"
+        log "watching $dev"
+    done
+}
+
+READERS=
+spawn_readers
+
+blanked=0
+while :; do
+    timeout=$(configured_timeout)
+    if [ "$timeout" -le 0 ]; then
+        if [ "$blanked" = 1 ]; then
+            printf '%s\n' "$saved" >"$BL" 2>/dev/null
+            blanked=0
+            log "blanking disabled; panel restored"
+        fi
+        sleep 5
+        continue
+    fi
+
+    # Track manual brightness changes so waking restores what the user chose,
+    # not the level captured at boot.
+    if [ "$blanked" = 0 ]; then
+        current=$(cat "$BL" 2>/dev/null | awk '{print $1}')
+        case "$current" in ''|*[!0-9]*) ;; *) [ "$current" -gt 0 ] && saved=$current ;; esac
+    fi
+
+    last=$(stat -c %Y "$STAMP" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    idle=$(( now - last ))
+
+    if [ "$blanked" = 0 ] && [ "$idle" -ge "$timeout" ]; then
+        printf '0\n' >"$BL" 2>/dev/null && { blanked=1; log "panel off after ${idle}s idle"; }
+    elif [ "$blanked" = 1 ] && [ "$idle" -lt "$timeout" ]; then
+        printf '%s\n' "$saved" >"$BL" 2>/dev/null && { blanked=0; log "panel on after input"; }
+    fi
+
+    # Pick up devices plugged in after boot.
+    [ $(( now % 30 )) -lt 2 ] && spawn_readers
+    sleep 1
+done

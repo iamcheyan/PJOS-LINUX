@@ -1,0 +1,6 @@
+Runtime source: inputs/pocket-linux-kms
+Runtime SHA-256: 441b37bb9788ed1239924866fb3fb068a3a8d4842b6e207620ae117c06d15096
+Launcher package source: inputs/boot.pocket
+Launcher package size: 4084728 bytes
+Launcher package SHA-256: d2836f45e0221dd0de1525a38324cc56f0915282fb864cc74570e707dfa93ee2
+Package profile: rocknix-h700-kms; verify admission on target

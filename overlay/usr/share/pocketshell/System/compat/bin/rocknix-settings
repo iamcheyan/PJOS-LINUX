@@ -1,0 +1,26 @@
+#!/bin/sh
+# BaseOS has no /sys/class/backlight. Its vendor display driver exposes a
+# writable brightness/enhancement node; use it rather than inventing a value.
+set -u
+node=/sys/class/disp/disp/attr/enhance_bright
+value=
+args=$*
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --value)
+            shift
+            value=${1-}
+            ;;
+    esac
+    shift
+done
+case "$args" in
+    *brightness*) ;;
+    *) exit 2 ;;
+esac
+case "$value" in ''|*[!0-9]*) exit 2 ;; esac
+[ "$value" -ge 0 ] && [ "$value" -le 100 ] || exit 2
+[ -w "$node" ] || exit 1
+printf '%s\n' "$value" > "$node" 2>/dev/null
+readback=$(awk '{print $1}' "$node" 2>/dev/null)
+[ "$readback" = "$value" ] || exit 1

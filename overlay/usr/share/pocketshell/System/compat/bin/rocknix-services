@@ -1,0 +1,52 @@
+#!/bin/sh
+# BaseOS has no rocknix-services. Map the keys the PocketShell UI uses to
+# actual processes; refuse changes that would cut the active ADB/USB session.
+set -u
+
+is_on() {
+    case "$1" in
+        ssh.enabled) pidof dropbear >/dev/null 2>&1 ;;
+        adbusb.enabled|adbd.enabled) pidof adbd >/dev/null 2>&1 ;;
+        avahi.enabled) pidof avahi-daemon >/dev/null 2>&1 ;;
+        *) return 2 ;;
+    esac
+}
+
+case "${1-}" in
+    status)
+        key=${2-}
+        if is_on "$key"; then
+            printf '%s=1\n' "$key"
+        elif [ "$?" -eq 2 ]; then
+            printf '%s=unknown\n' "$key"
+        else
+            printf '%s=0\n' "$key"
+        fi
+        ;;
+    toggle)
+        key=${2-}
+        case "$key" in
+            ssh.enabled)
+                if pidof dropbear >/dev/null 2>&1; then
+                    killall dropbear 2>/dev/null || exit 1
+                else
+                    /usr/sbin/dropbear \
+                        -r /data/dropbear/dropbear_rsa_host_key \
+                        -r /data/dropbear/dropbear_ed25519_host_key -B || exit 1
+                fi
+                if is_on "$key"; then printf '%s=1\n' "$key"; else printf '%s=0\n' "$key"; fi
+                ;;
+            adbusb.enabled|adbd.enabled)
+                echo "refusing to toggle the active ADB transport" >&2
+                exit 1
+                ;;
+            *)
+                echo "service is unsupported on BaseOS" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        exit 2
+        ;;
+esac

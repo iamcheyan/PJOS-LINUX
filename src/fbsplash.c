@@ -608,7 +608,7 @@ static void render(uint8_t *fb, struct fb_var_screeninfo *vp, struct fb_fix_scre
 		int size = clampi((int)(H * 0.085), 18, 200);
 		FT_Set_Pixel_Sizes(face, 0, size);
 		int tracking = (int)(size * 0.34);
-		int wordw = ft_measure(face, "BASE OS", tracking);
+		int wordw = ft_measure(face, "PJOS LINUX", tracking);
 		int wx = (W - wordw) / 2;
 		int baseline = (int)(H * 0.44 + size * 0.35);
 		int ramp = clampi((int)(size * 0.55), 1, 400);
@@ -620,7 +620,7 @@ static void render(uint8_t *fb, struct fb_var_screeninfo *vp, struct fb_fix_scre
 		int reveal_start = wx + firstw + ramp / 2;
 		int reveal_end = wx + wordw + ramp / 2;
 		int reveal_x = reveal_start + (int)((double)prog / 100.0 * (reveal_end - reveal_start));
-		ft_draw(fb, &v, &f, face, "BASE OS", wx, baseline, tracking, reveal_x, ramp, dim, bright);
+		ft_draw(fb, &v, &f, face, "PJOS LINUX", wx, baseline, tracking, reveal_x, ramp, dim, bright);
 
 		// Optional status/error message (solid dim, centred below).
 		if (msg && strcmp(msg, "\xE2\x9C\x93") == 0) {
@@ -637,8 +637,8 @@ static void render(uint8_t *fb, struct fb_var_screeninfo *vp, struct fb_fix_scre
 	} else {
 		// Bitmap fallback: wordmark bright + optional message, no illumination.
 		int scale = W < 600 ? 4 : 5;
-		int tw = (int)strlen("BASE OS") * 6 * scale - scale;
-		bmp_text(fb, &v, &f, (W - tw) / 2, (int)(H * 0.42), "BASE OS", scale, make_pixel(&v, 0xEA, 0xF0, 0xF0));
+		int tw = (int)strlen("PJOS LINUX") * 6 * scale - scale;
+		bmp_text(fb, &v, &f, (W - tw) / 2, (int)(H * 0.42), "PJOS LINUX", scale, make_pixel(&v, 0xEA, 0xF0, 0xF0));
 		if (msg && strcmp(msg, "\xE2\x9C\x93") == 0) {
 			draw_check(fb, &v, &f, msgcol);
 		} else if (msg) {
