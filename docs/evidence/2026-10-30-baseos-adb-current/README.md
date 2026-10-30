@@ -1,40 +1,44 @@
-# BaseOS / PocketJS ADB 现场取证（2026-10-30）
+# BaseOS / PocketJS 界面截图集（2026-10-30）
 
-本目录是在 RG34XX 当前连接状态下经 HX90 的 ADB 读取所得，跳过 M6 的 TF 卡刷写/首启验证；未写入设备存储或系统分区。
+设备：RG34XX / BaseOS 1.4.0。跳过 M6 的 TF 卡刷写/首启验证。本目录含 1 张本次 ADB 新抓截图，以及 6 张此前已存于仓库的历史截图；后 6 张仅为集中浏览而复制到此处，不冒充本次重新抓取。
 
 ## 本次新抓取
 
-- [`01-library-current.png`](01-library-current.png)：从设备 `/dev/fb0` 读取的当前画面，裁出可见的 720×480 面板区域。显示 PocketJS 启动器的 Apps 页面，顶部为 `WS 1/5 HOME`，列表显示 GAMES 3、MUSIC 1、VIDEOS 1，并选中“今すぐスキャン”。这是设备实际 framebuffer 截图，不是重绘图。
-- [`raw/framebuffer-720x960-bgra.raw.gz`](raw/framebuffer-720x960-bgra.raw.gz)：原始 framebuffer 数据（解压后 720×960、32bpp、BGRA），保留供复核。
+### 01 · Apps 当前画面
 
-## 同次 ADB 观测
+![Apps 当前画面](01-apps-current.png)
 
-- 设备：BaseOS 1.4.0，目标 RG34XX；内核 4.9.170（来自 `/etc/baseos-release` 与运行时信息）。
-- ADB：HX90 上 `adb devices -l` 显示目标为 `device`。
-- 启动器：`launch_frontend.sh` 与 `pocket-linux-kms` 进程正在运行；启动日志显示包准入成功，运行时因无 DRM 节点回退至 `/dev/fb0`，报告 `display: fbdev (timer pacing)`。
-- Apps 页面列出 6 项；本次未触发扫描、启动游戏或改变设置。
-- 尝试用 ADB 输入事件切换页面时画面没有变化，因此本次不把重复帧冒充成其他页面，也未能重新抓到 HOME、Settings、System 等页面。
+由 HX90 上 ADB 从设备 `/dev/fb0` 直接读取，显示 `WS 1/5 HOME`、Apps 列表和“今すぐスキャン”。原始 framebuffer：[BGRA 720×960](raw/framebuffer-720x960-bgra.raw.gz)；可见屏幕区域为 720×480。没有触发扫描、启动游戏或改变设置。
 
-## 同一仓库中的其他页面图（历史取证，不是本次重抓）
+## 其他界面（既有历史截图）
 
-以下直接预览此前保存在仓库的不同界面；这是已有证据，仅用于让页面集中可看，不声称本次重新采集。图片的可视内容优先于旧 README 的文件名描述：
+### 02 · HOME / Terminal 卡片选中
+![HOME](02-home-terminal.png)
 
-### HOME 启动器
+### 03 · Settings / Brightness
+![设置亮度](03-settings-brightness.png)
 
-![HOME 卡片页](../2026-10-30-baseos-first-boot/01-home-cards.png)
+### 04 · Settings / Volume
+![设置音量](04-settings-volume.png)
 
-### Settings 设置页（亮度/音量）
+### 05 · System Overview（含当时设备遥测值）
+![系统概览](05-system-overview-live.png)
 
-![设置页真实值](../2026-10-30-baseos-first-boot/04-settings-real-values.png)
+### 06 · System Overview（数值尚未填充的另一帧）
+![系统概览占位状态](06-system-overview-placeholder.png)
 
-![设置页音量选择](../2026-10-30-baseos-first-boot/06-settings-volume.png)
+### 07 · HOME（旧证据 README 标注为重启后）
+![重启后 HOME 历史截图](07-home-after-reboot.png)
 
-### System 系统概览
+02–07 取自仓库之前的 `docs/evidence/2026-10-30-baseos-first-boot/` 截图；只集中收录，不代表本次重拍或重新验证。05 含目标掌机当时的 CPU、内存、存储等遥测，不含 HX90 的运行数据。
 
-![系统概览](../2026-10-30-baseos-first-boot/05-system-overview.png)
+## 本次设备状态
 
-旧目录还含有其他原始截帧：[`2026-10-30-baseos-first-boot/`](../2026-10-30-baseos-first-boot/README.md)。注意其中部分画面包含设备遥测信息，截图并非本次重采，也没有在本次重新核验。
+- HX90 上 `adb devices -l` 显示 RG34XX 为 `device`。
+- BaseOS 1.4.0，内核 4.9.170。
+- `launch_frontend.sh` 与 `pocket-linux-kms` 进程运行中；日志显示无 DRM 节点，回退至 `/dev/fb0`，`display: fbdev (timer pacing)`。
+- 尝试通过 ADB 对现有输入节点发送方向键/PageDown，界面没有变化；因此本次无法重新切换并抓取其他工作区。
 
 ## 采集边界
 
-本次只读 ADB 查询与 framebuffer 读取；没有执行 `dd`、刷写、安装、`adb push` 到设备或修改 TF 卡。尝试向现有 evdev 节点发送方向键/PageDown 没有改变界面，因此没有把重复帧冒充成不同页面。M6 物理卡验证仍跳过。
+本次只读 ADB 查询及 framebuffer 读取；没有执行 `dd`、刷写、安装、向设备 `adb push` 或修改 TF 卡/系统分区。M6 物理卡验证仍跳过。
