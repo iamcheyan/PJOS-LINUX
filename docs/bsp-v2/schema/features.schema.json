@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pjos.local/schema/features-1.json",
+  "title": "PJOS Feature Set",
+  "description": "Generated at build time from board.json + soc.json. See docs/bsp-v2/05-feature.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "board", "soc", "bitmask_version", "features"],
+  "properties": {
+    "schema": { "const": "pjos.features/1" },
+    "board": { "type": "string" },
+    "soc": { "type": "string" },
+    "verified": { "type": "boolean" },
+    "bitmask_version": { "const": 1 },
+    "bitmask_order": {
+      "description": "Authoritative bit order for the bitmask encoding. Append-only. See docs/bsp-v2/05-feature.md §6.2.",
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 30,
+      "prefixItems": [
+        { "const": "bt_sink" },
+        { "const": "bt_source" },
+        { "const": "audio_hw_volume" },
+        { "const": "audio_hw_mute" },
+        { "const": "display_rotation" },
+        { "const": "display_output_switch" },
+        { "const": "suspend" },
+        { "const": "rtc_alarm" },
+        { "const": "usb_storage_export" },
+        { "const": "usb_adb" },
+        { "const": "usb_host_input" },
+        { "const": "wifi_ap" }
+      ],
+      "items": { "type": "string" }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": { "enum": ["yes", "no", "unknown"] },
+      "required": [
+        "bt_sink", "bt_source", "audio_hw_volume", "audio_hw_mute",
+        "display_rotation", "display_output_switch", "suspend", "rtc_alarm",
+        "usb_storage_export", "usb_adb", "usb_host_input", "wifi_ap"
+      ]
+    }
+  }
+}
