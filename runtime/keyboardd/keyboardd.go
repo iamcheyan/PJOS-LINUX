@@ -31,11 +31,11 @@ var Phase1Layouts = map[Layout]bool{
 // ReservedLayouts are names reserved for future implementations
 // (search/password/emoji/voice/ai). Phase 1 rejects them with 501.
 var ReservedLayouts = map[Layout]bool{
-	"search": true,
+	"search":   true,
 	"password": true,
-	"emoji":  true,
-	"voice":  true,
-	"ai":     true,
+	"emoji":    true,
+	"voice":    true,
+	"ai":       true,
 }
 
 // Capability describes an available input hardware class. Selection is driven by
@@ -43,9 +43,9 @@ var ReservedLayouts = map[Layout]bool{
 type Capability string
 
 const (
-	CapTouch           Capability = "Touch"
-	CapDPad            Capability = "DPad"
-	CapGamepad         Capability = "Gamepad"
+	CapTouch            Capability = "Touch"
+	CapDPad             Capability = "DPad"
+	CapGamepad          Capability = "Gamepad"
 	CapHardwareKeyboard Capability = "HardwareKeyboard"
 )
 
@@ -88,12 +88,12 @@ type State struct {
 
 // ShowRequest is the payload for show/focus requests.
 type ShowRequest struct {
-	Layout       Layout        `json:"layout"`
-	Value        string        `json:"value"`
-	Placeholder  string        `json:"placeholder"`
-	Secure       bool          `json:"secure"`
-	Capabilities []Capability  `json:"capabilities"`
-	Theme        Theme         `json:"theme"`
+	Layout       Layout         `json:"layout"`
+	Value        string         `json:"value"`
+	Placeholder  string         `json:"placeholder"`
+	Secure       bool           `json:"secure"`
+	Capabilities []Capability   `json:"capabilities"`
+	Theme        Theme          `json:"theme"`
 	Options      map[string]any `json:"options"`
 }
 

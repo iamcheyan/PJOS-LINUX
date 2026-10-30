@@ -10,9 +10,9 @@ type StubProvider struct {
 
 // ProviderEvent is a recorded provider hook invocation.
 type ProviderEvent struct {
-	Kind  string `json:"kind"` // show|hide|key|submit
-	Key   string `json:"key,omitempty"`
-	Value string `json:"value,omitempty"`
+	Kind   string `json:"kind"` // show|hide|key|submit
+	Key    string `json:"key,omitempty"`
+	Value  string `json:"value,omitempty"`
 	Layout Layout `json:"layout,omitempty"`
 }
 
@@ -50,7 +50,7 @@ func (p *StubProvider) Events() []ProviderEvent {
 
 // memStore is the default in-memory Store. Safe for dev/tests.
 type memStore struct {
-	st State
+	st  State
 	set bool
 }
 

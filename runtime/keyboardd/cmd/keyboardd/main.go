@@ -3,8 +3,9 @@
 // Desktop Debug Mode (no full PJOS required).
 //
 // Env:
-//   KEYBOARDD_ADDR  listen address (default 127.0.0.1:8787)
-//   KEYBOARDD_DB    sqlite path (opt-in; requires -tags sqlite). Empty = in-memory.
+//
+//	KEYBOARDD_ADDR  listen address (default 127.0.0.1:8787)
+//	KEYBOARDD_DB    sqlite path (opt-in; requires -tags sqlite). Empty = in-memory.
 package main
 
 import (

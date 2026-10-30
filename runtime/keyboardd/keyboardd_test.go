@@ -80,11 +80,13 @@ func TestKeyCompositionAndControls(t *testing.T) {
 			t.Fatalf("key %q: %v", k, err)
 		}
 	}
-	run("h"); run("i")
+	run("h")
+	run("i")
 	if st := m.State(); st.Value != "hi" {
 		t.Fatalf("value: %q", st.Value)
 	}
-	run("space"); run("A")
+	run("space")
+	run("A")
 	if v := m.State().Value; v != "hi A" {
 		t.Fatalf("value: %q", v)
 	}
