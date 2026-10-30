@@ -17,7 +17,7 @@
 | A4 | **不做平台分支**：API 里没有 `platform` 字段可供 Shell 读取 | issue 要求「PocketShell 永远不知道自己运行在哪个平台」 |
 | A5 | **不推断**：任何「有没有 / 能不能」都必须来自 Capability/Feature 查询 | issue 原文「PocketShell 不允许推断，必须查询」 |
 | A6 | **超时与取消是契约的一部分** | 今天没有超时语义，只有外层的 `timeout 2` |
-| A7 | **数值单位统一**：百分比 0–100 整数；时间毫秒；字节；坐标是**逻辑像素** | 今天的 `LEVEL\tip` 返回 `"iface|addr"`、`SYSTEM` 返回 18 个制表符字段（`PKT/.../pocketshell_launcher.rs:135-187`），全靠 Shell 自己 `split` |
+| A7 | **数值单位统一**：百分比 0–100 整数；时间毫秒；字节；坐标是**逻辑像素** | 今天的 `LEVEL\tip` 返回 `"iface\|addr"`、`SYSTEM` 返回 18 个制表符字段（`PKT/.../pocketshell_launcher.rs:135-187`），全靠 Shell 自己 `split` |
 
 ### 0.1 命名空间总览
 

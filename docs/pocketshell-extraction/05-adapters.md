@@ -63,7 +63,7 @@ Runtime 加载时执行（顺序固定，遇错即停）：
 | 1 | `api` 与 Runtime 主版本相等 | `version` |
 | 2 | `capabilities` 的键都在 API 词表内，值都是三态字面量 | `invalid` |
 | 3 | `features` 的键都在 API 词表内，值都是 Feature 三态字面量 | `invalid` |
-| 4 | 每个 feature 的依赖 Capability 不为 `no`；为 `unknown` 时 feature 必须为 `unknown` | `invalid` / 降级（见 04 §3.8） |
+| 4 | 每个 feature 的依赖（Capability 与 Feature）都已注册、依赖图无环；Capability 为 `no` 时拒绝；依赖不满足时降级 | `invalid` / 降级（见 04 §3.8） |
 | 5 | `limits` 各字段为正整数（`maxTextSessions` 允许 ≥1） | `invalid` |
 | 6 | 若给了 `pocketProfile`：通过 PocketJS 的 `validatePocketProfile`，且其 `capabilities` ⊆ 映射表从我们的 Capability 生成的集合 | `invalid` |
 
@@ -182,7 +182,7 @@ BaseOS Adapter 需要一个新的启动形态（设计，不实现）：
 | 电量 | `/sys/class/power_supply/*`（`PKT/...:201-221`） |
 | 音量 | `amixer` / `pactl`（`launcher.rs:18-24`） |
 | 服务开关 | `rocknix-services {list,status,start,stop,toggle,set}`（`RNX projects/ROCKNIX/packages/rocknix/sources/scripts/rocknix-services:22`） |
-| 音量/亮度/无线写 | `heya-control {volume|brightness|wifi|bluetooth} VALUE`（`RNX projects/ROCKNIX/packages/apps/heya/scripts/heya-control:8-37`） |
+| 音量/亮度/无线写 | `heya-control` 的 `volume` / `brightness` / `wifi` / `bluetooth` 四个子命令（`RNX projects/ROCKNIX/packages/apps/heya/scripts/heya-control:8-37`） |
 | 内容区 | `/storage/*`，`/storage/roms` 等（`RNX docs/platform-audit.md` 的路径表） |
 | 休眠/背光 | `pocketjs-sleep`（Python） |
 | 应用启动 | `pocketjs-native-launch` → `/usr/bin/heya-tool`、`/usr/bin/disk-browser`、`/usr/bin/xmplayer` + `pocket-session-run`（`systemd-run`） |

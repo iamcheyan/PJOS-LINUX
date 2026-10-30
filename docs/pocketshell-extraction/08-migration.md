@@ -167,29 +167,45 @@ P4 是本次迁移的核心手法：因为 Shell 今天已经能跑（BaseOS 上
 
 ### M7 — 写域逐域切换
 
+| 项 | 内容 |
+|---|---|
+| 新增 | 每个子步把 Shell 的一处写操作改为 `pocket.platform.*`，并删除对应的旧桥分支 |
+| 不碰 | 其他域的写路径；平台启动序；unit 文件 |
+| 已完成判据 | 每个子步「旧值 → 新值 → 读回值」三方一致；不可逆动作有独立评审 |
+| 验证命令 | 见 §4.7（逐子步命令） |
+| 零影响依据 | 每子步只替换一处写路径，其余域仍走旧实现；回滚 = revert 该子步 |
+
 每个写操作独立成一个 PR，顺序按风险从低到高：
 
-| 子步 | 域方法 | 风险 | 理由 |
-|---|---|---|---|
-| M7a | `display.setBrightness` | 低 | 失败只影响亮度 |
-| M7b | `audio.setVolume` / `setMuted` | 低 | |
-| M7c | `display.setOn` / `power.screenOff` | 中 | 屏幕黑了要有恢复路径 |
-| M7d | `network.setWifiEnabled` | 中 | 断网后无法远程调试 |
-| M7e | `power.setIdlePolicy` | 中 | 影响 `pocketjs-sleep` 的存废 |
-| M7f | `power.suspend` / `reboot` / `shutdown` | 高 | 不可逆动作 |
+| 子步 | 域方法（新） | 旧实现（读回用） | 风险 | 理由 |
+|---|---|---|---|---|
+| M7a | `display.setBrightness` | `CONTROL\tbrightness\t<n>` → `heya-control brightness`（`pocketshell-launcher.rs:37-46`） | 低 | 失败只影响亮度 |
+| M7b | `audio.setVolume` / `setMuted` | `CONTROL\tvolume\t<n>` → `heya-control volume`；读回走 `amixer get Master` | 低 | 音量可反复调 |
+| M7c | `display.setOn` / `power.screenOff` | 无旧实现（今天只有 `pocketjs-sleep` 的定时调暗） | 中 | 屏幕黑了要有恢复路径 |
+| M7d | `network.setWifiEnabled` | `CONTROL\twifi\ton\|off` → `heya-control wifi` | 中 | 断网后无法远程调试 |
+| M7e | `power.setIdlePolicy` | `SLEEP\t<token>` 写 `runtime.conf` 的 `[sleep] timeout`（`pocketshell-launcher.rs:53-88`）并 `try-restart pocketjs-sleep.service` | 中 | 影响 `pocketjs-sleep` 的存废 |
+| M7f | `power.suspend` / `reboot` / `shutdown` | 无旧实现（休眠由守护进程与 `/sys/power/state` 直接触发） | 高 | 不可逆动作 |
 
-每个子步的验证：**先旧后新**——旧实现执行一次，读回值；新实现执行一次，读回值；两者一致才算通过。对不可逆动作（M7f），先只做 `setAlarm/clearAlarm`（可逆），再单独评估 `suspend`。
+每个子步的验证一律「先旧后新」：旧实现执行一次并读回，新实现执行一次并读回，两者一致才算通过。对不可逆动作（M7f），先在 M7f-1 里只做 `setAlarm`/`clearAlarm`（可逆），再单独评估 `suspend`。
 
 ---
 
 ### M8 — 删除旧物
+
+| 项 | 内容 |
+|---|---|
+| 产出 | 逐项删除旧物，每项独立一个 PR |
+| 不碰 | 平台启动序与 unit 文件（除非该项本身就是 unit） |
+| 已完成判据 | 每一项的前置条件成立，且删除后所有 CI（含 [07](07-mock-and-tests.md) 的 T0–T3）仍全绿 |
+| 验证命令 | 见各行的 grep 判据；每项删完后重跑 `bun test` 与 `sh scripts/leak-check.sh` |
+| 零影响依据 | 删除项在删除前已无调用者（由「证据」列的 grep 证明） |
 
 | 删除项 | 前置条件 | 证据 |
 |---|---|---|
 | `scripts/patch-runtime.py` 的桥注入（`:34-52`） | M5 完成且 Shell 不再调 `__launcher`/`__library`/`__pocketshell` | `grep -r '__launcher\|__library\|__pocketshell' pocket-shell/` 零命中 |
 | `pocketshell-launcher.rs` | M4/M5 | 同上 |
 | `pocketshell-library.rs` | M5（Storage 域接管） | 同上 |
-| BaseOS 的 compat shim（`docs/13` §3 提到的 `rocknix-services`/`heya-control`/`systemctl` 等价物） | M3 + M5 | `grep -r 'rocknix-' <shell>` 零命中 |
+| BaseOS 的 compat shim（`docs/13-pocketjs-on-baseos.md:57` 规划的 `rocknix-services`/`heya-control`/`systemctl`/`pocketshell-games`/`pocketshell-play` 等价物） | M3 + M5 | `grep -r 'rocknix-\|heya-' <shell>` 零命中 |
 | `pocketjs-sleep`（Python） | M7e | Power 域的 `setIdlePolicy` 有真机证据 |
 | `pocketshell-dev` 的 `#[path]` 引入（`tools/pocketshell-dev/src/main.rs:21-22`） | M2（dev host 改用 mock/API） | `grep '#\[path' tools/pocketshell-dev/src` 零命中 |
 | `hello/` 的旧副本（`RNX .../pocketjs-runtime/hello/`） | M2（源码已在 `pocket-shell`） | rocknix 侧只剩包配方与 Adapter |
@@ -342,6 +358,40 @@ bun run compat diff /tmp/compat/baseos /tmp/compat/rocknix
 bun run compat diff /tmp/compat/rocknix /tmp/compat/android
 #   期望：D1 = 100%；差异逐条落台账
 ```
+
+### 4.7 M7：写域逐子步
+
+每个子步都跑同一套「旧→新→读回」，只换被测的那一个写入点。以 M7a（亮度）为例：
+
+```sh
+# 设备侧通用前导
+dev() { adb shell "$@"; }
+
+# 1. 旧实现写一次，读回（路径与今天完全相同，见 01 §2.1）
+dev 'heya-control brightness 40'                      # 或 compat shim 的等价物
+old=$(dev 'cat /sys/class/backlight/*/brightness | head -n1')
+
+# 2. 新实现写同一个值
+dev '<runtime> --platform-call display.setBrightness 40'
+new=$(dev 'cat /sys/class/backlight/*/brightness | head -n1')
+
+# 3. 断言：两条路径对同一个输入产生同一个硬件读数
+[ "$old" = "$new" ] || { echo "MISMATCH old=$old new=$new"; exit 1; }
+```
+
+| 子步 | 写入点 | 读回点 | 期望 |
+|---|---|---|---|
+| M7a | `heya-control brightness N` vs `display.setBrightness(N)` | 背光 `brightness` 原始值 | 两次读数相同 |
+| M7b | `heya-control volume N` vs `audio.setVolume(N)` | `amixer get Master` 的百分比 | 两次百分比相同 |
+| M7c | 无旧实现 | `display.snapshot().on` / 面板是否点亮 | 关闭后再打开，`on` 回到 true |
+| M7d | `heya-control wifi on\|off` vs `network.setWifiEnabled` | `network.wifiState().enabled` + `wlan0` operstate | 状态一致；关闭后仍能通过串口/本地控制台恢复 |
+| M7e | `SLEEP <token>` vs `power.setIdlePolicy` | `power.idlePolicy()` + `[sleep] timeout` 文本 | 两者表达同一策略（注意单位：token 是字符串，API 是毫秒） |
+| M7f-1 | 无旧实现 | `power.alarm()` | 设一次闹钟、读回、清除，读回 null |
+| M7f-2 | 无旧实现，需人工评审 | 唤醒后 `power.onSleepState` 事件 | 仅在 M7f-1 稳定后单独进行 |
+
+**不可逆动作的额外要求（M7f）**：PR 描述必须写明「如何在不重启设备的情况下恢复」；若无法回答，该子步不得合并。
+
+**零影响验证**（每个子步）：除被替换的那一处外，`grep -c '<旧桥动词>' pocket-shell/` 的计数只能减 1，不能出现新的旧桥调用。
 
 ---
 

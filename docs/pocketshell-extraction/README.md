@@ -61,9 +61,9 @@ flowchart TB
 | R1 | **源码与产物已不一致**：tracked `hello/main.tsx` 350 行，预编译产物里是 1033 行；`pocketshell-launcher.rs` 存在四份实现（91 / 285 / 324 / 319 行，动词集互不相同） | [01](01-audit.md) §7.1（含复现命令与实测计数） | 「零行为变化」没有可信基线，任何迁移都可能悄悄改行为 |
 | R2 | **三份 profile 互相矛盾**（`[[360,240],[720,480]]`/density 1 vs `[[360,240]]`/density 2），而 profile 哈希进包准入 | [01](01-audit.md) §7.3、`generated/pocket_profile.rs:3-19` | Shell 的视口/缩放数学与真机不符；重建会换 profile 哈希 |
 | R3 | **查询跑在渲染线程**，靠 `timeout 2` 兜底 | `PKT/.../pocketshell_launcher.rs:3-19` 的注释记录了 `pactl` 导致整屏冻结的事故 | 任何慢查询都变成掉帧或黑屏 |
-| R4 | **终端行格式发出 5 段、解析 4 段**，列号被当文字 | `pocketshell-terminal.rs:715` + `:1213-1219` vs `hello/main.tsx:127` | 逐帧比对全是噪声；UI 文本实际已错位 |
+| R4 | **终端行格式发出 5 段、解析 4 段**，列号被当文字 | `pocketshell-terminal.rs:715`（发出 5 段）+ `:1215`（注释写明 5 段）vs `hello/main.tsx:127`（只取 4 段） | 逐帧比对全是噪声；UI 文本实际已错位 |
 | R5 | **启动序没有版本与能力协商**，只有文件名约定 | `frontend-session:164-183` | 新 Shell 无法声明「我需要什么」；不兼容只能表现为黑屏或静默降级 |
-| R6 | **上游 patch 面积大且脆**（anchor 一移动就 `SystemExit`） | `patch-runtime.py:20-26,34-52` | 升级 pocketjs 的成本不可预测 |
+| R6 | **上游 patch 面积大且脆**（anchor 一移动就 `SystemExit`） | `patch-runtime.py:20-26`（`replace()` 的 fail-closed）、`:34-52`（三个桥的注入） | 升级 pocketjs 的成本不可预测 |
 | R7 | **服务开关与应用启动不在九域内**，但 Shell 现在承担它们 | `SERVICE`/`LAUNCH` 的桥实现 | 平台化后这部分 UI 必须消失或改由 PocketApps 承担，是**用户可见的行为变化** |
 
 ---

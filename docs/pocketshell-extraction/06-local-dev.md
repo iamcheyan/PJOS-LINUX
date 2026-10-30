@@ -52,7 +52,7 @@ Shell 里可以「纯函数化」的部分必须纯函数化，且**不 import �
 
 | 规则 | 判据 |
 |---|---|
-| L0 模块**不得** import `pocket.platform`、`getOps()`、`fetch`、`Date.now()`（时间从参数传入） | `grep -E 'pocket\.platform|getOps|fetch\(|Date\.now' <module>` 零命中 |
+| L0 模块**不得** import `pocket.platform`、`getOps()`、`fetch`、`Date.now()`（时间从参数传入） | `grep -E` 上述四个符号，零命中 |
 | L0 模块**不得**出现平台名/路径 | 03 §5 的 grep 同样适用 |
 | 每个 L0 模块必须有测试，且测试不启动任何进程、不开任何端口 | `bun test` 只跑 `.test.ts` |
 

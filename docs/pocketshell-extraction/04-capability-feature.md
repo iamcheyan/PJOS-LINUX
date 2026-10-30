@@ -23,7 +23,7 @@ Feature     ── 这条链路能做什么具体的事       bt_sink, bt_source
 | # | 规则 | 反面例子（来自审计） |
 |---|---|---|
 | N1 | Capability 是**三态**（`yes`/`no`/`unknown`）；`unknown` 不等于 `no` | 今天无背光节点时返回字符串 `"unknown"`（`RNX scripts/pocketshell-launcher.rs:16`），而「读到了但解析失败」也走同一条 `"unknown".into()` 出口（`:6-17`），Shell 无法区分 |
-| N2 | Feature **只**依赖 Capability，不反向 | — |
+| N2 | Feature **可以**依赖 Capability 或另一个 Feature，但依赖图必须**无环**；依赖方向只能是 Feature → Feature / Feature → Capability，Capability **绝不**依赖任何 Feature | — |
 | N3 | Shell **不得**从 Capability 推 Feature，也不得从 Feature 推 Capability | 今天 Shell 拿到 `LEVEL\twifi === "on"` 就假设能显示 IP —— 实际两者由不同来源决定（`PKT/.../pocketshell_launcher.rs:223-249`） |
 
 ---
@@ -104,9 +104,9 @@ Capability 在 Adapter 自报的 manifest 里是一张 map，值恒为三态字�
 
 | id | 含义 | 依赖 | 今天的位置 |
 |---|---|---|---|
-| `display.rotation` | 能在运行时改变屏幕朝向 | `display.brightness` 无关；仅需 `power.management` 的显示部分 | `PJOS docs/15` §5.1 的 `panel.rotation_ccw` 是**构建期**事实，应用拿不到 |
+| `display.rotation` | 能在运行时改变屏幕朝向 | `power.management`（旋转是一次显示电源模式切换） | `PJOS docs/15` §5.1 的 `panel.rotation_ccw` 是**构建期**事实，应用拿不到 |
 | `display.hw_brightness` | 亮度由硬件寄存器控制（而非软件 gamma 模拟） | `display.brightness` | 无 |
-| `display.external_output` | 能切换/热插拔外部显示 | `hdmi` | `docs/06` 的人工验证 |
+| `display.external_output` | 能切换/热插拔外部显示 | `hdmi` | `docs/06-status-and-lessons.md:18` 的人工验证 |
 
 ### 3.2 音频
 
@@ -181,16 +181,22 @@ Capability 在 Adapter 自报的 manifest 里是一张 map，值恒为三态字�
 
 ### 3.8 一致性校验（Runtime 强制，Adapter 加载时执行一次）
 
-对每个 `feature`：
+对每个 `feature`，按依赖图自底向上求值（Feature→Feature 依赖先算，再算 Feature→Capability）：
 
 | 条件 | 结果 |
 |---|---|
-| feature 声明的任一依赖 Capability 为 `"no"` | **manifest 无效**：`invalid`，拒绝加载（这是 Adapter 的 bug） |
-| feature 声明的任一依赖 Capability 为 `"unknown"` | feature 必须为 `"unknown"`；若 Adapter 声称 `"supported"` 则**降级为 `unknown`** 并记一条诊断 |
-| feature = `"supported"` 而依赖 = `"yes"` | 合法 |
+| 依赖了**未注册**的 Capability 或 Feature | **manifest 无效**：`invalid`，拒绝加载（拼写错误，或词表版本不匹配） |
+| 依赖图**有环** | **manifest 无效**：`invalid`，拒绝加载 |
+| 任一 Capability 依赖为 `"no"` | **manifest 无效**：`invalid`，拒绝加载（这是 Adapter 的 bug） |
+| 任一 Capability 依赖为 `"unknown"` | 该 feature 必须为 `"unknown"`；若 Adapter 声称 `"supported"` 则**降级为 `unknown`** 并记一条诊断 |
+| 任一 Feature 依赖不为 `"supported"` | 该 feature 必须为 `"unsupported"`（依赖的 feature 不可用，依赖者也不可用）；若声称 `"supported"` 则**降级**，并记一条诊断 |
+| 所有依赖均为 `"yes"` / `"supported"` | 合法：保留 Adapter 自报的值（可以是 `"supported"` 或 `"unsupported"`） |
 | feature 未声明依赖 | 视为依赖空集，合法（但词表里每个 feature 都已定义依赖） |
 
-**为什么不直接拒绝（第三行只降级）**：`unknown` 是平台诚实的回答；把 Adapter 拒之门外反而让用户看不到任何东西。但必须降级，否则 Shell 会相信一个不可靠的 `supported`。
+两点说明：
+
+1. **Capability 为 `no` 时拒绝加载**，因为那只可能是 Adapter 写错了；而 Capability 为 `unknown` 时只降级，因为 `unknown` 是平台诚实的回答，拒绝会让用户什么也看不到。
+2. **Feature 依赖不满足时只降级、不拒绝**：同一份 Adapter 在不同设备上可以有 `input.osk=unsupported`，那么 `input.ime` 自然也 `unsupported`，这是合法配置而非 bug。
 
 ---
 

@@ -6,6 +6,7 @@
 > - **PJOS:** 本仓库 `PJOS-LINUX`，`main` `dc99d574c9e0bd9c3cf87cd1008ea02db4bd56ac`。
 > - **RNX:** `rocknix` 工作副本，本地 `main` = `e484b261d2c3d9c8732be613a670ff0dc7431f51`。**注意：该工作副本落后 `origin/main` 41 个提交**（`git rev-list --left-right --count HEAD...origin/main` → `0 41`），所以 RNX 引用只对 `e484b26` 成立，不对 `origin/main` 成立。
 > - **PKT:** RNX 里的预编译 PocketJS 源码树 `build.ROCKNIX-H700.aarch64/build/pocketjs-runtime-e6770376626a4de5c93eaa6fb048e7e9ffb81f9f/`（pinned upstream `e6770376626a4de5c93eaa6fb048e7e9ffb81f9f`），下文简称 `PKT/`。
+> - **`launcher.rs`**：`RNX projects/ROCKNIX/packages/apps/pocketjs-runtime/scripts/pocketshell-launcher.rs`（tracked 版，V1）。本文与 [03](03-platform-api.md)–[05](05-adapters.md) 里所有裸写 `launcher.rs:<行>` 的引用都指这份；`PKT/.../pocketshell_launcher.rs` 专指被编译的 V3（见 §7.1）。
 
 ---
 
@@ -74,7 +75,7 @@ PocketShell 今天不是「运行在平台上」，而是**被编译进平台**�
 | `RNX .../scripts/pocketjs-session:7` | `/storage/pocketjs/{apps,data,cache,logs}` | 路径 |
 | `RNX .../scripts/pocketjs-session:16-27` | `POCKETJS_CARD`、`/sys/class/drm/card*-*/status`、`/dev/dri/${connector%%-*}`、兜底 `/dev/dri/card0` | 路径 + 环境变量 |
 | `RNX .../scripts/pocket-session-run:9-11` | `/run/lock/pocketjs-display.lock`、`flock -n 9` | 路径 + IPC（文件锁） |
-| `RNX .../scripts/pocket-session-run:14,16,21,27,29` | `systemctl is-active|stop|start pocketjs-kms.service|pocketjs-recovery.service|pocketjs-foreground.service` | 工具 + **服务管理器语义** |
+| `RNX .../scripts/pocket-session-run:14,16,21,27,29` | `systemctl` 的 `is-active` / `stop` / `start`，作用于 `pocketjs-kms.service`、`pocketjs-recovery.service`、`pocketjs-foreground.service` | 工具 + **服务管理器语义** |
 | `RNX .../scripts/pocket-session-run:38-45` | `/sys/class/drm/card*-*/status` → `drm_index` | 路径 |
 | `RNX .../scripts/pocket-session-run:47-57` | `systemd-run --unit=pocketjs-foreground`、`TTYPath=/dev/tty7`、`chvt 7`、`SDL_KMSDRM_DEVICE_INDEX`、`SDL_VIDEODRIVER=kmsdrm`、`SDL_AUDIODRIVER=pulseaudio`、`XDG_RUNTIME_DIR=/run/0-runtime-dir`、`SDL_GAMECONTROLLERCONFIG_FILE` | 工具 + 环境变量（把 **SDL 后端选择**塞进了 Shell 的启动路径） |
 | `RNX .../scripts/pocketshell-dev:3` | `--bind ${POCKETSHELL_DEV_BIND:-127.0.0.1} --port 8080` | 端口 |
@@ -213,8 +214,10 @@ done
 # 实测：91/0/0/0/0 与 285/3/0/6/1 与 324/0/6/0/0 与 319/0/6/0/0（顺序同上面 for 列表）
 ```
 
-- 发出：`pocketshell-terminal.rs:715` → `{fg:06x}:{bg:06x}:{flags}:{start_col}:` + text；同文件 `:1213-1219` 的注释明确写「Wire shape is fg:bg:flags:col:text — skip the four numeric fields」。
-- 解析：`hello/main.tsx:127` 与 `PKT/apps/rocknix-h700/main.tsx:426-431` 都执行 `parts.slice(3).join(":")` 当文本 → **列号被当成文字渲染**。
+### 7.2 终端行格式：发出 5 段，解析 4 段
+
+- 发出：`pocketshell-terminal.rs:715` → `{fg:06x}:{bg:06x}:{flags}:{start_col}:` + text；同文件 `:1215` 的注释明确写「Wire shape is fg:bg:flags:col:text — skip the four numeric fields」。
+- 解析：`hello/main.tsx:127` 与 `PKT/apps/rocknix-h700/main.tsx:427-431` 都执行 `parts.slice(3).join(":")` 当文本 → **列号被当成文字渲染**。
 
 这条不改，UI 逐帧比对任何迁移都是噪声。
 
@@ -252,7 +255,7 @@ PocketShell 之外，`pocket-*` 每个仓库都自带一套 profile/capability/�
 | `pocket-music` | 无 profile，只有 `MUSICD_MOCK` provider 开关；`mpv` + `ffprobe` + `ffmpeg` | `backend/main.go:109-128`、`mpv.go:87-108`、`library.go:457-461` |
 | `pocket-terminal` | `journalctl`、`systemctl list-units`、`/proc/*`、`/sys/class/thermal`、`/var/log/*` | `terminald/diagnostics.go:114-117,268-281,344-350`、`logs.go:30-34` |
 | `pocket-web` | profile `desktop,handheld,dap,reader`；用 `exec.LookPath` 把 URL 交给兄弟二进制 | `backend/pjapps.go:44-78` |
-| `pjos-keyboard` | capability 只有 `Touch|DPad|Gamepad|HardwareKeyboard`，**按能力选输入模式，不按设备名**（正确范式） | `src/keyboard/capability.ts:10-27`、`packaging/manifest.json:1-25` |
+| `pjos-keyboard` | capability 只有 `Touch` / `DPad` / `Gamepad` / `HardwareKeyboard`，**按能力选输入模式，不按设备名**（正确范式） | `src/keyboard/capability.ts:10-27`、`packaging/manifest.json:1-25` |
 
 `pocket-settings` 与 `pjos-keyboard` 已经证明了正确形态：**能力用 `{available, enabled, controllable, source, reason}` 表达，未知给 reason 而不是隐藏**。这条应当直接成为 Platform API 的 Capability 语义基准（见 [04](04-capability-feature.md)）。
 
