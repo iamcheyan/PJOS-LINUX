@@ -13,7 +13,7 @@
 |---|---|---|
 | A1 | **所有方法异步**，返回 `Promise`；渲染帧内不允许等待 | 今天的桥是同步字符串调用，跑在 guest 渲染线程上，因此每次外部查询都要 `/usr/bin/timeout 2` 包一层（`PKT/.../pocketshell_launcher.rs:3-19`），并留下「`pactl` 阻塞导致整屏黑」的事故记录 |
 | A2 | **状态栏读缓存，不读设备**：提供 `snapshot()` 同步返回最近一次已知值 + 时间戳 + `stale` 标记 | UI 每帧要显示电量/音量/Wi-Fi，但设备查询不能进帧 |
-| A3 | **缺失是一等答案**：`unsupported` / `unavailable` / `unknown` 三个不同含义，都用返回值表达，不用抛异常 | 今天无背光节点 → `"unknown"` 字符串（`launcher.rs:17`），与「查询失败」不可区分 |
+| A3 | **缺失是一等答案**：`unsupported` / `unavailable` / `unknown` 三个不同含义，都用返回值表达，不用抛异常 | 今天无背光节点时把 `"unknown".into()` 与「读到了但解析失败」写成同一个字符串出口（`launcher.rs:6-16`），与「查询失败」不可区分 |
 | A4 | **不做平台分支**：API 里没有 `platform` 字段可供 Shell 读取 | issue 要求「PocketShell 永远不知道自己运行在哪个平台」 |
 | A5 | **不推断**：任何「有没有 / 能不能」都必须来自 Capability/Feature 查询 | issue 原文「PocketShell 不允许推断，必须查询」 |
 | A6 | **超时与取消是契约的一部分** | 今天没有超时语义，只有外层的 `timeout 2` |
@@ -108,7 +108,7 @@ export function isPlatformError(value: unknown): value is PlatformError
 | `capability` / `feature` | 200 | 本地查表，适配器应在启动时建好索引 |
 | `display`（读） | 300 | |
 | `display.setBrightness` | 1500 | 写设备可能慢 |
-| `input.showKeyboard` / `hideKeyboard` | 500 | |
+| `input.openTextSession` | 500 | |
 | `audio`（读/写音量） | 1500 | |
 | `storage`（list/stat/read） | 3000 | 大目录允许更久，调用方显式给 |
 | `battery` | 300 | |
@@ -595,6 +595,13 @@ export interface Capability {
 
 **为什么 `has()` 存在而 `get()` 不省略**：`has()` 是 `get() === "yes"` 的糖，但它强制调用点显式，并且不允许 Shell 写 `if (cap.wifi)` 这类隐式真值判断（`"unknown"` 是真值，会误判）。
 
+| 错误 | 何时 |
+|---|---|
+| `invalid` | `id` 不在 API 词表内（拼写错误必须响亮失败，不能被当成 `unknown`） |
+| `timeout` | 超过 deadline（正常情况下不会发生：来源是 Adapter 启动时建好的内存索引） |
+
+本域**不允许** `unsupported`——三态本身就是回答，这是九个域里唯一不允许拒绝读操作的地方，因为 Shell 的首帧必须能问到「有没有」。它与 Feature 的联合一致性校验在 Runtime 加载 Adapter 时执行（[04](04-capability-feature.md) §3.8）。
+
 ### 3.9 Feature
 
 ```ts
@@ -614,6 +621,13 @@ export interface Feature {
 
 - `capability.get("bluetooth") === "no"` ⇒ `feature.get("bluetooth.sink")` 必须为 `unsupported`（一致性由 Runtime 校验，不一致则拒绝启动 Adapter）。
 - 反过来不成立：`bluetooth === "yes"` 而 `bluetooth.sink === "unsupported"`（只有 BLE，无 A2DP）是合法且常见的。
+
+| 错误 | 何时 |
+|---|---|
+| `invalid` | `id` 不在 API 词表内 |
+| `timeout` | 超过 deadline（与 Capability 同：内存索引，正常不会发生） |
+
+与 Capability 一样，本域不允许 `unsupported`：`"unsupported"` 是**值**，不是异常。唯一的实现侧义务是加载期的一致性（见 04 §3.8）。
 
 ---
 
