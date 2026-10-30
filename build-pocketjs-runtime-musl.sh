@@ -103,7 +103,14 @@ docker run --rm --platform linux/arm64 \
     export RUSTFLAGS="-C target-feature=+crt-static"
     if [ "${PJOS_RUN_TESTS:-0}" = 1 ]; then
       echo "running pocket-linux-evdev tests"
-      cargo test --offline -p pocket-linux-evdev 2>&1 | tail -20
+      # Never pipe cargo into tail: the pipeline would report the status of tail,
+      # and a failing test would ship a broken mapping. Capture, print, fail hard.
+      if ! cargo test --offline -p pocket-linux-evdev > /tmp/evdev-tests.log 2>&1; then
+        tail -30 /tmp/evdev-tests.log
+        echo "FATAL: pocket-linux-evdev tests failed" >&2
+        exit 1
+      fi
+      tail -5 /tmp/evdev-tests.log
     fi
 
     cargo build --release --offline \
