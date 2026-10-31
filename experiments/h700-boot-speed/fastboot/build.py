@@ -98,7 +98,12 @@ def write_artifact(path: Path, blob: bytes) -> None:
 
 
 def compress(kernel: bytes) -> bytes:
-    library = ctypes.util.find_library("lz4") or "/opt/homebrew/opt/lz4/lib/liblz4.dylib"
+    # LZ4_LIB lets hosts whose loader cache hides the library (NixOS) name it
+    # directly; find_library() finds nothing there and the Homebrew fallback
+    # is a macOS-only path.
+    library = (os.environ.get("LZ4_LIB")
+               or ctypes.util.find_library("lz4")
+               or "/opt/homebrew/opt/lz4/lib/liblz4.dylib")
     lib = ctypes.CDLL(library)
     lib.LZ4_compressBound.argtypes = [ctypes.c_int]
     lib.LZ4_compress_HC.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
