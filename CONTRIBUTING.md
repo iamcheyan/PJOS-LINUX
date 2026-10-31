@@ -286,3 +286,5 @@ from LED-on and frontend rendering measurements.
 - [Boot performance](docs/09-boot-profiling.md)
 - [Boot SD-card I/O](docs/10-boot-io-audit.md)
 - [Charger-only boot](docs/11-charger-only-boot.md)
+- [BSP and multi-device architecture](docs/15-bsp-architecture.md)
+- [BSP v2: multi-device distribution platform](docs/18-bsp-v2.md)
