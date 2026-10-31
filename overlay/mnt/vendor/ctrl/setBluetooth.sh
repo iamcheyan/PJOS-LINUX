@@ -1,5 +1,5 @@
 #!/bin/sh
-# Base OS replacement for the stock /mnt/vendor/ctrl/setBluetooth.sh (same
+# PJOS Linux replacement for the stock /mnt/vendor/ctrl/setBluetooth.sh (same
 # path so NextUI's bt_init.sh works unmodified; p6 is never mounted over it).
 # POSIX sh version of the vendor logic: attach the RTL8821CS BT UART.
 

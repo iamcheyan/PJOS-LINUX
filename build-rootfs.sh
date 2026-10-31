@@ -152,9 +152,9 @@ PY
   # os-release carries the same version so it cannot drift from the identity
   # baseos-update compares payloads against.
   {
-    printf "NAME=\"Base OS\"\nID=baseos\n"
+    printf "NAME=\"PJOS Linux\"\nID=baseos\n"
     printf "VERSION_ID=%s\n" "$BASEOS_VERSION"
-    printf "PRETTY_NAME=\"Base OS %s (h700)\"\n" "$BASEOS_VERSION"
+    printf "PRETTY_NAME=\"PJOS Linux %s (h700)\"\n" "$BASEOS_VERSION"
   } > "$R/etc/os-release"
   mkdir -p "$R/mnt/vendor/bin"
   printf "%s\n" "$BASEOS_MODEL_STRING" > "$R/mnt/vendor/bin/dmenu.bin"
