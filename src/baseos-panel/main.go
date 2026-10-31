@@ -1,14 +1,21 @@
-// baseos-panel — turn the H700 panel off and on.
+// baseos-panel — set the H700 panel's backlight, and turn it off and on.
 //
-// The vendor kernel exposes no /sys/class/backlight: the only brightness node
-// (disp/attr/enhance_bright) is an image-enhancement register, and writing 0 to it
-// leaves the backlight lit. The panel itself is powered down through the
-// framebuffer's FBIOBLANK ioctl, which the fb driver implements; the brightness
-// node is kept as a fallback so a kernel without FBIOBLANK still dims.
+// The vendor kernel exposes no /sys/class/backlight, and its /dev/disp
+// brightness ioctls (0x102 set, 0x106) answer EPERM for every screen selector
+// because the display driver owns the value. Writing disp/attr/enhance_bright
+// changes nothing physical: it is an image-enhancement register, not the
+// backlight, which is why the settings slider moved while the panel did not.
 //
-//	baseos-panel off          # FB_BLANK_POWERDOWN (panel dark, framebuffer kept)
-//	baseos-panel on           # FB_BLANK_UNBLANK, restore the saved level
-//	baseos-panel level 120    # set brightness only
+// The value that does drive the panel is the PWM channel the display driver
+// holds for the LCD (pwm-0 of /sys/class/pwm/pwmchip0, period 20000 ns). The
+// driver exposes it through debugfs: write a command name, a display name and a
+// 0..255 level to /sys/kernel/debug/dispdbg, then raise "start", and the
+// driver's own backlight path runs. Measured on the RG34XX: 0 -> duty 0 ns,
+// 100 -> 7891 ns, 255 -> 19922 ns; disp/attr/sys then reports "backlight(N)".
+//
+//	baseos-panel level 120    # set the backlight (0..255)
+//	baseos-panel off          # backlight off; the framebuffer keeps running
+//	baseos-panel on           # restore the saved level
 //
 // Build: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o baseos-panel .
 package main
@@ -16,111 +23,98 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 )
 
 const (
-	brightnessNode = "/sys/class/disp/disp/attr/enhance_bright"
-	levelFile      = "/run/panel.level"
-	markerFile     = "/run/panel.off"
-	dispDev        = "/dev/disp"
+	levelFile  = "/run/panel.level"
+	markerFile = "/run/panel.off"
 
-	// Allwinner disp commands (the vendor u-boot uses the same numbers for
-	// backlight on/off; the kernel's /dev/disp ioctl takes a pointer to two u32:
-	// {display selector, argument}).
-	dispCmdLcdSetBright = 0x102
-	dispCmdLcdGetBright = 0x103
-	dispCmdBacklightOn  = 0x104
-	dispCmdBacklightOff = 0x105
+	// The display driver's debugfs control surface. "start" is a trigger, so
+	// the command, display and level must be written first and start last.
+	dispDbgDir   = "/sys/kernel/debug/dispdbg"
+	dispDisplay  = "lcd0"
+	dispLevelMax = 255
+
+	// The driver prints its live level here as "backlight( 50)".
+	dispSysFile = "/sys/class/disp/disp/attr/sys"
 )
 
-// dispCall issues a disp ioctl. The kernel expects a pointer to a u32 pair even
-// for the on/off commands — a bare value returns EFAULT.
-func dispCall(cmd uintptr, selector, value uint32) (int, error) {
-	f, err := os.OpenFile(dispDev, os.O_RDWR, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	args := [2]uint32{selector, value}
-	r, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), cmd, uintptr(unsafe.Pointer(&args[0])))
-	if errno != 0 {
-		return int(r), errno
-	}
-	return int(r), nil
+// dispWrite stores one value in a dispdbg attribute. Every write is its own
+// open: the driver latches the command when "start" is written, not before.
+func dispWrite(attr, value string) error {
+	return os.WriteFile(dispDbgDir+"/"+attr, []byte(value+"\n"), 0o644)
 }
 
-func dispGetBright() (int, error) {
-	f, err := os.OpenFile(dispDev, os.O_RDWR, 0)
-	if err != nil {
-		return 0, err
+// dispCommand runs one of the display driver's own commands against the LCD.
+// level is the argument of "setbl" and is ignored by the others.
+func dispCommand(command string, level int) error {
+	if err := dispWrite("start", "0"); err != nil {
+		return err
 	}
-	defer f.Close()
-	args := [2]uint32{0, 0}
-	r, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), dispCmdLcdGetBright, uintptr(unsafe.Pointer(&args[0])))
-	if errno != 0 {
-		return 0, errno
+	if err := dispWrite("name", dispDisplay); err != nil {
+		return err
 	}
-	return int(r), nil
-}
-
-// setLevel tries the disp brightness command first. On this driver it answers
-// EPERM (the kernel keeps brightness for itself), so the enhancement node — the
-// same register the launcher's slider writes — is the fallback.
-func setLevel(level int) error {
-	if _, err := dispCall(dispCmdLcdSetBright, 0, uint32(level)); err == nil {
-		return nil
+	if err := dispWrite("command", command); err != nil {
+		return err
 	}
-	return setBrightness(level)
+	if err := dispWrite("param", strconv.Itoa(level)); err != nil {
+		return err
+	}
+	return dispWrite("start", "1")
 }
 
-func screenOff() error {
-	_, err := dispCall(dispCmdBacklightOff, 0, 0)
-	return err
-}
+var backlightPattern = regexp.MustCompile(`backlight\(\s*(\d+)\s*\)`)
 
-func screenOn() error {
-	_, err := dispCall(dispCmdBacklightOn, 0, 0)
-	return err
-}
-
-// brightness prefers the disp driver's real backlight value (the ioctl returns it
-// directly); the enhancement node is only a fallback.
+// brightness reads the level the driver actually applied. Reading it back from
+// dispdbg's "info" is not enough on its own: it echoes the last request, so a
+// refused write would still look applied. disp/attr/sys prints the live value.
 func brightness() (int, bool) {
-	if v, err := dispGetBright(); err == nil && v >= 0 {
-		return v, true
-	}
-	return nodeBrightness()
-}
-
-func nodeBrightness() (int, bool) {
-	b, err := os.ReadFile(brightnessNode)
+	b, err := os.ReadFile(dispSysFile)
 	if err != nil {
 		return 0, false
 	}
-	fields := strings.Fields(string(b))
-	if len(fields) == 0 {
+	m := backlightPattern.FindSubmatch(b)
+	if m == nil {
 		return 0, false
 	}
-	v, err := strconv.Atoi(fields[0])
+	v, err := strconv.Atoi(string(m[1]))
 	if err != nil {
 		return 0, false
 	}
 	return v, true
 }
 
-func setBrightness(v int) error {
-	return os.WriteFile(brightnessNode, []byte(strconv.Itoa(v)+"\n"), 0o644)
+// setLevel writes the backlight and verifies the read-back, so a kernel without
+// the dispdbg surface fails loudly instead of leaving a slider that lies.
+func setLevel(level int) error {
+	level = clampLevel(level)
+	if err := dispCommand("setbl", level); err != nil {
+		return err
+	}
+	if got, ok := brightness(); ok && got != level {
+		return fmt.Errorf("backlight reads %d after setting %d", got, level)
+	}
+	return nil
+}
+
+func clampLevel(level int) int {
+	if level < 0 {
+		return 0
+	}
+	if level > dispLevelMax {
+		return dispLevelMax
+	}
+	return level
 }
 
 func savedLevel() int {
 	if b, err := os.ReadFile(levelFile); err == nil {
 		if v, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && v > 0 {
-			return v
+			return clampLevel(v)
 		}
 	}
 	return 120
@@ -149,35 +143,33 @@ func runtimePids() []int {
 	return out
 }
 
-// offLevel switches the backlight off through the vendor disp ioctl — the only
-// path that actually stops the panel on this kernel (there is no
-// /sys/class/backlight, the PWM channels belong to the disp driver and FBIOBLANK
-// never unblanks). The PanelOn ioctl brings it back, so sleep is reversible.
+// offLevel stores the real level then asks the display driver to turn the
+// backlight off. The framebuffer keeps running, so key wake is immediate.
 func offLevel(_ int) error {
 	if v, ok := brightness(); ok && v > 0 {
-		os.WriteFile(levelFile, []byte(strconv.Itoa(v)+"\n"), 0o644)
+		_ = os.WriteFile(levelFile, []byte(strconv.Itoa(v)+"\n"), 0o644)
 	}
-	if err := screenOff(); err != nil {
+	if err := dispCommand("setbl", 0); err != nil {
 		return err
 	}
-	os.WriteFile(markerFile, nil, 0o644)
+	_ = os.WriteFile(markerFile, nil, 0o644)
 	return nil
 }
 
 func on() error {
-	now := time.Now()
-	os.Chtimes("/run/screen-idle.stamp", now, now)
-	os.WriteFile("/run/screen-idle.stamp", nil, 0o644)
-	if err := screenOn(); err != nil {
+	if err := dispCommand("setbl", savedLevel()); err != nil {
 		return err
 	}
-	os.Remove(markerFile)
+	now := time.Now()
+	_ = os.Chtimes("/run/screen-idle.stamp", now, now)
+	_ = os.WriteFile("/run/screen-idle.stamp", nil, 0o644)
+	_ = os.Remove(markerFile)
 	return nil
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: baseos-panel off [1-4]|on|level N")
+		fmt.Fprintln(os.Stderr, "usage: baseos-panel off|on|level [N]")
 		os.Exit(2)
 	}
 	var err error
@@ -187,16 +179,27 @@ func main() {
 	case "on":
 		err = on()
 	case "level":
-		if len(os.Args) < 3 {
-			err = fmt.Errorf("level needs a value")
+		if len(os.Args) == 2 {
+			if value, ok := brightness(); ok {
+				fmt.Println(value)
+			} else {
+				err = fmt.Errorf("cannot read driver's backlight level")
+			}
 			break
 		}
-		v, convErr := strconv.Atoi(os.Args[2])
+		value, convErr := strconv.Atoi(os.Args[2])
 		if convErr != nil {
 			err = convErr
 			break
 		}
-		err = setLevel(v)
+		err = setLevel(value)
+		if err == nil {
+			if actual, ok := brightness(); ok {
+				fmt.Println(actual)
+			} else {
+				err = fmt.Errorf("cannot read driver's backlight level")
+			}
+		}
 	default:
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
