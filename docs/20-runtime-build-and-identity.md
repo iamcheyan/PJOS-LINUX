@@ -117,8 +117,10 @@ adb shell '/storage/System/pocketjs/bin/pocket-linux-kms.new --package /storage/
    脚本用 `PIN` 校验 sha256 = `f943a88389c8fd70a6b0d061a88267465e143c7ca6ea2b75837ab20f5b60c739`。
    不在仓库里、也不会自动下载，缺了会报 `FileNotFoundError`。
 2. **`baseos-h700-mainline` 容器**：SPL 在容器里用 `aarch64-linux-gnu-` 交叉编出来。
-   需要 `build-essential gcc/binutils-aarch64-linux-gnu bison flex bc libssl-dev swig
-   device-tree-compiler python3 u-boot-tools`，容器只要常驻（`sleep infinity`）即可。
+   需要 `build-essential gcc/binutils-aarch64-linux-gnu bison flex bc libssl-dev
+   libgnutls28-dev uuid-dev swig device-tree-compiler python3 python3-dev
+   python3-setuptools u-boot-tools`，容器只要常驻（`sleep infinity`）即可。
+   少 `python3-setuptools` 会在 `pylibfdt` 停，少 `libgnutls28-dev` 会在 `mkeficapsule` 停。
 3. **带 `unicorn` 和 `capstone` 的 Python**：`build-release.py` 会 import 它们做启动轨迹校验。
    用一个独立 venv，通过 `BASEOS_NATIVE_PYTHON=/path/to/venv/bin/python` 指过去。
 4. **`clang` 在 PATH 上**：脚本用 `shutil.which("clang")` 找编译器（target `armv7a-none-eabi`）。
@@ -126,6 +128,20 @@ adb shell '/storage/System/pocketjs/bin/pocket-linux-kms.new --package /storage/
 
 缺任何一样都会在中途退出，且错误信息都不直白（`FileNotFoundError`、`expected str … not NoneType`、
 `docker exec … exit 1`），所以按这个顺序先自检。
+
+
+### 3.2 一个顺序坑：`build-update.sh` 要求 rootfs 的 build id 与 HEAD 一致
+
+`mkupdate` 会核对镜像里 `BASEOS_BUILD=` 的値，而它来自 `git describe --dirty`。踩过一次：
+先跑 rootfs（当时 HEAD 是 A），中间又提交了文档（HEAD 变 B），再单独跑 `build-image.sh` 和
+`build-update.sh`，镜像本身全部校验通过，最后一步却被拒：
+
+```
+mkupdate: the image does not contain BASEOS_BUILD=<B> — rebuild the rootfs first
+```
+
+所以**别在 rootfs 与 update 之间提交代码**；要么一次跑完 `build-all.sh <target>`，要么用同一个
+commit 依次跑三个脚本。文档类提交也算——它改的是 `git describe`。
 
 ## 4. 这一轮踩的坑（按发生顺序）
 
