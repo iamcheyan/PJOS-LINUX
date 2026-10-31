@@ -534,7 +534,11 @@ fn system_snapshot() -> String {
         .map(|l| l.trim_start_matches(&format!("{}=", name)).trim_matches('"').to_string())
         .unwrap_or_default();
     let name = field("NAME");
-    let version = field("VERSION");
+    // os-release only carries VERSION_ID here; VERSION is empty in this image.
+    let version = {
+        let v = field("VERSION");
+        if v.is_empty() { field("VERSION_ID") } else { v }
+    };
     push("osName", name.clone());
     push("osVersion", version.clone());
     push("os", format!("{} {}", name, version).trim().to_string());
@@ -557,7 +561,7 @@ fn system_snapshot() -> String {
         push("frequency", format!("{} MHz", raw / 1000));
     }
     push("display", read_trimmed("/sys/class/graphics/fb0/virtual_size").unwrap_or_else(|| "--".into()));
-    push("runtime", format!("PJOS {}", version).trim().to_string());
+    push("runtime", format!("PocketJS {}", version).trim().to_string());
     out.join("\n")
 }
 '''
