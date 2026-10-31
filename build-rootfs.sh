@@ -119,6 +119,12 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   # first — the same hazard the fbsplash applet has further down.
   rm -f "$R/usr/sbin/poweroff" "$R/usr/sbin/reboot"
   cp -R /overlay/. "$R/"
+  if [ -f /overlay/usr/share/pocketshell/System/compat/lib/retroarch ]; then
+    mkdir -p "$R/usr/bin" "$R/usr/lib/libretro" "$R/usr/share/retroarch"
+    install -m 0755 /overlay/usr/share/pocketshell/System/compat/lib/retroarch "$R/usr/bin/retroarch"
+    install -m 0644 /overlay/usr/share/pocketshell/System/compat/lib/libretro/mgba_libretro.so "$R/usr/lib/libretro/mgba_libretro.so"
+    install -m 0644 /overlay/usr/share/pocketshell/System/compat/share/retroarch/retroarch.cfg "$R/usr/share/retroarch/retroarch.cfg"
+  fi
   if [ -x /pocketjs-runtime/pocket-linux-kms ]; then
     # BaseOS ships glibc 2.35; a run-time linked against a newer glibc loads
     # nowhere but the build host. Only a static binary survives on the card.
