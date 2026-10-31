@@ -32,6 +32,7 @@ const (
 	// Allwinner disp commands (the vendor u-boot uses the same numbers for
 	// backlight on/off; the kernel's /dev/disp ioctl takes a pointer to two u32:
 	// {display selector, argument}).
+	dispCmdLcdSetBright = 0x102
 	dispCmdLcdGetBright = 0x103
 	dispCmdBacklightOn  = 0x104
 	dispCmdBacklightOff = 0x105
@@ -53,6 +54,30 @@ func dispCall(cmd uintptr, selector, value uint32) (int, error) {
 	return int(r), nil
 }
 
+func dispGetBright() (int, error) {
+	f, err := os.OpenFile(dispDev, os.O_RDWR, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	args := [2]uint32{0, 0}
+	r, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), dispCmdLcdGetBright, uintptr(unsafe.Pointer(&args[0])))
+	if errno != 0 {
+		return 0, errno
+	}
+	return int(r), nil
+}
+
+// setLevel tries the disp brightness command first. On this driver it answers
+// EPERM (the kernel keeps brightness for itself), so the enhancement node — the
+// same register the launcher's slider writes — is the fallback.
+func setLevel(level int) error {
+	if _, err := dispCall(dispCmdLcdSetBright, 0, uint32(level)); err == nil {
+		return nil
+	}
+	return setBrightness(level)
+}
+
 func screenOff() error {
 	_, err := dispCall(dispCmdBacklightOff, 0, 0)
 	return err
@@ -63,8 +88,16 @@ func screenOn() error {
 	return err
 }
 
-// brightness reads the first integer of the vendor node ("120 120").
+// brightness prefers the disp driver's real backlight value (the ioctl returns it
+// directly); the enhancement node is only a fallback.
 func brightness() (int, bool) {
+	if v, err := dispGetBright(); err == nil && v >= 0 {
+		return v, true
+	}
+	return nodeBrightness()
+}
+
+func nodeBrightness() (int, bool) {
 	b, err := os.ReadFile(brightnessNode)
 	if err != nil {
 		return 0, false
@@ -163,7 +196,7 @@ func main() {
 			err = convErr
 			break
 		}
-		err = setBrightness(v)
+		err = setLevel(v)
 	default:
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}

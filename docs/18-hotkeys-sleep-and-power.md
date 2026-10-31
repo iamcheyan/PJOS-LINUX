@@ -155,7 +155,9 @@ syscall.Syscall(SYS_IOCTL, fd, 0x104, uintptr(unsafe.Pointer(&args[0])))  // 开
 
 ### 仍未做
 
-- 设置页的亮度滑条写的还是 `enhance_bright`（图像增强），没接到 `0x102 LCD_SET_BRIGHT`
-  （直传数值时返回 EPERM，要再试指针形态）。
-- 前端内置的「睡眠黑屏 overlay」保留着，作为背光开关失败时的兜底。
-- 长按关机没在真机上验过（会真的断电）。
+- 亮度调节接不上：`0x102 LCD_SET_BRIGHT` / `0x106 BACKLIGHT_SET_BRIGHT` 在 sel=0/1/2、
+  指针与数值两种形态下**一律 EPERM**（内核自己管亮度），所以设置页滑条还是写
+  `enhance_bright`。`baseos-panel level N` 会先试 ioctl，失败再写节点。
+- 前端那个「睡眠黑屏 overlay」已移除：背光由主机真正断开，双路径只会让黑帧活过失败的唤醒。
+- 长按关机：用 `--poweroff /bin/true` 的测试实例 + 2.4 秒按住实测到
+  `power: long press -> poweroff`，真机断电那一步留给人手验证。
