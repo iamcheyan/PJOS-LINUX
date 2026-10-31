@@ -580,5 +580,231 @@ if "fn system_snapshot" not in text:
     text = text.rstrip() + helpers_sys
     print("appended system snapshot helper")
 
+
+# --- Wi-Fi 2.0 + installed-app launching -------------------------------------
+# Added as new functions instead of editing the ROCKNIX originals, so every change
+# stays anchor-based and cannot half-apply.
+
+wifi_arms_old = '''        ["WIFI", "connect", ssid] => wifi_connect(ssid, ""),
+        ["WIFI", "connect", ssid, psk] => wifi_connect(ssid, psk),
+        ["WIFI", "off"] => {
+            let _ = run("wpa_cli", &["-i", "wlan0", "disconnect"]);
+            let _ = run("ip", &["link", "set", "wlan0", "down"]);
+            "off".into()
+        }'''
+
+wifi_arms_new = '''        ["WIFI", "connect", ssid] => wifi_connect_app(ssid, ""),
+        ["WIFI", "connect", ssid, psk] => wifi_connect_app(ssid, psk),
+        ["WIFI", "disconnect"] => {
+            let _ = run("wpa_cli", &["-i", "wlan0", "disconnect"]);
+            "ok:disconnected".into()
+        }
+        ["WIFI", "forget", ssid] => wifi_forget(ssid),
+        ["WIFI", "saved"] => wifi_saved(),
+        ["WIFI", "ip"] => wifi_ip(),
+        ["WIFI", "off"] => {
+            let _ = run("wpa_cli", &["-i", "wlan0", "disconnect"]);
+            let _ = run("ip", &["link", "set", "wlan0", "down"]);
+            "off".into()
+        }'''
+
+text = replace_once(wifi_arms_old, wifi_arms_new, "wifi 2.0 arms")
+
+launch_old = '''        ["LAUNCH", app] if ["disk", "xmplayer"].contains(app) => {'''
+launch_new = '''        ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),
+        ["LAUNCH", app] if ["disk", "xmplayer"].contains(app) => {'''
+text = replace_once(launch_old, launch_new, "installed-app launch arm")
+
+apps_arm_old = '''        ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
+apps_arm_new = '''        ["APPS", "list"] => apps_list(),
+        ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
+text = replace_once(apps_arm_old, apps_arm_new, "installed app listing arm")
+
+runtime_helpers = r"""
+
+fn wpa_script(commands: &str) -> Option<String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("wpa_cli")
+        .args(["-i", "wlan0"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(format!("{}\nquit\n", commands).as_bytes());
+    }
+    let out = child.wait_with_output().ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn wifi_network_id(ssid: &str) -> Option<String> {
+    let text = run("wpa_cli", &["-i", "wlan0", "list_networks"])?;
+    text.lines().skip(1).find_map(|line| {
+        let mut cols = line.split('\t');
+        let id = cols.next()?.trim().to_string();
+        let row = cols.next()?.trim();
+        if row == ssid { Some(id) } else { None }
+    })
+}
+
+fn wifi_forget(ssid: &str) -> String {
+    match wifi_network_id(ssid) {
+        Some(id) => {
+            let _ = run("wpa_cli", &["-i", "wlan0", "remove_network", &id]);
+            let _ = run("wpa_cli", &["-i", "wlan0", "save_config"]);
+            format!("ok:forgot:{}", ssid)
+        }
+        None => format!("error:not-saved:{}", ssid),
+    }
+}
+
+fn wifi_saved() -> String {
+    match run("wpa_cli", &["-i", "wlan0", "list_networks"]) {
+        Some(text) => text.lines().skip(1)
+            .filter_map(|line| {
+                let mut cols = line.split('\t');
+                cols.next();
+                cols.next().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => String::new(),
+    }
+}
+
+fn wifi_ip() -> String {
+    if let Some(text) = run("wpa_cli", &["-i", "wlan0", "status"]) {
+        if let Some(ip) = text.lines().find_map(|l| l.strip_prefix("ip_address=")) {
+            if !ip.is_empty() {
+                return format!("wlan0|{}", ip);
+            }
+        }
+    }
+    if let Some(text) = run("ip", &["-4", "-o", "addr", "show", "wlan0"]) {
+        if let Some(addr) = text.split_whitespace().find(|w| w.contains('.') && w.contains('/')) {
+            return format!("wlan0|{}", addr.split('/').next().unwrap_or(addr));
+        }
+    }
+    "--".into()
+}
+
+fn wifi_connect_app(ssid: &str, psk: &str) -> String {
+    if !wifi_ensure() {
+        return "error:supplicant".into();
+    }
+    let scan = wifi_scan();
+    let row = scan.lines().find(|line| line.split('\t').next() == Some(ssid));
+    let row = match row {
+        Some(row) => row.to_string(),
+        None => return "not-found".into(),
+    };
+    let security = row.split('\t').nth(2).unwrap_or("").to_string();
+    if security != "open" && psk.is_empty() {
+        return "need-psk".into();
+    }
+    let net_id = match run("wpa_cli", &["-i", "wlan0", "add_network"]).map(|t| t.trim().to_string()) {
+        Some(id) if !id.is_empty() => id,
+        _ => return "error:add-network".into(),
+    };
+    let mut script = format!("set_network {} ssid \"{}\"\n", net_id, ssid);
+    if psk.is_empty() {
+        script.push_str(&format!("set_network {} key_mgmt NONE\n", net_id));
+    } else {
+        // Over stdin on purpose: an argv word is visible in `ps` to every user.
+        script.push_str(&format!("set_network {} psk \"{}\"\n", net_id, psk));
+    }
+    script.push_str(&format!(
+        "enable_network {}\nselect_network {}\nsave_config\n",
+        net_id, net_id
+    ));
+    if wpa_script(&script).is_none() {
+        // wpa_cli without stdin scripting: fall back to argv rather than fail.
+        let _ = run("wpa_cli", &["-i", "wlan0", "set_network", &net_id, "ssid", &format!("\"{}\"", ssid)]);
+        if psk.is_empty() {
+            let _ = run("wpa_cli", &["-i", "wlan0", "set_network", &net_id, "key_mgmt", "NONE"]);
+        } else {
+            let _ = run("wpa_cli", &["-i", "wlan0", "set_network", &net_id, "psk", &format!("\"{}\"", psk)]);
+        }
+        let _ = run("wpa_cli", &["-i", "wlan0", "enable_network", &net_id]);
+        let _ = run("wpa_cli", &["-i", "wlan0", "select_network", &net_id]);
+        let _ = run("wpa_cli", &["-i", "wlan0", "save_config"]);
+    }
+    let mut disabled = false;
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let text = match run("wpa_cli", &["-i", "wlan0", "status"]) {
+            Some(text) => text,
+            None => continue,
+        };
+        if text.contains("wpa_state=COMPLETED") {
+            let _ = run("udhcpc", &["-i", "wlan0", "-b", "-q", "-n", "-t", "5", "-T", "3"]);
+            return format!("connected:{}", ssid);
+        }
+        if let Some(list) = run("wpa_cli", &["-i", "wlan0", "list_networks"]) {
+            for line in list.lines() {
+                let mut cols = line.split('\t');
+                let id = cols.next().unwrap_or("");
+                cols.next();
+                cols.next();
+                let flags = cols.next().unwrap_or("");
+                if id == net_id && flags.contains("DISABLED") {
+                    disabled = true;
+                }
+            }
+        }
+    }
+    if disabled { "auth-failed".into() } else { "timeout".into() }
+}
+
+fn apps_list() -> String {
+    let mut rows: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/storage/apps") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(id) = name.strip_suffix(".pocket") {
+                if id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                    rows.push(id.to_string());
+                }
+            }
+        }
+    }
+    rows.sort();
+    rows.join("\n")
+}
+
+fn apps_launch_ready(app: &str) -> bool {
+    !app.is_empty()
+        && app.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && std::path::Path::new(&format!("/storage/apps/{}.pocket", app)).exists()
+}
+
+fn apps_launch(app: &str) -> String {
+    if !apps_launch_ready(app) {
+        return format!("error:missing:{}", app);
+    }
+    let marker = "/storage/System/pocketjs/active";
+    if let Some(dir) = std::path::Path::new(marker).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::write(marker, app).is_err() {
+        return "error:marker".into();
+    }
+    // Hand the panel over: the supervisor respawns launch_frontend.sh, which reads
+    // the marker, runs that package, then returns to the launcher.
+    let pid = std::process::id();
+    let _ = std::process::Command::new("/bin/sh")
+        .args(["-c", &format!("sleep 0.4; kill -9 {}", pid)])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    format!("launching:{}", app)
+}
+"""
+if "fn wifi_connect_app" not in text:
+    text = text.rstrip() + runtime_helpers
+    print("appended wifi 2.0 + app launch helpers")
+
 source.write_text(text)
 print("bridge patched")

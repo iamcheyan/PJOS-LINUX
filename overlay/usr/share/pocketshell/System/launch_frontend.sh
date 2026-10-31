@@ -68,6 +68,23 @@ if [ ! -f "$PACKAGE" ]; then
     fi
 fi
 
+# Installed-app switching: the launcher bridge asks for another package by
+# writing System/pocketjs/active and letting this script restart. Running the
+# child here keeps one owner of the panel — no second runtime racing the launcher.
+ACTIVE="$SD/System/pocketjs/active"
+CLEAR_ACTIVE=0
+if [ -r "$ACTIVE" ]; then
+    wanted=$(tr -cd 'a-zA-Z0-9._-' < "$ACTIVE" 2>/dev/null | cut -c1-64)
+    if [ -n "$wanted" ] && [ -f "$SD/apps/$wanted.pocket" ]; then
+        log "installed app requested: $wanted"
+        PACKAGE="$SD/apps/$wanted.pocket"
+        CLEAR_ACTIVE=1
+    else
+        log "active marker ignored: app=$wanted not installed"
+        rm -f "$ACTIVE" 2>/dev/null || :
+    fi
+fi
+
 card=
 for candidate in /dev/dri/card0 /dev/dri/card1; do
     if [ -e "$candidate" ]; then
@@ -183,6 +200,10 @@ wait "$runtime_pid"
 runtime_status=$?
 finished=$(date +%s 2>/dev/null || printf '0')
 log "PocketJS exit code=$runtime_status"
+if [ "$CLEAR_ACTIVE" = 1 ]; then
+    rm -f "$ACTIVE" 2>/dev/null || :
+    log "app $PACKAGE exited; returning to the launcher"
+fi
 if [ "$started" -gt 0 ] && [ "$finished" -ge $((started + 10)) ]; then
     printf '0\n' > "$FAILURES" 2>/dev/null || :
     log "runtime ran for $((finished - started))s; clearing failure streak"
