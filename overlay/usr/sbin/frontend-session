@@ -79,6 +79,14 @@ if mountpoint -q "$SD" 2>/dev/null \
     fi
 fi
 
+if mountpoint -q "$SD" 2>/dev/null \
+    && [ -f /usr/share/pocketshell/System/pocketjs/apps/gamehub.pocket ] \
+    && [ -d "$SD/System/pocketjs/apps" ]; then
+    install -m 0644 /usr/share/pocketshell/System/pocketjs/apps/gamehub.pocket \
+        "$SD/System/pocketjs/apps/gamehub.pocket.new"
+    mv -f "$SD/System/pocketjs/apps/gamehub.pocket.new" "$SD/System/pocketjs/apps/gamehub.pocket"
+fi
+
 # Which loader started this boot, and a diagnostics block when it is useful:
 # read only, at the lowest priority, once per boot, after the menu is up.
 start_diagnostics() {
