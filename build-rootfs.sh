@@ -24,6 +24,10 @@ for tool in busybox dropbearmulti curl fbsplash gptgrow gptslot sftp-server adbd
   [ -x "$TOOLS/$tool" ] || { echo "missing $TOOLS/$tool (run build-tools.sh)"; exit 1; }
 done
 BASEOS_VERSION="$(tr -d ' \n' < "$HERE/VERSION")"
+# PocketJS SDK the launcher package is built against (pinned by the runtime
+# package) and the ABI that runtime exports. Reported by the SYSTEM page.
+PJOS_SDK_VERSION="${PJOS_SDK_VERSION:-0.15.0}"
+POCKETJS_ABI="${POCKETJS_ABI:-12}"
 [ -n "$BASEOS_VERSION" ] || { echo "VERSION is empty"; exit 1; }
 BASEOS_BUILD="$(git -C "$HERE" describe --always --dirty 2>/dev/null || echo unknown)"
 [ -f "$TOOLS/ca-certificates.crt" ] \
@@ -53,6 +57,8 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   -e BASEOS_PANEL_ROTATION_CCW="$PROFILE_PANEL_ROTATION_CCW" \
   -e BASEOS_WIFI="$PROFILE_WIFI" \
   -e BASEOS_BLUETOOTH="$PROFILE_BLUETOOTH" \
+  -e PJOS_SDK_VERSION="$PJOS_SDK_VERSION" \
+  -e POCKETJS_ABI="$POCKETJS_ABI" \
   -e BASEOS_VERSION="$BASEOS_VERSION" \
   -e BASEOS_BUILD="$BASEOS_BUILD" \
   alpine:3.20 sh -euc '
@@ -148,6 +154,10 @@ PY
     printf "BASEOS_MODEL_STRING=%s\n" "$BASEOS_MODEL_STRING"
     printf "BASEOS_PANEL_ROTATION_CCW=%s\n" "$BASEOS_PANEL_ROTATION_CCW"
     printf "BASEOS_WIFI=%s\nBASEOS_BLUETOOTH=%s\n" "$BASEOS_WIFI" "$BASEOS_BLUETOOTH"
+    # Versions a person can read back from the SYSTEM page (the launcher host
+    # bridge and baseos-diag both report them).
+    printf "PJOS_SDK_VERSION=%s\n" "$PJOS_SDK_VERSION"
+    printf "POCKETJS_ABI=%s\n" "$POCKETJS_ABI"
   } > "$R/etc/baseos-release"
   # os-release carries the same version so it cannot drift from the identity
   # baseos-update compares payloads against.

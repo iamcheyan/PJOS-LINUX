@@ -250,6 +250,25 @@ fi
 	fi
 ) &
 
+# Bring the supplicant up at boot so saved networks reconnect without the user
+# opening the Wi-Fi page. The launcher bridge starts it on demand too; this is the
+# path that matters after a reboot.
+(
+	conf=/storage/.config/wpa_supplicant.conf
+	mkdir -p /storage/.config /run/wpa_supplicant
+	[ -f "$conf" ] || printf 'ctrl_interface=/run/wpa_supplicant\nupdate_config=1\n' > "$conf"
+	i=0
+	while [ ! -d /sys/class/net/wlan0 ] && [ $i -lt 40 ]; do
+		sleep 0.25
+		i=$((i + 1))
+	done
+	[ -d /sys/class/net/wlan0 ] || exit 0
+	rfkill unblock wifi 2>/dev/null || true
+	ip link set wlan0 up 2>/dev/null || true
+	wpa_cli -i wlan0 ping >/dev/null 2>&1 || \
+		wpa_supplicant -B -i wlan0 -c "$conf" -D nl80211 >/dev/null 2>&1 || true
+) &
+
 # machine-id (dbus/BlueZ). /etc/machine-id is a baked symlink into /run.
 if [ -s /data/machine-id ]; then
 	/bin/cp /data/machine-id /run/machine-id

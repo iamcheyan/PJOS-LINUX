@@ -561,7 +561,18 @@ fn system_snapshot() -> String {
         push("frequency", format!("{} MHz", raw / 1000));
     }
     push("display", read_trimmed("/sys/class/graphics/fb0/virtual_size").unwrap_or_else(|| "--".into()));
-    push("runtime", format!("PocketJS {}", version).trim().to_string());
+    // Concrete versions so the SYSTEM page can state what is actually running.
+    let release = std::fs::read_to_string("/etc/baseos-release").unwrap_or_default();
+    let rel = |name: &str| release.lines()
+        .find(|l| l.starts_with(&format!("{}=", name)))
+        .map(|l| l.trim_start_matches(&format!("{}=", name)).trim_matches('"').to_string())
+        .unwrap_or_default();
+    let sdk = { let v = rel("PJOS_SDK_VERSION"); if v.is_empty() { "0.15.0".to_string() } else { v } };
+    let abi = { let v = rel("POCKETJS_ABI"); if v.is_empty() { "12".to_string() } else { v } };
+    push("sdk", sdk.clone());
+    push("abi", abi.clone());
+    push("build", { let v = rel("BASEOS_BUILD"); if v.is_empty() { "--".to_string() } else { v } });
+    push("runtime", format!("PocketJS {} (abi {})", sdk, abi));
     out.join("\n")
 }
 '''
