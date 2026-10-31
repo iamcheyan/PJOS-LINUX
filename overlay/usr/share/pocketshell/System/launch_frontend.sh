@@ -143,6 +143,21 @@ if ! check_package "$PACKAGE"; then
     fi
 fi
 
+# Sleep and hotkey helpers may live on the card (they can be fixed without
+# rebuilding this read-only OS image). rcS already started the image copies; these
+# replace them with the card builds when present, one instance each.
+if [ -x "$SD/System/baseos-screen-idle" ]; then
+    [ -r /run/baseos-screen-idle.pid ] && kill "$(cat /run/baseos-screen-idle.pid)" 2>/dev/null || :
+    /bin/sh "$SD/System/baseos-screen-idle" </dev/null >/dev/null 2>&1 &
+    log "helpers: card screen-idle started"
+fi
+if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
+    [ -r /run/baseos-hotkeys.pid ] && kill "$(cat /run/baseos-hotkeys.pid)" 2>/dev/null || :
+    "$SD/System/bin/baseos-hotkeys" --power-dev /dev/input/event0 --pad-dev /dev/input/event1 \
+        </dev/null >/dev/null 2>&1 &
+    log "helpers: hotkeys started"
+fi
+
 started=$(date +%s 2>/dev/null || printf '0')
 log "launching runtime; package=$PACKAGE args=$display_args $input_args"
 (

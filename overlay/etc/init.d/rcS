@@ -395,6 +395,27 @@ if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-screen-idle ]; then
 	/usr/sbin/baseos-screen-idle </dev/null >/dev/null 2>&1 &
 fi
 
+# Power key and the SELECT+START quit combo. The H700 kernel reports KEY_POWER on
+# event0 and the gamepad on event1; nothing else in BaseOS listens to either, so
+# the button did nothing. Short press = panel off (screen-off sleep, everything
+# keeps running), 2 s hold = poweroff, SELECT+START = force-quit the frontend
+# (frontend-session respawns the launcher). Device nodes are resolved by name so a
+# different input order still works.
+if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-hotkeys ]; then
+	power_dev=$(for e in /dev/input/event*; do
+		[ -e "$e" ] || continue
+		[ "$(cat "/sys/class/input/${e##*/}/device/name" 2>/dev/null)" = "axp2202-pek" ] && { echo "$e"; break; }
+	done)
+	pad_dev=$(for e in /dev/input/event*; do
+		[ -e "$e" ] || continue
+		[ "$(cat "/sys/class/input/${e##*/}/device/name" 2>/dev/null)" = "ANBERNIC-keys" ] && { echo "$e"; break; }
+	done)
+	/usr/sbin/baseos-hotkeys \
+		--power-dev "${power_dev:-/dev/input/event0}" \
+		--pad-dev "${pad_dev:-/dev/input/event1}" \
+		</dev/null >/dev/null 2>&1 &
+fi
+
 # Dev image extras (serial getty is in inittab; this starts SSH).
 [ -x /etc/init.d/dev ] && /etc/init.d/dev &
 

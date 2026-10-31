@@ -17,6 +17,7 @@
 set -u
 
 STAMP=/run/screen-idle.stamp
+PIDFILE=/run/baseos-screen-idle.pid
 LOG=/tmp/baseos-screen-idle.log
 DEFAULT_TIMEOUT=30s
 # Candidate backlight nodes, most specific first.
@@ -67,6 +68,21 @@ find_backlight() {
 
 BL=$(find_backlight) || { log "no writable backlight node; idle blanking disabled"; exit 0; }
 log "backlight node: $BL"
+# Single instance: a frontend restart must replace the previous helper, not stack
+# another one on top of it (each stack would fight over the panel).
+if [ -r "$PIDFILE" ]; then
+    previous=$(cat "$PIDFILE" 2>/dev/null || :)
+    case "$previous" in
+    ''|*[!0-9]*) : ;;
+    *)
+        if kill -0 "$previous" 2>/dev/null; then
+            log "already running as $previous; exiting"
+            exit 0
+        fi
+        ;;
+    esac
+fi
+printf '%s\n' "$$" > "$PIDFILE" 2>/dev/null || :
 
 # Read the resting level once. Never restore to 0: a saved 0 would leave the
 # panel dark after the first wake.
@@ -85,14 +101,31 @@ touch "$STAMP" 2>/dev/null || : >"$STAMP"
 # refreshes the idle stamp. evdev allows several readers, so this does not steal
 # events from the runtime.
 spawn_readers() {
+    # Drop devices that were removed. Their reader exits on its own, but keeping the
+    # name here would stop the device from being watched again when it comes back.
+    for known in $READERS; do
+        [ -e "$known" ] && continue
+        READERS=$(printf '%s\n' $READERS | grep -vx "$known" | tr '\n' ' ')
+        log "stopped watching $known (removed)"
+    done
     for dev in /dev/input/event*; do
         [ -e "$dev" ] || continue
         case " $READERS " in *" $dev "*) continue ;; esac
         (
+            buffer="/tmp/.screen-idle-${dev##*/}"
             while :; do
-                timeout 3600 dd if="$dev" bs=24 count=1 of=/dev/null 2>/dev/null
-                touch "$STAMP" 2>/dev/null || :
+                timeout 3600 dd if="$dev" bs=24 count=1 of="$buffer" 2>/dev/null || :
+                if [ "$(wc -c <"$buffer" 2>/dev/null || echo 0)" -eq 24 ]; then
+                    touch "$STAMP" 2>/dev/null || :
+                else
+                    # dd returns instantly when the device is gone. Refreshing the stamp
+                    # here would keep the panel lit forever (and burn the CPU), so brake,
+                    # and stop watching a node that disappeared.
+                    [ -e "$dev" ] || break
+                    sleep 1
+                fi
             done
+            rm -f "$buffer"
         ) &
         READERS="$READERS $dev"
         log "watching $dev"
@@ -112,6 +145,14 @@ while :; do
             log "blanking disabled; panel restored"
         fi
         sleep 5
+        continue
+    fi
+
+    # The power key turns the panel off on purpose. Leave the node alone until it is
+    # toggled back, otherwise the idle loop fights the hotkey daemon every second.
+    if [ -e /run/panel.off ]; then
+        blanked=0
+        sleep 1
         continue
     fi
 
