@@ -58,7 +58,6 @@ docker run --rm --platform linux/arm64 \
   -v "$PROFILE:/in/pocket_profile.rs:ro" \
   -v "$HERE/src/apply-pocketjs-input.py:/in/apply-input.py:ro" \
   -v "$HERE/src/apply-pocketjs-bridge.py:/in/apply-bridge.py:ro" \
-  -v "$HERE/src/pocketjs-narrow-workspace.py:/in/narrow.py:ro" \
   -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
   -v "$CARGO_CACHE:/cargo-cache" \
   -v "$HERE/work/pocketjs-runtime:/out" \
@@ -82,7 +81,9 @@ docker run --rm --platform linux/arm64 \
 
     # Same workspace narrowing the ROCKNIX recipe performs: the Linux KMS host
     # plus the bindings shim that pulls rquickjs in.
-    python3 /in/narrow.py /work/src
+    # Upstream narrowing + the pinned rquickjs shim crate (rocknix-pocketjs-bindings)
+    # live in the ROCKNIX recipe; it also rewrites members/default-members itself.
+    python3 /in/rocknix-scripts/prepare-workspace.py /work/src cargo
 
     python3 /in/apply-input.py /work/src
 
