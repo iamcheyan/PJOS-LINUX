@@ -149,7 +149,10 @@ Wi-Fi 与已安装程序的启动接口在 `docs/19-wifi-and-app-launch.md`，�
 
 - **系统镜像**：`build-all.sh rg34xx` 仍在 tools/rootfs 阶段，`.bosupd` 还没产出；os-release
   改名要等它刷进机器才看得见。
-- **runtime 重编**：本轮第一次成功构建尚未完成（前三次分别死在第 4 节的 1–3 条）。
+- **runtime 重编**：已成功。产物 `work/pocketjs-runtime/pocket-linux-kms`，3,126,048 B，
+  sha256 `a3be425f648785e0…`，静态 aarch64；已装到掌机并验证 `boot.pocket` 与
+  `apps/files.pocket` 都能 admission，`LAUNCH` 路径端到端跑通（见 `pocketshell`
+  仓库 `docs/device/app-files-launch.png` 与 `returned-to-launcher.png`）。
 - **长按电源键真关机**：只验证到日志 `power: long press -> poweroff`，真实断电需人手确认。
 - **亮度滑条**：`DISP_CMD_LCD_SET_BRIGHT (0x102)` 仍是 EPERM（内核独占），只能写图像增强
   `enhance_bright` 作为近似。
