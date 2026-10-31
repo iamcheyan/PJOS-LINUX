@@ -306,7 +306,10 @@ PY
   find "$R/usr/bin" "$R/usr/sbin" "$R/usr/libexec" -type f | while read -r f; do
     head -c4 "$f" | grep -q "^.ELF" || continue
     case "$f" in
-      */busybox|*/dropbearmulti|*/curl|*/fbsplash|*/gptgrow|*/gptslot|*/ldconfig|*/ldconfig.real|*/rtk_hciattach|*/sftp-server|*/adbd|*/axp-off|*/charger-wait|*/avahi-daemon|*/boot-clock|*/native-health|*/baseos-regs|*/e2fsck) continue ;;
+      # Static Go binaries make the aarch64 loader segfault rather than report
+      # "not a dynamic executable", so they cannot be probed this way: they are
+      # fully static by construction (no PT_INTERP, no DT_NEEDED).
+      */busybox|*/dropbearmulti|*/curl|*/fbsplash|*/gptgrow|*/gptslot|*/ldconfig|*/ldconfig.real|*/rtk_hciattach|*/sftp-server|*/adbd|*/axp-off|*/charger-wait|*/avahi-daemon|*/boot-clock|*/native-health|*/baseos-regs|*/baseos-panel|*/baseos-hotkeys|*/e2fsck) continue ;;
     esac
     if ! chroot "$R" /usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 --list \
         "${f#"$R"}" 2>/dev/null | grep -q "=>"; then
