@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pjos.local/schema/soc-1.json",
+  "title": "PJOS SoC Profile",
+  "description": "Facts shared by every board on one SoC. See docs/bsp-v2/02-bsp-boundary.md §4.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "soc", "arch", "kernel", "harvest", "nodes", "hw_init"],
+  "properties": {
+    "schema": { "const": "pjos.soc/1" },
+    "soc": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+/[a-z0-9]+$",
+      "description": "vendor/soc; must match the directory path bsp/<vendor>/<soc>/."
+    },
+    "arch": { "enum": ["aarch64", "armv7", "x86_64"] },
+    "kernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "modules"],
+      "properties": {
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["release", "abi_guard"],
+          "properties": {
+            "release": { "type": "string" },
+            "abi_guard": {
+              "type": "array",
+              "items": { "enum": ["release", "version", "banner"] },
+              "minItems": 1
+            }
+          }
+        },
+        "profiles": { "type": "string", "description": "Path within the SoC dir." },
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "source"],
+            "properties": {
+              "name": { "type": "string" },
+              "source": { "enum": ["vendor", "bsp"] },
+              "build": { "type": "string" },
+              "flat": { "type": "string", "pattern": "^/usr/lib/modules/" }
+            }
+          }
+        }
+      }
+    },
+    "dtb": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "enum": ["stock", "bsp"] },
+        "from": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "harvest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["list"],
+      "properties": {
+        "list": { "type": "string" },
+        "base": { "enum": ["stock", "stockmod"] }
+      }
+    },
+    "nodes": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Subsystem -> node declarations. Board-level overrides deep-merge; null deletes a key. See docs/bsp-v2/02-bsp-boundary.md §4.1."
+    },
+    "hw_init": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step", "when"],
+        "properties": {
+          "step": { "type": "string" },
+          "module": { "type": "string" },
+          "when": { "enum": ["boot", "before-frontend", "charger", "suspend"] },
+          "background": { "type": "boolean" },
+          "pre": { "type": "string" },
+          "retry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "unload": { "type": "boolean" },
+              "hold_ms": { "type": "integer", "minimum": 0 },
+              "attempts": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": { "enum": ["yes", "no", "unknown"] }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": { "enum": ["yes", "no", "unknown"] }
+    }
+  }
+}

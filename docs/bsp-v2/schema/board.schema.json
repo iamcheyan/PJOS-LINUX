@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pjos.local/schema/board-1.json",
+  "title": "PJOS Board Profile v2",
+  "description": "The single source of truth for one board. See docs/bsp-v2/02-bsp-boundary.md §5.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "soc", "identity", "panel", "display", "input", "capabilities", "features"],
+  "properties": {
+    "schema": { "const": "pjos.board/1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+$",
+      "description": "Must equal the directory name under bsp/boards/."
+    },
+    "soc": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+/[a-z0-9]+$",
+      "description": "vendor/soc; resolves to bsp/<vendor>/<soc>/soc.json."
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "model_string", "frontend_family", "firmware_prefix"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "model_string": { "type": "string", "minLength": 1 },
+        "frontend_family": { "type": "string", "minLength": 1 },
+        "firmware_prefix": { "type": "string", "minLength": 1 },
+        "firmware_alias": { "type": ["string", "null"] }
+      }
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "rotation_ccw"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "rotation_ccw": { "enum": [0, 90, 180, 270] },
+        "bpp": { "type": "integer", "minimum": 1 },
+        "density": { "type": "number", "exclusiveMinimum": 0 },
+        "logical_width": { "type": "integer", "minimum": 1 },
+        "logical_height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "node"],
+      "properties": {
+        "backend": { "enum": ["fbdev", "drm"] },
+        "node": { "type": "string", "pattern": "^/dev/" },
+        "vsync": { "enum": ["timer", "pageflip"] },
+        "brightness_control": { "enum": ["ioctl", "sysfs", "none"] }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keyboard_name": { "type": "string" },
+        "event_hint": { "type": "string" },
+        "buttons": { "type": "array", "items": { "type": "string" } },
+        "power_key_match": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name_prefix": { "type": "string" },
+            "name_suffix": { "type": "string" }
+          }
+        },
+        "menu_gpio_label": { "type": "string" },
+        "menu_source": { "enum": ["gpio", "evdev", "none"] }
+      },
+      "anyOf": [
+        { "required": ["keyboard_name"] },
+        { "required": ["event_hint"] }
+      ]
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "card": { "type": "integer", "minimum": 0 },
+        "controls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "master": {
+              "type": "array",
+              "items": { "type": ["string", "integer"] },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "lineout": {
+              "type": "array",
+              "items": { "type": ["string", "integer"] },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "routing": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "amp_module": { "type": ["string", "null"] },
+        "headphone_pop_fix_default": { "type": "boolean" }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "battery": { "type": ["string", "null"] },
+        "charger": { "type": ["string", "null"] },
+        "led": { "type": ["string", "null"] },
+        "vibration": { "type": ["string", "null"] },
+        "suspend": { "enum": ["mem", "standby", "none"] },
+        "os_sleep_value": { "type": ["integer", "null"] },
+        "charge_only_boot": { "type": "boolean" }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wifi": { "type": "boolean" },
+        "bluetooth": { "type": "boolean" },
+        "wifi_iface": { "type": "string" },
+        "bt_uart": { "type": ["string", "null"] }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layout": { "enum": ["baseos-ab-v1"] },
+        "expand_target": { "type": "string" },
+        "tf2_disk": { "type": ["string", "null"] }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wifi", "bluetooth", "touch", "vibration", "hdmi", "gpu",
+        "rtc", "usb_gadget", "usb_host", "brightness", "audio"
+      ],
+      "properties": {
+        "wifi": { "$ref": "#/$defs/tri" },
+        "bluetooth": { "$ref": "#/$defs/tri" },
+        "touch": { "$ref": "#/$defs/tri" },
+        "vibration": { "$ref": "#/$defs/tri" },
+        "hdmi": { "$ref": "#/$defs/tri" },
+        "gpu": { "$ref": "#/$defs/tri" },
+        "rtc": { "$ref": "#/$defs/tri" },
+        "usb_gadget": { "$ref": "#/$defs/tri" },
+        "usb_host": { "$ref": "#/$defs/tri" },
+        "brightness": { "$ref": "#/$defs/tri" },
+        "audio": { "$ref": "#/$defs/tri" }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bt_sink", "bt_source", "audio_hw_volume", "audio_hw_mute",
+        "display_rotation", "display_output_switch", "suspend", "rtc_alarm",
+        "usb_storage_export", "usb_adb", "usb_host_input", "wifi_ap"
+      ],
+      "properties": {
+        "bt_sink": { "$ref": "#/$defs/tri" },
+        "bt_source": { "$ref": "#/$defs/tri" },
+        "audio_hw_volume": { "$ref": "#/$defs/tri" },
+        "audio_hw_mute": { "$ref": "#/$defs/tri" },
+        "display_rotation": { "$ref": "#/$defs/tri" },
+        "display_output_switch": { "$ref": "#/$defs/tri" },
+        "suspend": { "$ref": "#/$defs/tri" },
+        "rtc_alarm": { "$ref": "#/$defs/tri" },
+        "usb_storage_export": { "$ref": "#/$defs/tri" },
+        "usb_adb": { "$ref": "#/$defs/tri" },
+        "usb_host_input": { "$ref": "#/$defs/tri" },
+        "wifi_ap": { "$ref": "#/$defs/tri" }
+      }
+    },
+    "logo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "enum": ["generated", "vendor"] },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": { "type": "object" },
+        "hw_init": { "type": "array" }
+      }
+    }
+  },
+  "$defs": {
+    "tri": { "enum": ["yes", "no", "unknown"] }
+  }
+}
