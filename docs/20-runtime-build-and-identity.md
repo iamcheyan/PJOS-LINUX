@@ -106,6 +106,27 @@ adb shell '/storage/System/pocketjs/bin/pocket-linux-kms.new --package /storage/
 
 ---
 
+
+### 3.1 镜像构建（build-all.sh）在这台机器上还缺的四样东西
+
+`build-all.sh rg34xx` 除了 rootfs 还需要原生 loader（`experiments/h700-boot-speed/native`），
+它依赖宿主环境里几样不在仓库里的东西。逐条记下来，换机器时照抄：
+
+1. **u-boot 源码包**：`work/h700-loader/mainline/u-boot-v2026.10.tar.gz`，来自
+   `https://github.com/u-boot/u-boot/archive/refs/tags/v2026.10.tar.gz`，
+   脚本用 `PIN` 校验 sha256 = `f943a88389c8fd70a6b0d061a88267465e143c7ca6ea2b75837ab20f5b60c739`。
+   不在仓库里、也不会自动下载，缺了会报 `FileNotFoundError`。
+2. **`baseos-h700-mainline` 容器**：SPL 在容器里用 `aarch64-linux-gnu-` 交叉编出来。
+   需要 `build-essential gcc/binutils-aarch64-linux-gnu bison flex bc libssl-dev swig
+   device-tree-compiler python3 u-boot-tools`，容器只要常驻（`sleep infinity`）即可。
+3. **带 `unicorn` 和 `capstone` 的 Python**：`build-release.py` 会 import 它们做启动轨迹校验。
+   用一个独立 venv，通过 `BASEOS_NATIVE_PYTHON=/path/to/venv/bin/python` 指过去。
+4. **`clang` 在 PATH 上**：脚本用 `shutil.which("clang")` 找编译器（target `armv7a-none-eabi`）。
+   Debian 只装了 `clang-19` 而没有 `clang` 软链时，要自己做一个 shim 目录加到 PATH 前面。
+
+缺任何一样都会在中途退出，且错误信息都不直白（`FileNotFoundError`、`expected str … not NoneType`、
+`docker exec … exit 1`），所以按这个顺序先自检。
+
 ## 4. 这一轮踩的坑（按发生顺序）
 
 1. **`python3 /in/narrow.py` 报 "can't find '__main__' module"**
