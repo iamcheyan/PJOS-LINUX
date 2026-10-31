@@ -280,6 +280,17 @@ fi
 /bin/mkdir -p /run/dbus /var/lib/dbus
 /bin/ln -sf /run/machine-id /var/lib/dbus/machine-id
 
+# H700 Bluetooth is a UART H5 controller, not a probe-and-go HCI device. The
+# vendor-compatible script loads rtl_btlpm, attaches ttyS1 with rtk_hciattach,
+# then raises hci0. Keep attach alive independently of a PocketJS request.
+(
+	if [ -x /mnt/vendor/ctrl/setBluetooth.sh ]; then
+		if /mnt/vendor/ctrl/setBluetooth.sh all; then
+			/usr/sbin/systemctl start bluetooth
+			bluetoothctl power on >/dev/null 2>&1 || true
+		fi
+	) >/run/bluetooth-init.log 2>&1 &
+
 # First boot on a fresh flash: grow this card's data partition to fill the
 # whole card (leaving it empty for the user to add a frontend). No-op once the
 # card already fills the disk.

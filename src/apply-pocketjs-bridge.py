@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """Make the PocketShell launcher bridge work on BaseOS.
 
-The bridge was written for ROCKNIX, where /storage/.config already exists and
-systemd runs the screen-timeout daemon. On BaseOS the settings directory does not
-exist at all, so every `write` of runtime.conf failed and the launcher reported a
-timeout that was never saved -- the panel stayed lit forever. Likewise
-`systemctl try-restart pocketjs-sleep.service` has nothing to talk to.
+The original picker assumed a Bluetooth UART controller and BlueZ daemon already
+existed. BaseOS must attach the H5 UART, start D-Bus/BlueZ and return discovery
+results within the PocketJS bridge's two-second command limit.
 
 This patch:
   * creates the parent directory before writing settings,
   * treats a settings write that cannot happen as a visible error instead of a
     silent success,
   * drops the systemd restart (BaseOS blanks the panel from rcS instead),
-  * reports Wi-Fi state from wpa_cli instead of the absent rocknix-settings.
-
-Fail-closed: if an anchor disappears the build stops rather than shipping a
-launcher whose switches do nothing.
+  * reports Wi-Fi state from wpa_cli instead of the absent rocknix-settings,
+  * reads and writes the physical panel backlight through baseos-panel,
+  * attaches Bluetooth, starts discovery asynchronously, and reads BlueZ's cache.
 """
 from __future__ import annotations
 
@@ -39,6 +36,7 @@ def replace_once(old: str, new: str, label: str) -> str:
 
 
 # 1) SLEEP: create the directory, and stop pretending systemd owns the blanking.
+
 text = replace_once(
     '''        ["SLEEP", timeout] if ["never", "10s", "30s", "1m", "5m", "15m", "30m", "1h"].contains(timeout) => {
             let path = std::path::Path::new("/storage/.config/pocketjs/runtime.conf");''',
@@ -96,17 +94,23 @@ text = replace_once(
 )
 
 text = replace_once(
-    '''        _ => "Unknown launcher action".into(),''',
-    '''        ["WIFI", "scan"] => wifi_scan(),
-        ["WIFI", "status"] => wifi_status(),
-        ["WIFI", "connect", ssid] => wifi_connect(ssid, ""),
-        ["WIFI", "connect", ssid, psk] => wifi_connect(ssid, psk),
-        ["WIFI", "off"] => {
-            let _ = run("wpa_cli", &["-i", "wlan0", "disconnect"]);
-            let _ = run("ip", &["link", "set", "wlan0", "down"]);
-            "off".into()
-        }
-        ["BT", "on"] => {
+    '''        ["WIFI", "connect", ssid, psk] => wifi_connect(ssid, psk),
+        ["WIFI", "off"] => {''',
+    '''        ["WIFI", "connect", ssid, psk] => wifi_connect(ssid, psk),
+        ["BT", "status"] => bluetooth_status(),
+        ["BT", "scan"] => bluetooth_scan(),
+        ["BT", "connect", mac] => bluetooth_connect(mac),
+        ["BT", "forget", mac] => bluetooth_forget(mac),
+        ["BT", "disconnect", mac] => bluetooth_disconnect(mac),
+        ["CONTROL", "bluetooth", state] if ["on", "off"].contains(state) => bluetooth_power(state),
+        ["WIFI", "off"] => {''',
+    "Bluetooth actions used by the picker",
+)
+
+# Remove obsolete BT arms from the older patch stage. Bluetooth is supplied
+# below with attach, daemon lifecycle and the picker response protocol.
+text = text.replace(
+    '''        ["BT", "on"] => {
             let _ = run("rfkill", &["unblock", "bluetooth"]);
             bluetooth_state()
         }
@@ -116,8 +120,8 @@ text = replace_once(
         }
         ["BT", "scan"] => bluetooth_scan(),
         ["BT", "pair", mac] => bluetooth_pair(mac),
-        _ => "Unknown launcher action".into(),''',
-    "wifi/bluetooth commands",
+''',
+    "",
 )
 
 # Helpers appended to the module.
@@ -232,49 +236,91 @@ fn wifi_connect(ssid: &str, psk: &str) -> String {
     "Unable to connect".into()
 }
 
-// ── Bluetooth ───────────────────────────────────────────────────────────────
-// bluetoothctl exists but BaseOS ships no bluetoothd, so scanning can only work
-// once the daemon is present. Report that plainly instead of a dead toggle.
-fn bluetooth_state() -> String {
-    match run("rfkill", &["list", "bluetooth"]) {
-        Some(text) if text.contains("Soft blocked: yes") => "off".into(),
-        Some(_) => {
-            if run("bluetoothctl", &["show"]).map(|t| t.contains("Powered: yes")).unwrap_or(false) {
-                "on".into()
-            } else {
-                "blocked".into()
-            }
-        }
-        None => "unknown".into(),
+// ── Bluetooth (RTL8821CS H5 UART + BlueZ) ──────────────────────────────────
+// ROCKNIX starts the UART attach helper before BlueZ. The UI bridge used to
+// skip both steps, then synchronously wait eight seconds for bluetoothctl
+// output; its host runner kills commands after two seconds and the output format
+// is D-Bus progress, not the device cache. Attach/service start are therefore
+// backgrounded, discovery is started in the background, and this call returns
+// the BlueZ device cache immediately.
+const BT_ATTACH: &str = "/mnt/vendor/ctrl/setBluetooth.sh";
+
+fn bluetooth_ready() -> bool {
+    let _ = run("rfkill", &["unblock", "bluetooth"]);
+    if run("hciconfig", &["hci0"]).is_none() {
+        let _ = run(BT_ATTACH, &["all"]);
+    }
+    if run("hciconfig", &["hci0", "up"]).is_none() {
+        return false;
+    }
+    run("/usr/sbin/systemctl", &["start", "bluetooth"]).is_some()
+}
+
+fn bluetooth_status() -> String {
+    if !bluetooth_ready() {
+        return "powered=no\naddress=".into();
+    }
+    let Some(text) = run("bluetoothctl", &["show"]) else {
+        return "powered=no\naddress=".into();
+    };
+    let address = text.lines().find_map(|line| line.trim().strip_prefix("Controller "))
+        .and_then(|line| line.split_whitespace().next()).unwrap_or("");
+    let powered = text.lines().any(|line| line.trim() == "Powered: yes");
+    format!("powered={}\naddress={}", if powered { "yes" } else { "no" }, address)
+}
+
+fn bluetooth_power(state: &str) -> String {
+    if !bluetooth_ready() {
+        return "error:bluez".into();
+    }
+    let answer = run("bluetoothctl", &["power", state]).unwrap_or_default();
+    if answer.contains("succeeded") || answer.contains("already") {
+        format!("powered={}", state)
+    } else {
+        "error:power".into()
     }
 }
 
 fn bluetooth_scan() -> String {
-    let _ = run("rfkill", &["unblock", "bluetooth"]);
-    match run("bluetoothctl", &["--timeout", "8", "scan", "on"]) {
-        Some(text) => {
-            let mut rows = String::new();
-            for line in text.lines() {
-                if let Some(rest) = line.strip_prefix("Device ") {
-                    if let Some((mac, name)) = rest.split_once(' ') {
-                        rows.push_str(&format!("{}\\t{}\\n", mac, name.trim()));
-                    }
-                }
-            }
-            if rows.is_empty() { "empty".into() } else { rows }
+    if !bluetooth_ready() {
+        return "error:bluez".into();
+    }
+    let _ = run_detached("bluetoothctl", &["--timeout", "12", "scan", "on"]);
+    let Some(text) = run("bluetoothctl", &["devices"]) else {
+        return "error:bluez".into();
+    };
+    let mut rows = String::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("Device ") else { continue };
+        let Some((mac, name)) = rest.split_once(' ') else { continue };
+        if mac.len() == 17 && mac.bytes().filter(|b| *b == b':').count() == 5 {
+            rows.push_str(&format!("{}\t{}\t-127\t0\n", mac, name.trim()));
         }
-        None => "error:no-daemon".into(),
+    }
+    if rows.is_empty() { "empty".into() } else { rows }
+}
+
+fn bluetooth_connect(mac: &str) -> String {
+    if !bluetooth_ready() { return "error:bluez".into(); }
+    match run("bluetoothctl", &["connect", mac]) {
+        Some(text) if text.contains("Connection successful") || text.contains("already connected") => format!("connected:{}", mac),
+        _ => format!("error:connect:{}", mac),
     }
 }
 
-fn bluetooth_pair(mac: &str) -> String {
-    match run("bluetoothctl", &["pair", mac]) {
-        Some(text) if text.contains("Pairing successful") || text.contains("AlreadyExists") => {
-            let _ = run("bluetoothctl", &["trust", mac]);
-            let _ = run("bluetoothctl", &["connect", mac]);
-            format!("paired:{}", mac)
-        }
-        _ => "Pairing failed".into(),
+fn bluetooth_forget(mac: &str) -> String {
+    if !bluetooth_ready() { return "error:bluez".into(); }
+    match run("bluetoothctl", &["remove", mac]) {
+        Some(_) => format!("ok:forgot:{}", mac),
+        None => format!("error:forget:{}", mac),
+    }
+}
+
+fn bluetooth_disconnect(mac: &str) -> String {
+    if !bluetooth_ready() { return "error:bluez".into(); }
+    match run("bluetoothctl", &["disconnect", mac]) {
+        Some(_) => format!("ok:disconnected:{}", mac),
+        None => format!("error:disconnect:{}", mac),
     }
 }
 '''
@@ -282,10 +328,16 @@ if "fn wifi_scan()" not in text:
     text = text.rstrip() + helpers
     print("appended wifi/bluetooth helpers")
 
-# 4) Brightness and the compat shims. BaseOS exposes panel brightness through
-#    /sys/class/disp/disp/attr/enhance_bright, not /sys/class/backlight, and its
-#    heya-control/rocknix-services helpers live under /mnt/sdcard/System/compat/bin
-#    which is not on PATH -- so the slider and the service switches were no-ops.
+# 4) Brightness uses baseos-panel to drive and read the real PWM backlight;
+#    heya-control's brightness alias writes enhance_bright, which is not it.
+run_old = '''fn run(program: &str, args: &[&str]) -> Option<String> {
+    let mut argv: Vec<&str> = vec!["2", program];
+    argv.extend_from_slice(args);'''
+run_new = '''fn run(program: &str, args: &[&str]) -> Option<String> {
+    let mut argv: Vec<&str> = vec![if program == "bluetoothctl" { "8" } else { "2" }, program];
+    argv.extend_from_slice(args);'''
+if run_old in text:
+    text = text.replace(run_old, run_new, 1)
 text = replace_once(
     '''        ["LEVEL", "brightness"] => {
             if let Ok(entries) = std::fs::read_dir("/sys/class/backlight") {
@@ -314,8 +366,7 @@ text = replace_once(
                     Err(_) => "Invalid setting".into(),
                 };
             }
-            let tool = compat_tool("heya-control");
-            match run(&tool, &[control, value]) {
+            match run(&compat_tool("heya-control"), &[control, value]) {
                 Some(_) => "Setting updated".into(),
                 None => "Setting failed".into(),
             }''',
@@ -323,70 +374,14 @@ text = replace_once(
 )
 
 text = replace_once(
-    '''        [\"SERVICE\", key] if [\"adbd.enabled\", \"adbusb.enabled\", \"ssh.enabled\", \"avahi.enabled\", \"ftp.enabled\", \"http.enabled\", \"rsyncd.enabled\", \"samba.enabled\", \"syncthing.enabled\", \"telnet.enabled\", \"pocketshell-dev.enabled\"].contains(key) => {
+    '''        ["SERVICE", key] if ["adbd.enabled", "adbusb.enabled", "ssh.enabled", "avahi.enabled", "ftp.enabled", "http.enabled", "rsyncd.enabled", "samba.enabled", "syncthing.enabled", "telnet.enabled", "pocketshell-dev.enabled"].contains(key) => {
             match run("rocknix-services", &["toggle", key]) {''',
-    '''        [\"SERVICE\", key] if [\"adbd.enabled\", \"adbusb.enabled\", \"ssh.enabled\", \"avahi.enabled\", \"ftp.enabled\", \"http.enabled\", \"rsyncd.enabled\", \"samba.enabled\", \"syncthing.enabled\", \"telnet.enabled\", \"pocketshell-dev.enabled\"].contains(key) => {
+    '''        ["SERVICE", key] if ["adbd.enabled", "adbusb.enabled", "ssh.enabled", "avahi.enabled", "ftp.enabled", "http.enabled", "rsyncd.enabled", "samba.enabled", "syncthing.enabled", "telnet.enabled", "pocketshell-dev.enabled"].contains(key) => {
             match run(&compat_tool("rocknix-services"), &["toggle", key]) {''',
     "service shim path",
 )
 
-helpers_bright = '''
 
-// ── Brightness (BaseOS panel attribute) ─────────────────────────────────────
-// The vendor kernel has no backlight class; brightness lives in a display
-// attribute that carries 0..255. 0 is "off", so a requested 0 still maps to the
-// lowest visible step instead of a black panel the user cannot undo.
-const BRIGHT_PATH: &str = "/sys/class/disp/disp/attr/enhance_bright";
-const COMPAT_DIRS: [&str; 2] = ["/mnt/sdcard/System/compat/bin", "/storage/System/compat/bin"];
-
-fn compat_tool(name: &str) -> String {
-    for dir in COMPAT_DIRS {
-        let path = format!("{}/{}", dir, name);
-        if std::path::Path::new(&path).exists() {
-            return path;
-        }
-    }
-    name.to_string()
-}
-
-fn bright_raw() -> Option<u32> {
-    let text = std::fs::read_to_string(BRIGHT_PATH).ok()?;
-    text.split_whitespace().next()?.parse::<u32>().ok()
-}
-
-fn brightness_level() -> String {
-    match bright_raw() {
-        Some(value) => ((value.min(255) * 100) / 255).to_string(),
-        // Fall back to the ROCKNIX location when the vendor node is absent.
-        None => {
-            if let Ok(entries) = std::fs::read_dir("/sys/class/backlight") {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let read = |name| std::fs::read_to_string(path.join(name)).ok()?.trim().parse::<u32>().ok();
-                    if let (Some(current), Some(max)) = (read("brightness"), read("max_brightness")) {
-                        if max > 0 { return (current * 100 / max).to_string(); }
-                    }
-                }
-            }
-            "unknown".into()
-        }
-    }
-}
-
-fn set_brightness(percent: u32) -> String {
-    let percent = percent.min(100);
-    let value = ((percent * 255 + 50) / 100).max(10);
-    let write = std::fs::write(BRIGHT_PATH, format!("{}\\n", value))
-        .or_else(|_| std::fs::write(BRIGHT_PATH, format!("{} {}\\n", value, value)));
-    match write {
-        Ok(_) => "Setting updated".into(),
-        Err(_) => "Setting failed".into(),
-    }
-}
-'''
-if "fn set_brightness" not in text:
-    text = text.rstrip() + helpers_bright
-    print("appended brightness helpers")
 
 
 # 5) Volume: this board's simple mixer control is LINEOUT, not Master, so both

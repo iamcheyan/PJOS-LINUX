@@ -63,7 +63,7 @@ case "$cmd" in
 				[ "$cmd" = restart ] && killall bluetoothd 2>/dev/null
 				ensure_dbus
 				if ! pidof bluetoothd >/dev/null 2>&1; then
-					/usr/libexec/bluetooth/bluetoothd 2>/dev/null &
+					/usr/libexec/bluetooth/bluetoothd </dev/null >/run/bluetoothd.log 2>&1 &
 				fi
 				n=0
 				while ! pidof bluetoothd >/dev/null 2>&1 && [ "$n" -lt 10 ]; do
