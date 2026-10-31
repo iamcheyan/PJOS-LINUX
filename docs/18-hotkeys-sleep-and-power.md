@@ -120,3 +120,42 @@ helper 自己还有 pidfile 单实例保护。
 
 注意：`kill_matching` 的模式不能出现在你正在执行的 `adb shell` 命令行里，否则它会把自己
 那个 shell 一起杀掉（试过，输出直接断掉）。
+
+## 7. 最终方案：/dev/disp 的背光 ioctl（真关屏，4 秒开机不变）
+
+前面所有弯路都记在上面，结论只有一条：**这颗 vendor 内核能关背光，只是不在 sysfs 上，而在
+`/dev/disp` 的 ioctl 里**。
+
+线索来自本仓库 `experiments/h700-boot-speed/uboot-trace-notes/emit.py`：vendor u-boot 的
+`disp_ioctl` 用 `0x104/0x105` 做背光开/关。内核的 disp 驱动沿用同一套命令号：
+
+| cmd | 名称 | 实测 |
+|---|---|---|
+| `0x103` | `DISP_CMD_LCD_GET_BRIGHT` | 返回 `50`（当前亮度，真实值） |
+| `0x104` | `DISP_CMD_BACKLIGHT_ON` | 返回 0 |
+| `0x105` | `DISP_CMD_BACKOFF_OFF` | 返回 0，背光真的断电 |
+
+**参数形态是关键**：`ioctl(fd, cmd, 数值)` 一律 `EFAULT`/`EPERM`；必须传
+`ioctl(fd, cmd, &{sel, value})` —— 两个 u32 的指针。改成指针之后三条命令全部正常。
+
+`baseos-panel` 现在就是：
+
+```go
+args := [2]uint32{0, 0}
+syscall.Syscall(SYS_IOCTL, fd, 0x105, uintptr(unsafe.Pointer(&args[0])))  // 关背光
+syscall.Syscall(SYS_IOCTL, fd, 0x104, uintptr(unsafe.Pointer(&args[0])))  // 开背光
+```
+
+- 自动熄屏：`baseos-screen-idle` 超时后调 `baseos-panel off`（`timeout` 取
+  `/storage/.config/baseos/screen-idle.conf` → 现在 1m）
+- 电源键：短按走同一对 ioctl；长按 2 秒 `baseos-poweroff`；SELECT+START 杀前端
+- 唤醒：`baseos-panel on` 开背光 + 刷新 `/run/screen-idle.stamp`，否则 idle 守护下一秒会再关
+
+不需要换 mainline 内核，开机时间仍是前端 1.65 s 就绪。
+
+### 仍未做
+
+- 设置页的亮度滑条写的还是 `enhance_bright`（图像增强），没接到 `0x102 LCD_SET_BRIGHT`
+  （直传数值时返回 EPERM，要再试指针形态）。
+- 前端内置的「睡眠黑屏 overlay」保留着，作为背光开关失败时的兜底。
+- 长按关机没在真机上验过（会真的断电）。
