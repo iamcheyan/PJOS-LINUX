@@ -66,7 +66,12 @@ find_backlight() {
     return 1
 }
 
-BL=$(find_backlight) || { log "no writable backlight node; idle blanking disabled"; exit 0; }
+PANEL=/usr/sbin/baseos-panel
+[ -x /mnt/sdcard/System/bin/baseos-panel ] && PANEL=/mnt/sdcard/System/bin/baseos-panel
+[ -x "$PANEL" ] || PANEL=
+
+BL=$(find_backlight) || { [ -n "$PANEL" ] || { log "no writable backlight node; idle blanking disabled"; exit 0; }; }
+log "panel helper: ${PANEL:-none (brightness node only)}"
 log "backlight node: $BL"
 # Single instance: a frontend restart must replace the previous helper, not stack
 # another one on top of it (each stack would fight over the panel).
@@ -168,9 +173,17 @@ while :; do
     idle=$(( now - last ))
 
     if [ "$blanked" = 0 ] && [ "$idle" -ge "$timeout" ]; then
-        printf '0\n' >"$BL" 2>/dev/null && { blanked=1; log "panel off after ${idle}s idle"; }
+        if [ -n "$PANEL" ] && "$PANEL" off; then
+            blanked=1; log "panel off after ${idle}s idle"
+        elif printf '0\n' >"$BL" 2>/dev/null; then
+            blanked=1; log "panel dimmed to 0 after ${idle}s idle"
+        fi
     elif [ "$blanked" = 1 ] && [ "$idle" -lt "$timeout" ]; then
-        printf '%s\n' "$saved" >"$BL" 2>/dev/null && { blanked=0; log "panel on after input"; }
+        if [ -n "$PANEL" ] && "$PANEL" on; then
+            blanked=0; log "panel on after input"
+        elif printf '%s\n' "$saved" >"$BL" 2>/dev/null; then
+            blanked=0; log "panel restored after input"
+        fi
     fi
 
     # Pick up devices plugged in after boot.

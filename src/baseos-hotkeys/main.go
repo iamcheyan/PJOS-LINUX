@@ -124,20 +124,39 @@ func panelSet(level int) error {
 	return os.WriteFile(opt.panel, []byte(strconv.Itoa(level)), 0o644)
 }
 
-func toggleSleep() {
-	if panelLit() {
-		level := panelGet()
-		if level <= 0 {
-			level = 50
+
+// panelHelper returns the baseos-panel binary, which owns the FBIOBLANK ioctl.
+func panelHelper() string {
+	for _, candidate := range []string{"/mnt/sdcard/System/bin/baseos-panel", "/usr/sbin/baseos-panel"} {
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			return candidate
 		}
-		os.WriteFile(opt.level, []byte(strconv.Itoa(level)), 0o644)
-		if err := panelSet(0); err != nil {
-			logf("power: panel off failed: %v", err)
-			return
+	}
+	return ""
+}
+
+// panelOff/panelOn prefer the helper (real panel power down) and fall back to the
+// brightness register, which only dims the image.
+func panelOff() bool {
+	if helper := panelHelper(); helper != "" {
+		if err := exec.Command(helper, "off").Run(); err == nil {
+			os.WriteFile(opt.marker, nil, 0o644)
+			return true
 		}
+	}
+	if panelSet(0) == nil {
 		os.WriteFile(opt.marker, nil, 0o644)
-		logf("power: screen off (level %d saved)", level)
-		return
+		return true
+	}
+	return false
+}
+
+func panelOn() bool {
+	if helper := panelHelper(); helper != "" {
+		if err := exec.Command(helper, "on").Run(); err == nil {
+			os.Remove(opt.marker)
+			return true
+		}
 	}
 	level := 50
 	if b, err := os.ReadFile(opt.level); err == nil {
@@ -145,12 +164,27 @@ func toggleSleep() {
 			level = v
 		}
 	}
-	if err := panelSet(level); err != nil {
-		logf("power: panel on failed: %v", err)
+	if panelSet(level) == nil {
+		os.Remove(opt.marker)
+		return true
+	}
+	return false
+}
+
+func toggleSleep() {
+	if _, err := os.Stat(opt.marker); err != nil && panelLit() {
+		if !panelOff() {
+			logf("power: panel off failed")
+			return
+		}
+		logf("power: screen off")
 		return
 	}
-	os.Remove(opt.marker)
-	logf("power: screen on (level %d)", level)
+	if !panelOn() {
+		logf("power: panel on failed")
+		return
+	}
+	logf("power: screen on")
 }
 
 // wakePanel restores the level saved before a power-key sleep and clears the
@@ -160,18 +194,11 @@ func wakePanel() {
 	if _, err := os.Stat(opt.marker); err != nil {
 		return
 	}
-	level := 50
-	if b, err := os.ReadFile(opt.level); err == nil {
-		if v, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && v > 0 {
-			level = v
-		}
-	}
-	if err := panelSet(level); err != nil {
-		logf("wake: panel on failed: %v", err)
+	if !panelOn() {
+		logf("wake: panel on failed")
 		return
 	}
-	os.Remove(opt.marker)
-	logf("wake: panel on (level %d)", level)
+	logf("wake: panel on")
 }
 
 func powerOff() {

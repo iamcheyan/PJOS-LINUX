@@ -143,16 +143,31 @@ if ! check_package "$PACKAGE"; then
     fi
 fi
 
-# Sleep and hotkey helpers may live on the card (they can be fixed without
-# rebuilding this read-only OS image). rcS already started the image copies; these
-# replace them with the card builds when present, one instance each.
+# Sleep and hotkey helpers are kept on the card so they can be fixed without
+# rebuilding the (read-only) OS image. rcS starts the image copies; kill every
+# instance of them here — image and card, by cmdline — and start exactly one card
+# copy each. Two idle daemons fight over the panel and the screen never sleeps.
+kill_matching() {
+    helper_pattern=$1
+    for helper_dir in /proc/[0-9]*; do
+        helper_pid=${helper_dir##*/}
+        [ "$helper_pid" = "$$" ] && continue
+        helper_cmd=$(tr '\0' ' ' < "$helper_dir/cmdline" 2>/dev/null) || continue
+        case "$helper_cmd" in
+        *"$helper_pattern"*) kill -9 "$helper_pid" 2>/dev/null || : ;;
+        esac
+    done
+}
+
 if [ -x "$SD/System/baseos-screen-idle" ]; then
-    [ -r /run/baseos-screen-idle.pid ] && kill "$(cat /run/baseos-screen-idle.pid)" 2>/dev/null || :
+    kill_matching baseos-screen-idle
+    rm -f /run/baseos-screen-idle.pid
     /bin/sh "$SD/System/baseos-screen-idle" </dev/null >/dev/null 2>&1 &
     log "helpers: card screen-idle started"
 fi
 if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
-    [ -r /run/baseos-hotkeys.pid ] && kill "$(cat /run/baseos-hotkeys.pid)" 2>/dev/null || :
+    kill_matching baseos-hotkeys
+    rm -f /run/baseos-hotkeys.pid
     "$SD/System/bin/baseos-hotkeys" --power-dev /dev/input/event0 --pad-dev /dev/input/event1 \
         </dev/null >/dev/null 2>&1 &
     log "helpers: hotkeys started"

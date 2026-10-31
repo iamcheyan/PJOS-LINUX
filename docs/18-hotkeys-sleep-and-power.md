@@ -98,3 +98,25 @@ CGO_ENABLED=0 交叉编译）：
 | SELECT+START | `sendkey event1 310 1` + `311 1` | 运行时 pid 消失，4 s 后新 pid 出现，日志 `combo: SELECT+START -> SIGTERM` |
 | 设备消失后不空转 | 移除 uinput 设备后观察 stamp 与 CPU | stamp 不再刷新，reader 退出，无空转 |
 | 长按关机 | 未做（会真的断电，留待用户手动验） | — |
+
+## 6. 第二次修正：真正的「关灯」不是那个亮度节点
+
+第一版把 `enhance_bright` 写 0 当关屏，读回来是 `0 0`，但面板**亮度一点没变**——那个节点
+是图像增强参数，不是背光。用户实测「按了没反应」就是这么来的。
+
+H700 的 vendor 内核没有 `/sys/class/backlight`，也没有 `bl_power`；能真正关断面板的是
+framebuffer 的 **FBIOBLANK ioctl**（`/dev/fb0`，`FB_BLANK_POWERDOWN=4`）。新增
+`baseos-panel off|on|level N`（`src/baseos-panel`，静态 aarch64）：`off` 发 ioctl，
+失败才退回写亮度节点；`on` 发 `FB_BLANK_UNBLANK` 并恢复 `/run/panel.level`。
+
+`baseos-screen-idle` 和 `baseos-hotkeys` 现在都优先调 `baseos-panel`，没有 helper 才退回旧路径。
+
+### 还有一个坑：镜像里和卡上的 helper 会同时活着
+
+rcS 启动镜像里的 `/usr/sbin/baseos-screen-idle`，`launch_frontend.sh` 又启动卡上的版本。
+两个 idle 进程各有自己的 `blanked` 状态，互相把面板点亮，表现就是「永远不熄屏」。
+现在 launch 脚本按 **cmdline** 杀掉所有同名进程（镜像版 + 卡版），再各启动一个卡版；
+helper 自己还有 pidfile 单实例保护。
+
+注意：`kill_matching` 的模式不能出现在你正在执行的 `adb shell` 命令行里，否则它会把自己
+那个 shell 一起杀掉（试过，输出直接断掉）。
