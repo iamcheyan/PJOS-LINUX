@@ -119,12 +119,26 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   # first — the same hazard the fbsplash applet has further down.
   rm -f "$R/usr/sbin/poweroff" "$R/usr/sbin/reboot"
   cp -R /overlay/. "$R/"
-  if [ -f /overlay/usr/share/pocketshell/System/compat/lib/retroarch ]; then
+  COMPAT=/overlay/usr/share/pocketshell/System/compat
+  if [ -f "$COMPAT/lib/retroarch" ]; then
     mkdir -p "$R/usr/bin" "$R/usr/lib/libretro" "$R/usr/share/retroarch"
-    install -m 0755 /overlay/usr/share/pocketshell/System/compat/lib/retroarch "$R/usr/bin/retroarch"
-    install -m 0644 /overlay/usr/share/pocketshell/System/compat/lib/libretro/mgba_libretro.so "$R/usr/lib/libretro/mgba_libretro.so"
-    install -m 0644 /overlay/usr/share/pocketshell/System/compat/share/retroarch/retroarch.cfg "$R/usr/share/retroarch/retroarch.cfg"
+    install -m 0755 "$COMPAT/lib/retroarch" "$R/usr/bin/retroarch"
+    install -m 0644 "$COMPAT/lib/libretro/mgba_libretro.so" "$R/usr/lib/libretro/mgba_libretro.so"
+    install -m 0644 "$COMPAT/lib/libSDL2-2.0.so.0" "$R/usr/lib/libSDL2-2.0.so.0"
+    install -m 0644 "$COMPAT/lib/libsamplerate.so.0" "$R/usr/lib/libsamplerate.so.0"
+    install -m 0644 "$COMPAT/lib/libUMP.so.3.0.0" "$R/usr/lib/libUMP.so.3.0.0"
+    ln -sf libUMP.so.3.0.0 "$R/usr/lib/libUMP.so.3"
+    install -m 0644 "$COMPAT/share/retroarch/retroarch.cfg" "$R/usr/share/retroarch/retroarch.cfg"
+    for core in gambatte; do
+      [ ! -f "$COMPAT/lib/libretro/${core}_libretro.so" ] || install -m 0644 "$COMPAT/lib/libretro/${core}_libretro.so" "$R/usr/lib/libretro/${core}_libretro.so"
+    done
+    for script in pocket-game-play pocket-gamehub-play pocketshell-games; do
+      [ ! -x "$COMPAT/bin/$script" ] || install -m 0755 "$COMPAT/bin/$script" "$R/usr/bin/$script"
+    done
   fi
+  # Emulator, mGBA, Gambatte, and the ROM player are a rootfs deliverable.
+  # Rebuild and reflash the SYSTEM image for these files; no device flash is
+  # performed by this build step.
   if [ -x /pocketjs-runtime/pocket-linux-kms ]; then
     # BaseOS ships glibc 2.35; a run-time linked against a newer glibc loads
     # nowhere but the build host. Only a static binary survives on the card.

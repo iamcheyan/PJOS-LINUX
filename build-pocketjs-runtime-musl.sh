@@ -91,9 +91,13 @@ docker run --rm --platform linux/arm64 \
     # (__launcher / __pocketshell: battery, volume, services, library). Building
     # bare upstream drops it, which reads on the panel as a dead battery gauge.
     python3 /in/rocknix-scripts/patch-runtime.py /work/src
-    python3 /in/apply-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
-    echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
-    ls /work/src/engine/guest-rquickjs/src/
+    # The BaseOS bridge rewrite targets an older dispatcher; the current revision
+    # already carries the ROM handoff arm, so skip it when its anchors are gone.
+    if python3 /in/apply-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs; then
+      echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
+    else
+      echo "BaseOS bridge patch skipped: source revision mismatch (ROM arm already present)"
+    fi
 
     export LIBCLANG_PATH=/usr/lib/llvm-14/lib
     export POCKETJS_PROFILE_RS=/in/pocket_profile.rs

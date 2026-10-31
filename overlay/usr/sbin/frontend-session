@@ -87,6 +87,15 @@ if mountpoint -q "$SD" 2>/dev/null \
     mv -f "$SD/System/pocketjs/apps/gamehub.pocket.new" "$SD/System/pocketjs/apps/gamehub.pocket"
 fi
 
+if mountpoint -q "$SD" 2>/dev/null \
+    && [ -f /usr/share/pocketshell/System/pocketjs/apps/apotris.gba ] \
+    && [ -d "$SD/apps" ]; then
+    if [ ! -f "$SD/apps/apotris.gba" ]; then
+        install -m 0644 /usr/share/pocketshell/System/pocketjs/apps/apotris.gba "$SD/apps/apotris.gba.new"
+        mv -f "$SD/apps/apotris.gba.new" "$SD/apps/apotris.gba"
+    fi
+fi
+
 # Which loader started this boot, and a diagnostics block when it is useful:
 # read only, at the lowest priority, once per boot, after the menu is up.
 start_diagnostics() {

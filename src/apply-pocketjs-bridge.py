@@ -35,94 +35,10 @@ def replace_once(old: str, new: str, label: str) -> str:
     return text
 
 
-# 1) SLEEP: create the directory, and stop pretending systemd owns the blanking.
-
-text = replace_once(
-    '''        ["SLEEP", timeout] if ["never", "10s", "30s", "1m", "5m", "15m", "30m", "1h"].contains(timeout) => {
-            let path = std::path::Path::new("/storage/.config/pocketjs/runtime.conf");''',
-    '''        ["SLEEP", timeout] if ["never", "10s", "30s", "1m", "5m", "15m", "30m", "1h"].contains(timeout) => {
-            let path = std::path::Path::new("/storage/.config/pocketjs/runtime.conf");
-            // BaseOS ships no /storage/.config; without this the write below fails
-            // and the panel never blanks even though the UI shows a value.
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }''',
-    "settings directory creation",
-)
-
-text = replace_once(
-    '''                Ok(_) => {
-                    // Reload the daemon if it is running.
-                    let _ = run("systemctl", &["try-restart", "pocketjs-sleep.service"]);
-                    format!("Screen timeout set to {}", timeout)
-                }''',
-    '''                Ok(_) => {
-                    // BaseOS blanks the panel from /usr/sbin/baseos-screen-idle,
-                    // which re-reads this file every second; no daemon to restart.
-                    format!("Screen timeout set to {}", timeout)
-                }''',
-    "drop systemd restart",
-)
-
-# 2) The launcher's persisted language/state writes share the same trap.
-if 'create_dir_all(parent)' in text:
-    text = text.replace(
-        '''            if std::fs::create_dir_all(parent).is_err() { return "Unable to save language".into() }''',
-        '''            if std::fs::create_dir_all(parent).is_err() { return "Unable to save language".into() }''',
-        1,
-    )
-
-# 3) Wi-Fi: BaseOS has wpa_supplicant/wpa_cli/udhcpc but nothing starts them, and
-#    rocknix-settings does not exist, so the toggle reported nothing and scanning
-#    was impossible. Report real state and drive the supplicant directly.
-text = replace_once(
-    '''        ["STATE", "wifi"] => match run("rocknix-settings", &["--command", "load", "--key", "wifi.enabled"]) {
-            Some(text) if !text.trim().is_empty() => text.trim().to_string(),
-            _ => "unknown".into(),
-        },''',
-    '''        ["STATE", "wifi"] => wifi_state(),''',
-    "wifi state source",
-)
-
-text = replace_once(
-    '''        ["STATE", "bluetooth"] => std::fs::read_to_string("/storage/.config/system/configs/system.cfg")
-            .ok()
-            .and_then(|text| text.lines().find_map(|line| line.trim().strip_prefix("controllers.bluetooth.enabled=").map(str::to_string)))
-            .unwrap_or_else(|| "unknown".into()),''',
-    '''        ["STATE", "bluetooth"] => bluetooth_state(),''',
-    "bluetooth state source",
-)
-
-text = replace_once(
-    '''        ["WIFI", "connect", ssid, psk] => wifi_connect(ssid, psk),
-        ["WIFI", "off"] => {''',
-    '''        ["WIFI", "connect", ssid, psk] => wifi_connect(ssid, psk),
-        ["BT", "status"] => bluetooth_status(),
-        ["BT", "scan"] => bluetooth_scan(),
-        ["BT", "connect", mac] => bluetooth_connect(mac),
-        ["BT", "forget", mac] => bluetooth_forget(mac),
-        ["BT", "disconnect", mac] => bluetooth_disconnect(mac),
-        ["CONTROL", "bluetooth", state] if ["on", "off"].contains(state) => bluetooth_power(state),
-        ["WIFI", "off"] => {''',
-    "Bluetooth actions used by the picker",
-)
-
-# Remove obsolete BT arms from the older patch stage. Bluetooth is supplied
-# below with attach, daemon lifecycle and the picker response protocol.
-text = text.replace(
-    '''        ["BT", "on"] => {
-            let _ = run("rfkill", &["unblock", "bluetooth"]);
-            bluetooth_state()
-        }
-        ["BT", "off"] => {
-            let _ = run("rfkill", &["block", "bluetooth"]);
-            "off".into()
-        }
-        ["BT", "scan"] => bluetooth_scan(),
-        ["BT", "pair", mac] => bluetooth_pair(mac),
-''',
-    "",
-)
+# This adapter targets the BaseOS launcher bridge source revision that ships in
+# the pinned ROCKNIX package. Newer revisions restructured the dispatcher to
+# Command::new; they already contain the ROM handoff arm, so this patch is not
+# applied to them (build-pocketjs-runtime-musl.sh skips it in that case).
 
 # Helpers appended to the module.
 helpers = '''
@@ -614,6 +530,13 @@ apps_arm_old = '''        ["LAUNCH", app] if apps_launch_ready(app) => apps_laun
 apps_arm_new = '''        ["APPS", "list"] => apps_list(),
         ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
 text = replace_once(apps_arm_old, apps_arm_new, "installed app listing arm")
+rom_arm_old = '''        ["APPS", "list"] => apps_list(),
+        ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
+rom_arm_new = '''        ["APPS", "list"] => apps_list(),
+        ["ROMS", "list"] => roms_list(),
+        ["ROM", "launch", path] => game_launch(path),
+        ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
+text = replace_once(rom_arm_old, rom_arm_new, "supervisor ROM handoff arm")
 
 runtime_helpers = r"""
 
@@ -766,6 +689,54 @@ fn apps_list() -> String {
     }
     rows.sort();
     rows.join("\n")
+}
+
+fn roms_list() -> String {
+    let mut rows = Vec::new();
+    for root in ["/storage/content/games", "/storage/roms", "/storage/games-internal/roms", "/storage/games-external/roms", "/mnt/sdcard/content/games", "/mnt/sdcard/roms", "/mnt/sdcard/games-internal/roms", "/mnt/sdcard/games-external/roms"] {
+        let mut dirs = vec![std::path::PathBuf::from(root)];
+        while let Some(dir) = dirs.pop() {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() { dirs.push(path); continue; }
+                    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else { continue };
+                    if ["gba", "gb", "gbc"].iter().any(|supported| ext.eq_ignore_ascii_case(supported)) {
+                        if let Some(path) = path.to_str() { rows.push(path.to_owned()); }
+                    }
+                }
+            }
+        }
+    }
+    rows.sort();
+    rows.dedup();
+    rows.join("\n")
+}
+
+fn game_launch(path: &str) -> String {
+    let allowed = ["/storage/content/games/", "/storage/roms/", "/storage/games-internal/roms/", "/storage/games-external/roms/", "/mnt/sdcard/content/games/", "/mnt/sdcard/roms/", "/mnt/sdcard/games-internal/roms/", "/mnt/sdcard/games-external/roms/", "/media/"];
+    if !allowed.iter().any(|root| path.starts_with(root))
+        || path.split('/').any(|part| part == "." || part == "..")
+        || !std::path::Path::new(path).is_file()
+    {
+        return "error:rom-path".into();
+    }
+    let lower = path.to_ascii_lowercase();
+    if ![".gba", ".gb", ".gbc"].iter().any(|ext| lower.ends_with(ext)) {
+        return "error:rom-type".into();
+    }
+    let marker = "/mnt/sdcard/System/pocketjs/game-active";
+    if std::fs::write(marker, path).is_err() {
+        return "error:marker".into();
+    }
+    let pid = std::process::id();
+    let _ = std::process::Command::new("/bin/sh")
+        .args(["-c", &format!("sleep 0.4; kill -9 {}", pid)])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    format!("launching:{}", path)
 }
 
 fn apps_launch_ready(app: &str) -> bool {

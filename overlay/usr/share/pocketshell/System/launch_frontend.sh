@@ -68,9 +68,6 @@ if [ ! -f "$PACKAGE" ]; then
     fi
 fi
 
-# Installed-app switching: the launcher bridge asks for another package by
-# writing System/pocketjs/active and letting this script restart. Running the
-# child here keeps one owner of the panel — no second runtime racing the launcher.
 ACTIVE="$SD/System/pocketjs/active"
 CLEAR_ACTIVE=0
 if [ -r "$ACTIVE" ]; then
@@ -181,6 +178,11 @@ if [ -x "$SD/System/baseos-screen-idle" ]; then
     rm -f /run/baseos-screen-idle.pid
     /bin/sh "$SD/System/baseos-screen-idle" </dev/null >/dev/null 2>&1 &
     log "helpers: card screen-idle started"
+
+fi
+if [ -f "$SD/apps/apotris.gba" ]; then
+    mkdir -p "$SD/content/games/homebrew"
+    [ -f "$SD/content/games/homebrew/apotris.gba" ] || cp "$SD/apps/apotris.gba" "$SD/content/games/homebrew/apotris.gba"
 fi
 if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
     kill_matching baseos-hotkeys
@@ -198,6 +200,24 @@ log "launching runtime; package=$PACKAGE args=$display_args $input_args"
 runtime_pid=$!
 wait "$runtime_pid"
 runtime_status=$?
+# ROM handoff: after the PocketJS child exits, this process owns /dev/fb0 again
+# (the bridge killed the runtime). Run the ROM synchronously, then return to the
+# boot package so the launcher respawns.
+GAME_ACTIVE="$SD/System/pocketjs/game-active"
+if [ -r "$GAME_ACTIVE" ]; then
+    game_rom=$(cat "$GAME_ACTIVE" 2>/dev/null || :)
+    rm -f "$GAME_ACTIVE"
+    case "$game_rom" in
+        "$SD"/content/games/*|"$SD"/roms/*|"$SD"/games-internal/roms/*|"$SD"/games-external/roms/*|/media/*/content/games/*|/media/*/roms/*)
+            case "$game_rom" in *"/../"*|*/..|*"/./"*|*/.) log "game ROM path rejected" ;; *)
+                log "launching ROM: $game_rom"
+                /usr/bin/pocket-game-play "$game_rom" >> "$LOG" 2>&1 || log "ROM player exit=$?"
+                log "ROM session ended; returning to the launcher"
+            esac ;;
+        *) log "game ROM marker rejected" ;;
+    esac
+fi
+
 finished=$(date +%s 2>/dev/null || printf '0')
 log "PocketJS exit code=$runtime_status"
 if [ "$CLEAR_ACTIVE" = 1 ]; then

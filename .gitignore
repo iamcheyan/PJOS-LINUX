@@ -15,7 +15,10 @@ work/
 
 # Vendor compat binaries: not ours to version. tools/sync-gamehub.sh and the
 # build host place them here; build-rootfs.sh installs them into the image.
-/overlay/usr/share/pocketshell/System/compat/lib/retroarch
-/overlay/usr/share/pocketshell/System/compat/lib/libretro/
+/overlay/usr/share/pocketshell/System/compat/lib/
 /overlay/usr/share/pocketshell/System/compat/bin/pocket-gamehub-play
 /overlay/usr/share/pocketshell/System/compat/bin/pocketshell-play
+/overlay/usr/share/pocketshell/System/compat/bin/pocket-game-play
+/overlay/usr/share/pocketshell/System/compat/install/
+/overlay/usr/share/pocketshell/System/pocketjs/apps/gamehub.pocket
+/overlay/usr/share/pocketshell/System/pocketjs/apps/apotris.gba

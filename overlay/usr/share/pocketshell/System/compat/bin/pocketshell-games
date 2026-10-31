@@ -22,7 +22,7 @@ allowed() {
     section=$1
     ext=$2
     case "$section:$ext" in
-        games:gba|games:gbc|games:gb|games:nes|games:sfc|games:smc|games:md|games:gen|games:sms|games:gg|games:pce|games:ngp|games:ngc|games:ws|games:wsc|games:lnx|games:a26|games:a78|games:cue|games:chd|games:pbp|games:iso|games:zip|games:7z|games:cso|games:rvz|games:gcm|games:n64|games:z64|games:v64|games:nds|games:3ds|games:cia|games:xci|games:nsp|games:vb|games:min|games:col|games:int|games:pocket) return 0 ;;
+        games:gba|games:gbc|games:gb|games:nes|games:sfc|games:smc|games:md|games:gen|games:sms|games:gg|games:pce|games:ngp|games:ngc|games:ws|games:wsc|games:lnx|games:a26|games:a78|games:cue|games:chd|games:pbp|games:iso|games:zip|games:7z|games:cso|games:rvz|games:gcm|games:n64|games:z64|games:v64|games:nds|games:3ds|games:cia|games:xci|games:nsp|games:vb|games:min|games:col|games:int|games:pocket|games:gba|games:gbc|games:gb) return 0 ;;
         music:mp3|music:flac|music:ogg|music:opus|music:m4a|music:aac|music:wav|music:wma|music:ape|music:dsf) return 0 ;;
         videos:mp4|videos:mkv|videos:webm|videos:avi|videos:mov|videos:m4v|videos:ts|videos:mpg|videos:mpeg) return 0 ;;
         books:epub|books:pdf|books:txt|books:md|books:mobi|books:azw3|books:cbz|books:cbr) return 0 ;;
