@@ -51,6 +51,42 @@ if fixed != text:
 else:
     print("no escaped newline literal to normalize in", p.name)
 PYFIX
+# The fuel gauge on the RG34XX is axp2202-battery, and the stock bridge only
+# looks for BAT0/BAT1/rk817/cw2015: the panel showed neither a percentage nor a
+# charging icon. Add the gauge and the charging state the launcher polls.
+python3 - "$HERE/work/bridge-scripts/pocketshell-launcher.rs" <<'PYBATT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+if '"axp2202-battery"' not in text:
+    text = text.replace(
+        'for name in ["battery", "BAT0", "BAT1", "rk817-battery", "cw2015-battery"] {',
+        'for name in ["axp2202-battery", "battery", "BAT0", "BAT1", "rk817-battery", "cw2015-battery"] {',
+    )
+if '"LEVEL", "battery-status"' not in text:
+    anchor = '        // First IPv4 address of an interface that is up and not loopback'
+    arm = (
+        '        // Charging state of the fuel gauge: "charging" | "discharging" | "full" | "unknown".\n'
+        '        ["LEVEL", "battery-status"] => {\n'
+        '            for name in ["axp2202-battery", "battery", "BAT0", "BAT1", "rk817-battery", "cw2015-battery"] {\n'
+        '                let base = std::path::Path::new("/sys/class/power_supply").join(name);\n'
+        '                if let Ok(raw) = std::fs::read_to_string(base.join("status")) {\n'
+        '                    return match raw.trim().to_ascii_lowercase().as_str() {\n'
+        '                        "charging" => "charging".into(),\n'
+        '                        "discharging" => "discharging".into(),\n'
+        '                        "full" | "not charging" => "full".into(),\n'
+        '                        _ => "unknown".into(),\n'
+        '                    };\n'
+        '                }\n'
+        '            }\n'
+        '            "unknown".into()\n'
+        '        }\n'
+    )
+    if anchor in text:
+        text = text.replace(anchor, arm + anchor, 1)
+p.write_text(text)
+print("battery arm present:", '"LEVEL", "battery-status"' in text)
+PYBATT
 
 docker run --rm --platform linux/arm64 \
   -e DEBIAN_FRONTEND=noninteractive -e PJOS_RUN_TESTS="${PJOS_RUN_TESTS:-0}" \
@@ -58,6 +94,8 @@ docker run --rm --platform linux/arm64 \
   -v "$PROFILE:/in/pocket_profile.rs:ro" \
   -v "$HERE/src/apply-pocketjs-input.py:/in/apply-input.py:ro" \
   -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
+  -v "$HERE/src/apply-pocketjs-battery.py:/in/apply-battery.py:ro" \
+  -v "$HERE/src/apply-pocketjs-panel.py:/in/apply-panel.py:ro" \
   -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
   -v "$CARGO_CACHE:/cargo-cache" \
   -v "$HERE/work/pocketjs-runtime:/out" \
@@ -96,6 +134,8 @@ docker run --rm --platform linux/arm64 \
     # The older BaseOS bridge rewrite (apply-pocketjs-bridge.py) is not used: it
     # targets a dispatcher revision that no longer exists in any checkout.
     python3 /in/apply-rom-arm.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-battery.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-panel.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     echo "rom_launch hits: $(grep -c 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
     grep -q 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: ROM launch arm missing from the built source" >&2; exit 1; }
