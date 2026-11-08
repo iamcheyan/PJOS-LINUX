@@ -36,54 +36,112 @@ mGBA (`.gba`) and Gambatte (`.gb`/`.gbc`) are the bundled cores; both stay at or
 
 ## Input
 
-The device reports one joystick, `ANBERNIC-keys`, with 15 buttons, 6 axes and 1 hat
-(`/dev/input/js0`). The device run that produced the screenshots used explicit SDL2 button
-bindings with `input_autodetect_enable = false`, which avoids a crash in RetroArch's joypad
-initialisation on this device. Button *events* inside RetroArch are not yet verified; treat
-in-game control as unproven until someone presses buttons on the panel and records the result.
+Measured on the connected RG34XX (PJOS Linux 1.5.3, 2026-11-08) with `EVIOCGABS` and
+`JSIOCGAXMAP` / `JSIOCGBTNMAP` on the live nodes. RetroArch's input driver is `sdl2` (keyboard
+and the mali-fbdev window). Its joypad driver is `linuxraw`, which reads `/dev/input/js*` and
+does not understand hat names such as `h0up`.
 
-The bundled `test.gba`, `test.gb` and `test.gbc` are emulator diagnostic ROMs (mGBA and
-Gambatte test images). Their screens are not evidence of a running game.
+### What the kernel actually exposes
 
-## Image integration
+`ANBERNIC-keys` is `/dev/input/event1` and `/dev/input/js0`. Face, shoulder, menu, Select and
+Start are keys. The D-pad is **not** a key and **not** on `dierct-keys-polled` (`event2`).
+The vendor device tree under `soc@03000000/gpio_keys` sets `linux,input-type` to `EV_ABS`:
 
-`build-rootfs.sh` installs, when the vendor artifacts are present under
-`overlay/usr/share/pocketshell/System/compat`:
+| Physical | evdev | js0 | RetroArch |
+|---|---|---|---|
+| A | key 304 | button 0 | b |
+| B | key 305 | button 1 | a |
+| X | key 306 | button 2 | x, and quick save |
+| Y | key 307 | button 3 | y, and quick load |
+| L1 | key 308 | button 4 | l |
+| R1 | key 309 | button 5 | r |
+| Select | key 310 | button 6 | select |
+| Start | key 311 | button 7 | start |
+| Menu | key 312 | button 8 | menu_toggle |
+| L2 | key 314 | button 9 | l2 |
+| R2 | key 315 | button 10 | r2 |
+| Left / Right | `ABS_HAT0X` (0x10), value −1 / +1 | axis 3 | `left_axis = "-3"`, `right_axis = "+3"` |
+| Up / Down | `ABS_HAT0Y` (0x11), value −1 / +1 | axis 4 | `up_axis = "-4"`, `down_axis = "+4"` |
 
-| Path | What |
-|---|---|
-| `/usr/bin/retroarch` | frontend |
-| `/usr/lib/libretro/mgba_libretro.so`, `gambatte_libretro.so` | cores |
-| `/usr/lib/libSDL2-2.0.so.0`, `libsamplerate.so.0`, `libUMP.so.3.0.0` (+ `libUMP.so.3` link) | runtime libraries |
-| `/usr/share/retroarch/retroarch.cfg` | device-tuned defaults |
-| `/usr/bin/pocket-game-play` | ROM → core → RetroArch |
-| `/usr/bin/pocket-gamehub-play`, `pocketshell-games` | compat helpers |
+`js0` also advertises axes 0–2 (`ABS_RX`, `ABS_RY`, `ABS_RZ`). They sit at 0. Binding the
+D-pad to axis 0 or 1 makes every direction look dead. `linuxraw` scales a hat value of ±1
+through joydev's correction (min −1, max +1) to about ±32767, which passes the default 0.5
+axis threshold.
 
-All of these live in the root filesystem, so **a SYSTEM image build and flash is required**
-for a fresh card. This repository never flashes the device, and no flashing was performed for
-this work.
+`dierct-keys-polled` (`event2`) is a second keyboard-like node. The launcher still opens it.
+It is not the node RetroArch's joypad driver has to read for the D-pad.
 
-`pocket-game-play <rom>` validates that the path is under a scanned games root
-(`/storage/content/games`, `/storage/roms`, `/storage/games-internal/roms`,
-`/storage/games-external/roms`, `/media/...`), rejects `.`/`..` components, picks mGBA for
-`.gba` and Gambatte for `.gb`/`.gbc`, then execs RetroArch.
+### Why directions died inside a game
+
+`launch_frontend.sh` used to start `pjos-padmerge`, which built a virtual `PJOS Pad` and
+rewrote `input_player1_joypad_index` to that js node. The merger copied face buttons and
+listened for `KEY_UP` / `DOWN` / `LEFT` / `RIGHT` on `event2`. The physical D-pad never sends
+those keys; it sends the hat axes on `event1`, which the merger ignored. `driver.cfg` then
+bound directions to axes 0 and 1 of the virtual pad. Face buttons still worked, because those
+keys were forwarded. Directions did not.
+
+The game path no longer starts the merger and no longer rewrites the joypad index. Player 1
+stays on `js0`. The binds live in
+`overlay/usr/share/pocketshell/System/compat/share/retroarch/driver.cfg`
+(`input_autodetect_enable = false`, so a profile that still says `h0up` cannot override them).
+
+### Select, Start, and leaving the game
+
+Select and Start are ordinary buttons 6 and 7. `baseos-hotkeys` (card copy,
+`System/bin/baseos-hotkeys`) also watches `event1`, but it does not grab the device, so a
+normal press still reaches RetroArch.
+
+Holding **Select and Start together for 1.5 s** is the quit combo (`comboHold` in
+`src/baseos-hotkeys/main.go`). The helper sends `SIGTERM` to `retroarch` or
+`pocket-linux-kms`, then `SIGKILL` if that process is still there 1.5 s later.
+`launch_frontend.sh` is waiting on the player; when it exits, init respawns
+`frontend-session` and the launcher comes back. A shorter press does nothing. RetroArch's own
+instant Select+Start exit is not bound.
+
+On this device, 2026-11-08 11:19:43 and 11:22:12, `/tmp/baseos-hotkeys.log` recorded
+`SELECT+START held 1.5s` and `SIGTERM retroarch`. The frontend log then says
+`ROM session ended; returning to the launcher`, and `pocket-linux-kms` was running again.
+
+### GBA quick save and quick load
+
+`driver.cfg` turns the hotkey modifier off (`input_enable_hotkey_btn = "nul"`) and binds:
+
+| Physical | js button | RetroArch |
+|---|---|---|
+| X | 2 | `input_save_state_btn` |
+| Y | 3 | `input_load_state_btn` |
+
+States go to `/storage/pocketshell/states/mGBA/<rom>.state`. During the Zelda session the
+frontend log recorded both `Saving state` and `Loading state` for
+`zelda-minish-cap-zh1.state` (405592 bytes). The file on the card was updated at 11:21, while
+that game was in the foreground.
+
+## Audio
+
+The bundled frontend reports a garbage ALSA period/buffer (`Buffer size: …548005464848
+frames`) and its synchronous audio thread then blocks the whole frame loop: RetroArch sits
+at 0 % CPU with a frozen picture. `driver.cfg` therefore sets `audio_driver = "null"` until a
+working sink ships. Games run and render without sound; removing that line re-introduces the
+stall.
 
 ## ROM handoff to the supervisor
 
-The launcher owns `/dev/fb0`, so an emulator cannot simply be forked alongside it. The flow:
+The launcher owns `/dev/fb0`, so an emulator cannot simply be forked alongside it.
 
-1. A PocketJS app calls the bridge `ROM\tlaunch\t<absolute-path>`.
-2. The bridge validates the path and extension, writes it to
-   `/mnt/sdcard/System/pocketjs/game-active`, then kills its own runtime after 0.4 s —
-   the same handoff the existing `LAUNCH\t<app>` command uses.
-3. `launch_frontend.sh` is already blocked in `wait "$runtime_pid"`; once the runtime is gone
-   it owns the panel, reads the marker, deletes it, and runs
-   `/usr/bin/pocket-game-play <rom>` synchronously.
-4. When RetroArch exits, the script clears the app marker and exits; busybox init respawns
-   `frontend-session`, which restarts the boot package (the launcher).
+1. A card with `romPath` calls the bridge `ROMLAUNCH\t<absolute-path>`
+   (`ROM\tlaunch\t<path>` is tried as a fallback for older bridges).
+2. The bridge checks the file, then starts `pocketshell-play <path>` detached through
+   `systemd-run` (`--unit/--collect/--no-block` are dropped by the BaseOS shim, which
+   `setsid`s the command instead).
+3. `pocketshell-play` writes the ROM's absolute path into
+   `/mnt/sdcard/System/pocketjs/active` and SIGKILLs the launcher runtime. It draws nothing.
+4. `launch_frontend.sh` is blocked in `wait "$runtime_pid"`; it respawns, reads the marker
+   (an absolute path is played as-is; a bare id still resolves to `$SD/apps/<id>.gba`), and
+   runs `pocket-game-play <rom>` synchronously.
+5. When RetroArch exits the marker is cleared and the script exits; init respawns
+   `frontend-session`, which brings the launcher back.
 
-Apotris itself is shipped in the image at
-`/usr/share/pocketshell/System/pocketjs/apps/apotris.gba`. `frontend-session` installs it to
-`$SD/apps/apotris.gba` on first boot, and `launch_frontend.sh` copies it into
-`$SD/content/games/homebrew/apotris.gba`, which the games scanner already indexes. That makes
-it selectable from the launcher's library and from GameHub.
+Apotris ships in the image at
+`/usr/share/pocketshell/System/pocketjs/apps/apotris.gba`. `frontend-session` seeds it to
+`$SD/apps/apotris.gba` on first boot and `launch_frontend.sh` copies it into
+`$SD/content/games/homebrew/apotris.gba`, where the scanner indexes it.

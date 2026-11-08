@@ -26,6 +26,18 @@ read_failures() {
     case "$failures" in ''|*[!0-9]*) failures=0 ;; esac
 }
 
+kill_matching() {
+    helper_pattern=$1
+    for helper_dir in /proc/[0-9]*; do
+        helper_pid=${helper_dir##*/}
+        [ "$helper_pid" = "$$" ] && continue
+        helper_cmd=$(tr '\0' ' ' < "$helper_dir/cmdline" 2>/dev/null) || continue
+        case "$helper_cmd" in
+        *"$helper_pattern"*) kill -9 "$helper_pid" 2>/dev/null || : ;;
+        esac
+    done
+}
+
 backoff() {
     read_failures
     failures=$((failures + 1))
@@ -68,18 +80,90 @@ if [ ! -f "$PACKAGE" ]; then
     fi
 fi
 
+# App and ROM switching: the launcher bridge asks for another target by writing
+# System/pocketjs/active and letting this script restart. Running the child here
+# keeps one owner of the panel — no second process racing the launcher.
+# A target is either an installed package id (apps/<id>.pocket) or a ROM name
+# shipped on the card (apps/<name>.gba|gb|gbc), so the same bridge arm serves
+# both without a second command.
 ACTIVE="$SD/System/pocketjs/active"
 CLEAR_ACTIVE=0
+ROM_PLAY=
 if [ -r "$ACTIVE" ]; then
-    wanted=$(tr -cd 'a-zA-Z0-9._-' < "$ACTIVE" 2>/dev/null | cut -c1-64)
-    if [ -n "$wanted" ] && [ -f "$SD/apps/$wanted.pocket" ]; then
+    wanted=$(head -n 1 "$ACTIVE" 2>/dev/null | tr -d '\r')
+    # A ROM is named by absolute path when the bridge knows the file (any
+    # title, any language); the legacy short-name form copied under apps/ is
+    # still honoured when the marker holds a bare id.
+    case "$wanted" in
+        /*)
+            case "$wanted" in
+                *"/../"*|*/..|*"/./"*|*/.) log "active marker rejected: $wanted" ;;
+                *.gba|*.gb|*.gbc)
+                    if [ -f "$wanted" ]; then
+                        ROM_PLAY=$wanted
+                        log "ROM requested: $ROM_PLAY"
+                        CLEAR_ACTIVE=1
+                    fi ;;
+            esac ;;
+    esac
+    wanted=$(printf '%s' "$wanted" | tr -cd 'a-zA-Z0-9._-' | cut -c1-64)
+    if [ -z "$ROM_PLAY" ] && [ -n "$wanted" ] && [ -f "$SD/apps/$wanted.pocket" ]; then
         log "installed app requested: $wanted"
         PACKAGE="$SD/apps/$wanted.pocket"
         CLEAR_ACTIVE=1
-    else
-        log "active marker ignored: app=$wanted not installed"
-        rm -f "$ACTIVE" 2>/dev/null || :
+    elif [ -z "$ROM_PLAY" ]; then
+        for ext in gba gb gbc; do
+            source_rom="$SD/apps/$wanted.$ext"
+            [ -f "$source_rom" ] || continue
+            target_dir="$SD/content/games/homebrew"
+            target_rom="$target_dir/$wanted.$ext"
+            mkdir -p "$target_dir" 2>/dev/null || :
+            if [ -f "$target_rom" ] || cp "$source_rom" "$target_rom" 2>/dev/null; then
+                ROM_PLAY=$target_rom
+            else
+                ROM_PLAY=$source_rom
+            fi
+            break
+        done
+        if [ -n "$ROM_PLAY" ]; then
+            log "ROM requested: $ROM_PLAY"
+            CLEAR_ACTIVE=1
+        else
+            log "active marker ignored: target=$wanted not installed"
+            rm -f "$ACTIVE" 2>/dev/null || :
+        fi
     fi
+fi
+
+# A ROM is a session, not a package: there is no PocketJS runtime to start.
+# Play it here, then return so init respawns this script for the launcher.
+if [ -n "$ROM_PLAY" ]; then
+    log "launching ROM: $ROM_PLAY"
+    # The D-pad is already on ANBERNIC-keys (js0) as ABS_HAT0X/Y, which
+    # driver.cfg binds as axes 3 and 4. Do not start pjos-padmerge and do
+    # not retarget player 1: that virtual pad never saw these hat events,
+    # so every direction in a game was dead.
+    if [ -x "$SD/System/bin/pjos-padmerge" ]; then
+        kill_matching pjos-padmerge
+        killall -9 pjos-padmerge 2>/dev/null || :
+    fi
+    if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
+        kill_matching baseos-hotkeys
+        killall -9 baseos-hotkeys 2>/dev/null || :
+        rm -f /run/baseos-hotkeys.pid
+        "$SD/System/bin/baseos-hotkeys" --power-dev /dev/input/event0 --pad-dev /dev/input/event1 \
+            --runtime "pocket-linux-kms,retroarch" </dev/null >/dev/null 2>&1 &
+        log "helpers: hotkeys started for ROM session"
+    fi
+    play=/usr/bin/pocket-game-play
+    [ -x "$play" ] || play=/storage/System/compat/bin/pocket-game-play
+    "$play" "$ROM_PLAY" >> "$LOG" 2>&1 || log "ROM player exit=$?"
+    kill_matching pjos-padmerge
+    killall -9 pjos-padmerge 2>/dev/null || :
+    log "ROM session ended; returning to the launcher"
+    rm -f "$ACTIVE" 2>/dev/null || :
+    sleep 3
+    exit 0
 fi
 
 card=
@@ -161,33 +245,17 @@ fi
 # rebuilding the (read-only) OS image. rcS starts the image copies; kill every
 # instance of them here — image and card, by cmdline — and start exactly one card
 # copy each. Two idle daemons fight over the panel and the screen never sleeps.
-kill_matching() {
-    helper_pattern=$1
-    for helper_dir in /proc/[0-9]*; do
-        helper_pid=${helper_dir##*/}
-        [ "$helper_pid" = "$$" ] && continue
-        helper_cmd=$(tr '\0' ' ' < "$helper_dir/cmdline" 2>/dev/null) || continue
-        case "$helper_cmd" in
-        *"$helper_pattern"*) kill -9 "$helper_pid" 2>/dev/null || : ;;
-        esac
-    done
-}
-
 if [ -x "$SD/System/baseos-screen-idle" ]; then
     kill_matching baseos-screen-idle
     rm -f /run/baseos-screen-idle.pid
     /bin/sh "$SD/System/baseos-screen-idle" </dev/null >/dev/null 2>&1 &
     log "helpers: card screen-idle started"
-
-fi
-if [ -f "$SD/apps/apotris.gba" ]; then
-    mkdir -p "$SD/content/games/homebrew"
-    [ -f "$SD/content/games/homebrew/apotris.gba" ] || cp "$SD/apps/apotris.gba" "$SD/content/games/homebrew/apotris.gba"
 fi
 if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
     kill_matching baseos-hotkeys
     rm -f /run/baseos-hotkeys.pid
     "$SD/System/bin/baseos-hotkeys" --power-dev /dev/input/event0 --pad-dev /dev/input/event1 \
+        --runtime "pocket-linux-kms,retroarch" \
         </dev/null >/dev/null 2>&1 &
     log "helpers: hotkeys started"
 fi
@@ -200,24 +268,6 @@ log "launching runtime; package=$PACKAGE args=$display_args $input_args"
 runtime_pid=$!
 wait "$runtime_pid"
 runtime_status=$?
-# ROM handoff: after the PocketJS child exits, this process owns /dev/fb0 again
-# (the bridge killed the runtime). Run the ROM synchronously, then return to the
-# boot package so the launcher respawns.
-GAME_ACTIVE="$SD/System/pocketjs/game-active"
-if [ -r "$GAME_ACTIVE" ]; then
-    game_rom=$(cat "$GAME_ACTIVE" 2>/dev/null || :)
-    rm -f "$GAME_ACTIVE"
-    case "$game_rom" in
-        "$SD"/content/games/*|"$SD"/roms/*|"$SD"/games-internal/roms/*|"$SD"/games-external/roms/*|/media/*/content/games/*|/media/*/roms/*)
-            case "$game_rom" in *"/../"*|*/..|*"/./"*|*/.) log "game ROM path rejected" ;; *)
-                log "launching ROM: $game_rom"
-                /usr/bin/pocket-game-play "$game_rom" >> "$LOG" 2>&1 || log "ROM player exit=$?"
-                log "ROM session ended; returning to the launcher"
-            esac ;;
-        *) log "game ROM marker rejected" ;;
-    esac
-fi
-
 finished=$(date +%s 2>/dev/null || printf '0')
 log "PocketJS exit code=$runtime_status"
 if [ "$CLEAR_ACTIVE" = 1 ]; then
