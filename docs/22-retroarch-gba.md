@@ -58,8 +58,8 @@ The vendor device tree under `soc@03000000/gpio_keys` sets `linux,input-type` to
 | Select | key 310 | button 6 | select |
 | Start | key 311 | button 7 | start |
 | Menu | key 312 | button 8 | menu_toggle |
-| L2 | key 314 | button 9 | l2 |
-| R2 | key 315 | button 10 | r2 |
+| L2 | key 314 | button 9 | backlight down, one step per tap |
+| R2 | key 315 | button 10 | backlight up, one step per tap |
 | Left / Right | `ABS_HAT0X` (0x10), value −1 / +1 | axis 3 | `left_axis = "-3"`, `right_axis = "+3"` |
 | Up / Down | `ABS_HAT0Y` (0x11), value −1 / +1 | axis 4 | `up_axis = "-4"`, `down_axis = "+4"` |
 
@@ -115,6 +115,32 @@ States go to `/storage/pocketshell/states/mGBA/<rom>.state`. During the Zelda se
 frontend log recorded both `Saving state` and `Loading state` for
 `zelda-minish-cap-zh1.state` (405592 bytes). The file on the card was updated at 11:21, while
 that game was in the foreground.
+
+### L2 / R2 brightness
+
+L2 and R2 are not GBA buttons. While RetroArch's command line contains the `.gba`
+ROM, `baseos-hotkeys` steps the panel backlight: L2 calls `baseos-panel down`, R2
+calls `baseos-panel up`. A tap is one step. Holding the key waits 380 ms, then
+repeats every 150 ms. The launcher does not use these keys for brightness, and a
+press that only wakes a blanked panel does not also change the level.
+
+The backlight is the display driver's PWM, not `/sys/class/disp/disp/attr/enhance_bright`
+and not the `/dev/disp` brightness ioctls (those return `EPERM`). `baseos-panel`
+writes `setbl` for `lcd0` through `/sys/kernel/debug/dispdbg`, then checks
+`backlight(N)` in `/sys/class/disp/disp/attr/sys`. Levels are 0..255. `down` / `up`
+move by 15 and do not go below 10, so L2 cannot turn the panel off. Blanking stays
+with `off` / `on` (power key and `baseos-screen-idle`).
+
+A successful `level N`, `up`, or `down` with a level above 0 stores that number in
+`/run/panel.level`. `off` records the live read-back, writes `setbl 0`, and creates
+`/run/panel.off`. `on` restores the stored level and refreshes `/run/screen-idle.stamp`.
+Screen idle reads the same helper, so a level chosen in a GBA game is the level
+idle blanking restores.
+
+`driver.cfg` binds L2 and R2 to `nul`. The core does not see them. Keys 314 and 315
+are the shoulders on this board (Linux calls those codes `BTN_SELECT` / `BTN_START`).
+Select and Start remain 310 and 311, and the quit combo listens only to that pair.
+Holding L2 and R2 does not leave the game.
 
 ## Audio
 

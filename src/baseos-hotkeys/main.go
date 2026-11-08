@@ -8,11 +8,16 @@
 //     press to suspend via logind; BaseOS has no logind and its kernel suspend is
 //     unreliable, so the panel goes dark instead of freezing the board.
 //
-//   - SELECT + START held for three seconds on the gamepad. ROCKNIX quits the
+//   - SELECT + START held for 1.5 seconds on the gamepad. ROCKNIX quits the
 //     running program on that combo; here the "program" may be a PocketJS app
 //     (pocket-linux-kms) or the emulator (retroarch), so the daemon terminates
 //     whichever owns the panel and the frontend supervisor respawns the launcher.
-//     A short press does nothing: three seconds of intent avoids a lost game.
+//     A short press does nothing: 1.5 seconds of intent avoids a lost game.
+//
+//   - L2 and R2 while a GBA ROM is running. They are not GBA buttons. L2 asks
+//     baseos-panel to step the backlight down, R2 steps it up. The same binary
+//     owns blanking and wake, so the saved level, the idle blanker and the
+//     power key stay on one value. On the launcher those keys do nothing here.
 //
 // Build (static, for the card):
 //
@@ -37,14 +42,20 @@ const (
 	evKey = 0x01
 
 	keyPower  = 116 // KEY_POWER, axp2202-pek
-	btnSelect = 310 // BTN_TL on the RG34XX vendor map
-	btnStart  = 311 // BTN_TR
-	// A few kernels expose START/SELECT at the mainline codes instead.
-	btnSelectAlt = 314
-	btnStartAlt  = 315
+	btnSelect = 310 // BTN_TL. Physical Select on the RG34XX.
+	btnStart  = 311 // BTN_TR. Physical Start.
+	// Linux calls 314/315 BTN_SELECT/BTN_START. This board's DTB wires those
+	// codes to the L2/R2 shoulders. Select and Start are 310 and 311, so the
+	// quit combo must not listen here or L2+R2 would leave the game.
+	btnL2 = 314
+	btnR2 = 315
 
 	comboHold = 1500 * time.Millisecond
 	longPress = 2 * time.Second
+
+	// First repeat waits, then steps follow. A tap is exactly one step.
+	brightDelay  = 380 * time.Millisecond
+	brightRepeat = 150 * time.Millisecond
 )
 
 type inputEvent struct {
@@ -101,10 +112,26 @@ func panelValue() (int, bool) {
 	return v, true
 }
 
+// realBrightness reads the driver's backlight. The helper's "level" command
+// prints that read-back. The enhance_bright node is not the backlight, so it is
+// only a fallback when the helper is absent.
+func realBrightness() (int, bool) {
+	if helper := panelHelper(); helper != "" && !opt.dryRun {
+		out, err := exec.Command(helper, "level").Output()
+		if err == nil {
+			v, convErr := strconv.Atoi(strings.TrimSpace(string(out)))
+			if convErr == nil {
+				return v, true
+			}
+		}
+	}
+	return panelValue()
+}
+
 // panelLit reports whether the panel is currently lit; unknown counts as lit so a
 // missing node never leaves the user staring at a black screen.
 func panelLit() bool {
-	v, ok := panelValue()
+	v, ok := realBrightness()
 	if !ok {
 		return true
 	}
@@ -192,15 +219,130 @@ func toggleSleep() {
 // wakePanel restores the level saved before a power-key sleep and clears the
 // marker, so screen-idle takes over again. Any face button does this, which is how
 // a handheld is expected to wake.
-func wakePanel() {
+func wakePanel() bool {
 	if _, err := os.Stat(opt.marker); err != nil {
-		return
+		return false
 	}
 	if !panelOn() {
 		logf("wake: panel on failed")
-		return
+		return false
 	}
 	logf("wake: panel on")
+	return true
+}
+
+// cmdlineIsGBA reports whether a RetroArch command line is a GBA ROM. The
+// supervisor passes the ROM path as an argument, so ".gba" is in the bytes.
+// ".gb" and ".gbc" do not contain that suffix.
+func cmdlineIsGBA(cmdline string) bool {
+	return strings.Contains(cmdline, ".gba")
+}
+
+func gbaSession() bool {
+	for _, pid := range runtimePids("retroarch") {
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if err != nil {
+			continue
+		}
+		if cmdlineIsGBA(string(b)) {
+			return true
+		}
+	}
+	return false
+}
+
+// bright serialises shoulder-key repeats. L2 and R2 share one held direction.
+var bright = struct {
+	sync.Mutex
+	dir  int
+	stop chan struct{}
+}{}
+
+var brightStep sync.Mutex
+
+func adjustBrightness(dir int) {
+	brightStep.Lock()
+	defer brightStep.Unlock()
+	if !gbaSession() {
+		return
+	}
+	if _, err := os.Stat(opt.marker); err == nil {
+		return
+	}
+	helper := panelHelper()
+	if helper == "" {
+		logf("brightness: baseos-panel missing")
+		return
+	}
+	arg := "down"
+	if dir > 0 {
+		arg = "up"
+	}
+	if opt.dryRun {
+		logf("dry-run: brightness %s", arg)
+		return
+	}
+	out, err := exec.Command(helper, arg).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		logf("brightness: %s failed: %v %s", arg, err, text)
+		return
+	}
+	logf("brightness: %s %s", arg, text)
+}
+
+func stopBrightnessLocked() {
+	if bright.stop != nil {
+		close(bright.stop)
+		bright.stop = nil
+	}
+	bright.dir = 0
+}
+
+func onBrightnessKey(dir int, value int32) {
+	// gpio-keys may also emit value 2. The timer below is the repeat.
+	if value == 2 {
+		return
+	}
+	if value == 0 {
+		bright.Lock()
+		if bright.dir == dir {
+			stopBrightnessLocked()
+		}
+		bright.Unlock()
+		return
+	}
+	if value != 1 || !gbaSession() {
+		return
+	}
+	bright.Lock()
+	stopBrightnessLocked()
+	stop := make(chan struct{})
+	bright.stop = stop
+	bright.dir = dir
+	bright.Unlock()
+	go repeatBrightness(dir, stop)
+}
+
+func repeatBrightness(dir int, stop <-chan struct{}) {
+	adjustBrightness(dir)
+	timer := time.NewTimer(brightDelay)
+	select {
+	case <-stop:
+		timer.Stop()
+		return
+	case <-timer.C:
+	}
+	ticker := time.NewTicker(brightRepeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			adjustBrightness(dir)
+		}
+	}
 }
 
 func powerOff() {
@@ -323,6 +465,21 @@ func watchCombo() {
 	}
 }
 
+func noteCombo(down *bool, downAt *time.Time, released *time.Time, value int32) {
+	combo.Lock()
+	defer combo.Unlock()
+	if value == 1 {
+		*down = true
+		if downAt.IsZero() {
+			*downAt = time.Now()
+		}
+		*released = time.Time{}
+	} else if value == 0 {
+		*down = false
+		*released = time.Now()
+	}
+}
+
 func readLoop(dev string) {
 	f, err := os.Open(dev)
 	if err != nil {
@@ -344,8 +501,9 @@ func readLoop(dev string) {
 		if ev.Type != evKey {
 			continue
 		}
+		woke := false
 		if ev.Value == 1 && ev.Code != keyPower {
-			wakePanel()
+			woke = wakePanel()
 		}
 		switch ev.Code {
 		case keyPower:
@@ -360,32 +518,21 @@ func readLoop(dev string) {
 					toggleSleep()
 				}
 			}
-		case btnSelect, btnSelectAlt:
-			combo.Lock()
-			if ev.Value == 1 {
-				combo.selectDown = true
-				if combo.selectDownAt.IsZero() {
-					combo.selectDownAt = time.Now()
-				}
-				combo.selectReleased = time.Time{}
-			} else if ev.Value == 0 {
-				combo.selectDown = false
-				combo.selectReleased = time.Now()
+		case btnSelect:
+			noteCombo(&combo.selectDown, &combo.selectDownAt, &combo.selectReleased, ev.Value)
+		case btnStart:
+			noteCombo(&combo.startDown, &combo.startDownAt, &combo.startReleased, ev.Value)
+		case btnL2:
+			// The press that wakes the panel must not also dim it.
+			if woke {
+				break
 			}
-			combo.Unlock()
-		case btnStart, btnStartAlt:
-			combo.Lock()
-			if ev.Value == 1 {
-				combo.startDown = true
-				if combo.startDownAt.IsZero() {
-					combo.startDownAt = time.Now()
-				}
-				combo.startReleased = time.Time{}
-			} else if ev.Value == 0 {
-				combo.startDown = false
-				combo.startReleased = time.Now()
+			onBrightnessKey(-1, ev.Value)
+		case btnR2:
+			if woke {
+				break
 			}
-			combo.Unlock()
+			onBrightnessKey(1, ev.Value)
 		}
 	}
 }
@@ -413,11 +560,11 @@ func main() {
 		}
 	}
 	os.WriteFile("/run/baseos-hotkeys.pid", []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
-	// Remember the level the panel booted at, so a power toggle restores the user's
-	// brightness rather than whatever the last blanking cycle happened to save.
+	// Remember the driver's level, not enhance_bright. A missing file used to be
+	// seeded from that register, and the next wake then restored the wrong number.
 	if _, err := os.Stat(opt.level); err != nil {
-		if v, ok := panelValue(); ok && v > 0 {
-			os.WriteFile(opt.level, []byte(strconv.Itoa(v)), 0o644)
+		if v, ok := realBrightness(); ok && v > 0 {
+			os.WriteFile(opt.level, []byte(strconv.Itoa(v)+"\n"), 0o644)
 		}
 	}
 	logf("start power=%s pad=%s panel=%s", opt.powerDev, opt.padDev, opt.panel)

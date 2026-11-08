@@ -70,9 +70,30 @@ PANEL=/usr/sbin/baseos-panel
 [ -x /mnt/sdcard/System/bin/baseos-panel ] && PANEL=/mnt/sdcard/System/bin/baseos-panel
 [ -x "$PANEL" ] || PANEL=
 
-BL=$(find_backlight) || { [ -n "$PANEL" ] || { log "no writable backlight node; idle blanking disabled"; exit 0; }; }
+# The driver's backlight. enhance_bright is not that value; read it only when
+# the helper is missing. "level" with no argument prints the live PWM level.
+read_level() {
+    if [ -n "$PANEL" ]; then
+        v=$("$PANEL" level 2>/dev/null || true)
+        case "$v" in
+        ''|*[!0-9]*) ;;
+        *) printf '%s\n' "$v"; return 0 ;;
+        esac
+    fi
+    if [ -n "${BL:-}" ] && [ -r "$BL" ]; then
+        awk '{print $1; exit}' "$BL" 2>/dev/null || true
+        return 0
+    fi
+    echo 0
+}
+
+BL=$(find_backlight || true)
+if [ -z "$BL" ] && [ -z "$PANEL" ]; then
+    log "no writable backlight node; idle blanking disabled"
+    exit 0
+fi
 log "panel helper: ${PANEL:-none (brightness node only)}"
-log "backlight node: $BL"
+log "backlight node: ${BL:-none}"
 # Single instance: a frontend restart must replace the previous helper, not stack
 # another one on top of it (each stack would fight over the panel).
 if [ -r "$PIDFILE" ]; then
@@ -90,13 +111,16 @@ fi
 printf '%s\n' "$$" > "$PIDFILE" 2>/dev/null || :
 
 # Read the resting level once. Never restore to 0: a saved 0 would leave the
-# panel dark after the first wake.
-saved=$(cat "$BL" 2>/dev/null || echo 0)
+# panel dark after the first wake. Prefer the level file the panel helper
+# keeps, which is the same number L2/R2 and the power key restore.
+saved=$(read_level)
 case "$saved" in ''|*[!0-9]*) saved=0 ;; esac
+if [ "$saved" -eq 0 ] && [ -r /run/panel.level ]; then
+    saved=$(awk '{print $1; exit}' /run/panel.level 2>/dev/null || echo 0)
+    case "$saved" in ''|*[!0-9]*) saved=0 ;; esac
+fi
 if [ "$saved" -eq 0 ]; then
-    max=$(cat "$(dirname "$BL")/max_brightness" 2>/dev/null || echo 255)
-    case "$max" in ''|*[!0-9]*) max=255 ;; esac
-    saved=$(( max > 1 ? max / 2 : 1 ))
+    saved=120
 fi
 log "resting level: $saved"
 
@@ -145,9 +169,13 @@ while :; do
     timeout=$(configured_timeout)
     if [ "$timeout" -le 0 ]; then
         if [ "$blanked" = 1 ]; then
-            printf '%s\n' "$saved" >"$BL" 2>/dev/null
-            blanked=0
-            log "blanking disabled; panel restored"
+            if [ -n "$PANEL" ] && "$PANEL" on; then
+                blanked=0
+                log "blanking disabled; panel restored"
+            elif [ -n "$BL" ] && printf '%s\n' "$saved" >"$BL" 2>/dev/null; then
+                blanked=0
+                log "blanking disabled; panel restored"
+            fi
         fi
         sleep 5
         continue
@@ -161,10 +189,11 @@ while :; do
         continue
     fi
 
-    # Track manual brightness changes so waking restores what the user chose,
-    # not the level captured at boot.
+    # Track manual brightness changes (settings slider, GBA L2/R2) so a fallback
+    # wake restores what the user chose, not the level captured at boot.
+    # baseos-panel off/on already persist this in /run/panel.level.
     if [ "$blanked" = 0 ]; then
-        current=$(cat "$BL" 2>/dev/null | awk '{print $1}')
+        current=$(read_level)
         case "$current" in ''|*[!0-9]*) ;; *) [ "$current" -gt 0 ] && saved=$current ;; esac
     fi
 
@@ -175,13 +204,13 @@ while :; do
     if [ "$blanked" = 0 ] && [ "$idle" -ge "$timeout" ]; then
         if [ -n "$PANEL" ] && "$PANEL" off; then
             blanked=1; log "panel off after ${idle}s idle"
-        elif printf '0\n' >"$BL" 2>/dev/null; then
+        elif [ -n "$BL" ] && printf '0\n' >"$BL" 2>/dev/null; then
             blanked=1; log "panel dimmed to 0 after ${idle}s idle"
         fi
     elif [ "$blanked" = 1 ] && [ "$idle" -lt "$timeout" ]; then
         if [ -n "$PANEL" ] && "$PANEL" on; then
             blanked=0; log "panel on after input"
-        elif printf '%s\n' "$saved" >"$BL" 2>/dev/null; then
+        elif [ -n "$BL" ] && printf '%s\n' "$saved" >"$BL" 2>/dev/null; then
             blanked=0; log "panel restored after input"
         fi
     fi
