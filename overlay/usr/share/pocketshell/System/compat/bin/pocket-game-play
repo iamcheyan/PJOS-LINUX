@@ -68,4 +68,13 @@ export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS
 export SDL_VIDEODRIVER=mali
 export SDL_RENDER_DRIVER=opengles2
 [ -z "$lib_dir" ] || export LD_LIBRARY_PATH=$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+
+# Record active session for resume/auto power-off state saving.
+mkdir -p /storage/.config/pocketjs 2>/dev/null || :
+printf 'kind=rom\ntarget=%s\n' "$rom" > /storage/.config/pocketjs/last-active 2>/dev/null || :
+printf '%s\n' "$rom" > /tmp/pocketjs-current-rom 2>/dev/null || :
+
+# Auto-load last savestate for this ROM when returning after an intentional stop.
+# RetroArch is configured with savestate_auto_load=true; keep this hook as a
+# place for explicit resume logic if needed.
 exec "$frontend" -v --config "$config" --appendconfig "/storage/System/compat/share/retroarch/driver.cfg" -L "$core" "$rom"

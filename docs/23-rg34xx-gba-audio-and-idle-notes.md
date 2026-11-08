@@ -108,3 +108,25 @@ Rocknix 的 H700 RetroArch 配置使用线程化音频驱动，避免同步 ALSA
 - 若是文件真的从存储消失，则需要单独检查存储/挂载/应用清理逻辑，不属于自动休眠设置。
 
 建议在设备上复现前后收集：电源/充电状态、`/tmp/baseos-screen-idle.log`、`/tmp/baseos-hotkeys.log`、前端/播放器日志、是否存在意外 reboot/关机痕迹，以及存储挂载状态。
+
+
+## 4. 自动关机 + 关机前保存状态（本次新增）
+
+### 自动关机（按空闲时间，可在设置中选择）
+- `overlay/usr/sbin/baseos-screen-idle` 新增自动关机逻辑：使用与息屏相同的输入空闲 stamp；达到配置的空闲时长后 `sync`，优先调用 `/usr/sbin/baseos-poweroff`（失败才回退到 `/sbin/poweroff`）。
+- 默认 **Never**（不自动关机）。
+- 配置优先级：
+  - `/storage/.config/baseos/screen-idle.conf`：`auto_stop_timeout = never|1m|5m|10m|15m|30m|1h|2h`（兼容 `poweroff_timeout`）
+  - `/storage/.config/pocketjs/runtime.conf`：`[power]` 段 `timeout = never|...`
+- 启动器设置页（`pocketshell`）新增 “Auto Power Off/自动关机/自動電源オフ” 枚举行；通过 bridge `STATE	power_timeout` 读取、`POWER	<timeout>` 写入（兼容统一 `SETTING` 协议）。
+
+### 关机前保存状态（best-effort）
+- `overlay/usr/sbin/baseos-save-state`：在有意关机前记录恢复标记到 `/storage/.config/pocketjs/resume.state`（`kind=rom|app`, `target=...`）。若检测到 RetroArch 运行，尝试通过网络命令端口 `127.0.0.1:55355` 发送 `SAVE_STATE`（需 RetroArch 启用 network cmd）；失败不阻塞关机。
+- `overlay/usr/sbin/baseos-poweroff` 在设置关机 marker 前调用 `baseos-save-state`（best-effort）。
+- `pocket-game-play` 启动 ROM 时写 `/storage/.config/pocketjs/last-active` 与 `/tmp/pocketjs-current-rom`，供保存/恢复使用。
+- `launch_frontend.sh`：启动安装的 `.pocket` app 时写 `last-active`；开机/前端启动时若存在 `resume.state` 且没有 `active` marker，则一次性转换为 `active` 并删除 `resume.state`，从而自动打开上次记录的 ROM/app。
+- RetroArch 配置（`compat/share/retroarch/retroarch.cfg`）已启用 `savestate_auto_save=true`、`savestate_auto_load=true`、`network_cmd_enable=true`（localhost 55355），作为 ROM 进度恢复的基础能力。
+
+### 验证状态
+- 已做：shell/python 脚本语法检查、bridge/work 脚本补丁幂等应用检查、配置/脚本改动已纳入 `PJOS-LINUX` 待提交；`pocketshell` 设置/UI 变更已提交并推送 `1bac55a..46094af`。
+- 未做（当前环境限制）：RG34XX 真机上的自动关机触发、RetroArch savestate 实际写入/恢复、关机后自动重开 ROM/app 的端到端验证（本机无 RG34XX 真机/可运行的 H700 模拟环境，且卡已拔下）。需要在设备上按“设置超时→空闲等待→关机/重启→确认自动恢复”流程实测。

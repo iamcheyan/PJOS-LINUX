@@ -96,6 +96,8 @@ docker run --rm --platform linux/arm64 \
   -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
   -v "$HERE/src/apply-pocketjs-battery.py:/in/apply-battery.py:ro" \
   -v "$HERE/src/apply-pocketjs-panel.py:/in/apply-panel.py:ro" \
+  -v "$HERE/src/apply-pocketjs-power-bridge.py:/in/apply-power-bridge.py:ro" \
+  -v "$HERE/src/apply-pocketjs-restore.py:/in/apply-restore.py:ro" \
   -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
   -v "$CARGO_CACHE:/cargo-cache" \
   -v "$HERE/work/pocketjs-runtime:/out" \
@@ -136,7 +138,13 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-rom-arm.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-battery.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-panel.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-power-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-restore.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     echo "rom_launch hits: $(grep -c 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    echo "power_timeout hits: $(grep -c 'power_timeout' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    echo "resume_get hits: $(grep -c 'resume_get' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    grep -q 'power_timeout' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
+      || { echo "FATAL: auto power-off bridge arm missing" >&2; exit 1; }
     grep -q 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: ROM launch arm missing from the built source" >&2; exit 1; }
 

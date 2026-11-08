@@ -87,8 +87,26 @@ kill_matching() {
 }
 
 ACTIVE="$SD/System/pocketjs/active"
+RESUME="$SD/System/pocketjs/../.config/pocketjs/resume.state"
+RESUME="/storage/.config/pocketjs/resume.state"
 CLEAR_ACTIVE=0
 ROM_PLAY=
+# One-shot resume after intentional auto power-off/save-state.
+if [ ! -r "$ACTIVE" ] && [ -r "$RESUME" ]; then
+    rkind=$(sed -n 's/^kind=//p' "$RESUME" | head -1)
+    rtarget=$(sed -n 's/^target=//p' "$RESUME" | head -1)
+    if [ "$rkind" = "rom" ] && [ -n "$rtarget" ] && [ -f "$rtarget" ]; then
+        printf '%s
+' "$rtarget" > "$ACTIVE" 2>/dev/null && log "resume: ROM $rtarget"
+        rm -f "$RESUME" 2>/dev/null || :
+    elif [ "$rkind" = "app" ] && [ -n "$rtarget" ]; then
+        printf '%s
+' "$rtarget" > "$ACTIVE" 2>/dev/null && log "resume: app $rtarget"
+        rm -f "$RESUME" 2>/dev/null || :
+    else
+        rm -f "$RESUME" 2>/dev/null || :
+    fi
+fi
 if [ -r "$ACTIVE" ]; then
     wanted=$(head -n 1 "$ACTIVE" 2>/dev/null | tr -d '\r')
     # A ROM is named by absolute path when the bridge knows the file (any
@@ -111,6 +129,10 @@ if [ -r "$ACTIVE" ]; then
         log "installed app requested: $wanted"
         PACKAGE="$SD/apps/$wanted.pocket"
         CLEAR_ACTIVE=1
+        mkdir -p /storage/.config/pocketjs 2>/dev/null || :
+        printf 'kind=app
+target=%s
+' "$wanted" > /storage/.config/pocketjs/last-active 2>/dev/null || :
     elif [ -z "$ROM_PLAY" ]; then
         for ext in gba gb gbc; do
             source_rom="$SD/apps/$wanted.$ext"

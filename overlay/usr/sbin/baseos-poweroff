@@ -22,5 +22,9 @@
 MARKER="${BASEOS_POWEROFF_MARKER:-/run/poweroff-requested}"
 BUSYBOX="${BASEOS_BUSYBOX:-/usr/bin/busybox}"
 
+# Best-effort: save current session/RetroArch state before stopping.
+if [ -x /usr/sbin/baseos-save-state ]; then
+	/usr/sbin/baseos-save-state 2>/dev/null || :
+fi
 : > "$MARKER"
 exec "$BUSYBOX" poweroff "$@"
