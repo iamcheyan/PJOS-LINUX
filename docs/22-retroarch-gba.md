@@ -144,11 +144,17 @@ Holding L2 and R2 does not leave the game.
 
 ## Audio
 
-The bundled frontend reports a garbage ALSA period/buffer (`Buffer size: …548005464848
-frames`) and its synchronous audio thread then blocks the whole frame loop: RetroArch sits
-at 0 % CPU with a frozen picture. `driver.cfg` therefore sets `audio_driver = "null"` until a
-working sink ships. Games run and render without sound; removing that line re-introduces the
-stall.
+The first device run reported a garbage ALSA period/buffer (`Buffer size: …548005464848
+frames`) and the synchronous `alsa` driver then blocked the whole frame loop (RetroArch at
+0 % CPU, frozen picture), so audio was disabled. `driver.cfg` now uses
+`audio_driver = "alsathread"` with `audio_out_rate = "44100"`, `audio_sync = "true"`,
+`audio_latency = "64"` and rate control, matching ROCKNIX's H700 profile — audio runs on a
+worker thread so a bad period report cannot stall rendering.
+
+The codec path is opened by `rcS` (DAC → output, speaker unmuted, sane level on a fresh
+card) and `heya-control`/`baseos-panel` own the volume. If a future build regresses to a
+frozen picture with 0 % CPU, check `retroarch --verbose` for ALSA buffer errors and fall
+back to `audio_driver = "alsa"` or `sdl2` only after confirming it does not stall.
 
 ## ROM handoff to the supervisor
 
