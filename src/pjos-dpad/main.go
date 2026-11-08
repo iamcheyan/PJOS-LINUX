@@ -49,8 +49,10 @@ const (
 	keyLeft  = 105
 	keyRight = 106
 
-	keyVolumeUp   = 114
-	keyVolumeDown = 115
+	// Measured on the shell: rolling the wheel right emits 115 and rolling it
+	// left emits 114, i.e. the vendor labels and the Linux codes disagree.
+	keyVolumeUp   = 115
+	keyVolumeDown = 114
 )
 
 type inputID struct {

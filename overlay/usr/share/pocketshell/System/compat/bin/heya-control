@@ -12,9 +12,16 @@ case "${1-}" in
         # The codec's DAC gain alone did not change the speaker loudness on this
         # panel; lineout is the analog stage that does. Drive both from the same
         # percentage so the UI, the wheel and the tick all agree.
-        "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 \
-            || "$mixer" -q set "digital volume" "${value}%" >/dev/null 2>&1 || exit 1
-        "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || :
+        #
+        # Write raw register values, not "N%": the percent path makes the codec
+        # report its maximum for ~100ms, which the launcher's poll caught as a
+        # jump to 100 before the real value appeared.
+        digital=$(( (value * 63 + 50) / 100 ))
+        lineout=$(( (value * 31 + 50) / 100 ))
+        "$mixer" -q -c 0 cset numid=2 "$digital" >/dev/null 2>&1 \
+            || "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 || exit 1
+        "$mixer" -q -c 0 cset numid=3 "$lineout" >/dev/null 2>&1 \
+            || "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || :
         # Zero really means silent: the amp stays enabled at 0% on this codec, so
         # close the speaker switch as well and reopen it on the next step.
         if [ "$value" -eq 0 ]; then
