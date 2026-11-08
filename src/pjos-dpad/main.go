@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -86,6 +87,11 @@ var (
 	state       padState
 	dirNames    = [4]uint16{keyUp, keyDown, keyLeft, keyRight}
 	volumeSteps = make(chan int, 8)
+	// One detent can surface on both nodes and the encoder bounces; without a
+	// gate one flick jumped the whole range. Steps closer than this are merged.
+	volumeGate   = 140 * time.Millisecond
+	lastVolumeAt time.Time
+	volumeMu     sync.Mutex
 )
 
 func ioctlErr(fd uintptr, req uintptr, arg uintptr) error {
@@ -170,10 +176,7 @@ func readDevices(path string, hat bool) {
 				if ev.Code == keyVolumeDown {
 					step = -5
 				}
-				select {
-				case volumeSteps <- step:
-				default:
-				}
+				requestVolumeStep(step)
 			}
 		case hat && ev.Type == evAbs && (ev.Code == absHat0X || ev.Code == absHat0Y):
 			if ev.Code == absHat0Y {
@@ -188,18 +191,12 @@ func readDevices(path string, hat bool) {
 			switch ev.Code {
 			case keyVolumeUp:
 				if ev.Value == 1 {
-					select {
-					case volumeSteps <- 5:
-					default:
-					}
+					requestVolumeStep(5)
 				}
 				continue
 			case keyVolumeDown:
 				if ev.Value == 1 {
-					select {
-					case volumeSteps <- -5:
-					default:
-					}
+					requestVolumeStep(-5)
 				}
 				continue
 			case keyUp:
@@ -253,6 +250,21 @@ func currentVolume() int {
 	return 50
 }
 
+func requestVolumeStep(step int) {
+	now := time.Now()
+	volumeMu.Lock()
+	if now.Sub(lastVolumeAt) < volumeGate {
+		volumeMu.Unlock()
+		return
+	}
+	lastVolumeAt = now
+	volumeMu.Unlock()
+	select {
+	case volumeSteps <- step:
+	default:
+	}
+}
+
 func volumeWorker() {
 	control := volumeControlPath()
 	if control == "" {
@@ -260,6 +272,17 @@ func volumeWorker() {
 		return
 	}
 	for step := range volumeSteps {
+		// Collapse everything queued behind this step: one flick of the wheel
+		// must not walk the whole range while the previous tick still plays.
+		for {
+			select {
+			case queued := <-volumeSteps:
+				step = queued
+			default:
+				goto apply
+			}
+		}
+	apply:
 		next := currentVolume() + step
 		if next < 0 {
 			next = 0
@@ -270,6 +293,9 @@ func volumeWorker() {
 		if err := exec.Command(control, "volume", strconv.Itoa(next)).Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "pjos-dpad: volume %d: %v\n", next, err)
 		}
+		// Pace the wheel: the tick is the feedback, so the next step waits for
+		// this one to be heard.
+		time.Sleep(120 * time.Millisecond)
 	}
 }
 

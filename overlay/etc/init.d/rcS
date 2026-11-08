@@ -267,6 +267,26 @@ fi
 	ip link set wlan0 up 2>/dev/null || true
 	wpa_cli -i wlan0 ping >/dev/null 2>&1 || \
 		wpa_supplicant -B -i wlan0 -c "$conf" -D nl80211 >/dev/null 2>&1 || true
+
+	# The supplicant only associates. Without a DHCP client the link stayed
+	# IPv6-only (SLAAC), so the launcher's IP row had nothing to show.
+	i=0
+	while [ $i -lt 60 ]; do
+		if [ "$(cat /sys/class/net/wlan0/operstate 2>/dev/null)" = "up" ]; then
+			ip -o -4 addr show wlan0 2>/dev/null | grep -q "inet " && break
+			udhcpc -i wlan0 -n -q -t 4 -T 2 >/dev/null 2>&1 || :
+		fi
+		sleep 2
+		i=$((i + 1))
+	done
+	# Re-acquire when the address disappears (reconnect, router reboot, lease
+	# expiry) instead of waiting for the next boot.
+	while :; do
+		sleep 20
+		ip -o -4 addr show wlan0 2>/dev/null | grep -q "inet " && continue
+		[ "$(cat /sys/class/net/wlan0/operstate 2>/dev/null)" = "up" ] || continue
+		udhcpc -i wlan0 -n -q -t 4 -T 2 >/dev/null 2>&1 || :
+	done
 ) &
 
 # machine-id (dbus/BlueZ). /etc/machine-id is a baked symlink into /run.
