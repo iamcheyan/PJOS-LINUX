@@ -1,0 +1,24 @@
+#!/bin/sh
+# BaseOS player entry for the PocketJS runtime bridge.
+#
+# The runtime's ROM arm runs this detached (through the systemd-run shim). It
+# draws nothing itself: it writes the ROM's own path into the supervisor's
+# active marker, which makes the frontend own the panel, play the ROM with
+# pocket-game-play, and return to the launcher when the emulator exits.
+set -u
+rom=${1:-}
+[ -n "$rom" ] && [ -f "$rom" ] || exit 1
+case "$rom" in
+    *.gba|*.gb|*.gbc) ;;
+    *) exit 1 ;;
+esac
+sd=/mnt/sdcard
+[ -d "$sd/System/pocketjs" ] || sd=/storage
+# Hand the bridge's absolute path to pocket-game-play, which accepts both the
+# /storage and /mnt/sdcard spellings of the card.
+printf '%s\n' "$rom" > "$sd/System/pocketjs/active" || exit 1
+# A deliberate hand-off is not a crash: clear the respawn backoff counter.
+printf '0\n' > /tmp/pocketjs-frontend-failures 2>/dev/null || :
+sleep 0.6
+pid=$(pidof pocket-linux-kms 2>/dev/null) && kill -9 $pid 2>/dev/null
+exit 0

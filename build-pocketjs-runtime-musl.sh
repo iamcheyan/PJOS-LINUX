@@ -57,7 +57,7 @@ docker run --rm --platform linux/arm64 \
   -v "$TARBALL:/in/src.tar.gz:ro" \
   -v "$PROFILE:/in/pocket_profile.rs:ro" \
   -v "$HERE/src/apply-pocketjs-input.py:/in/apply-input.py:ro" \
-  -v "$HERE/src/apply-pocketjs-bridge.py:/in/apply-bridge.py:ro" \
+  -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
   -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
   -v "$CARGO_CACHE:/cargo-cache" \
   -v "$HERE/work/pocketjs-runtime:/out" \
@@ -91,13 +91,14 @@ docker run --rm --platform linux/arm64 \
     # (__launcher / __pocketshell: battery, volume, services, library). Building
     # bare upstream drops it, which reads on the panel as a dead battery gauge.
     python3 /in/rocknix-scripts/patch-runtime.py /work/src
-    # The BaseOS bridge rewrite targets an older dispatcher; the current revision
-    # already carries the ROM handoff arm, so skip it when its anchors are gone.
-    if python3 /in/apply-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs; then
-      echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
-    else
-      echo "BaseOS bridge patch skipped: source revision mismatch (ROM arm already present)"
-    fi
+    echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
+    # One ROM hand-off arm, anchored on the LAUNCH arm every revision carries.
+    # The older BaseOS bridge rewrite (apply-pocketjs-bridge.py) is not used: it
+    # targets a dispatcher revision that no longer exists in any checkout.
+    python3 /in/apply-rom-arm.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    echo "rom_launch hits: $(grep -c 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    grep -q 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
+      || { echo "FATAL: ROM launch arm missing from the built source" >&2; exit 1; }
 
     export LIBCLANG_PATH=/usr/lib/llvm-14/lib
     export POCKETJS_PROFILE_RS=/in/pocket_profile.rs

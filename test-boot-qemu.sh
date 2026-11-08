@@ -50,7 +50,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
   (cd "$R" && find . | cpio -o -H newc 2>/dev/null | gzip -1) > /tmp/rootfs.cpio.gz
 
   timeout 60 qemu-system-aarch64 \
-    -M virt -cpu cortex-a53 -smp 2 -m 512 \
+    -M virt -cpu cortex-a53 -smp 2 -m 2048 \
     -kernel "$KERNEL" -initrd /tmp/rootfs.cpio.gz \
     -append "rdinit=/init console=ttyAMA0 loglevel=4" \
     -nographic -no-reboot > /tmp/boot.log 2>&1 || true

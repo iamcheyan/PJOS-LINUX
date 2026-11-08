@@ -79,12 +79,12 @@ if mountpoint -q "$SD" 2>/dev/null \
     fi
 fi
 
-if mountpoint -q "$SD" 2>/dev/null \
-    && [ -f /usr/share/pocketshell/System/pocketjs/apps/gamehub.pocket ] \
-    && [ -d "$SD/System/pocketjs/apps" ]; then
-    install -m 0644 /usr/share/pocketshell/System/pocketjs/apps/gamehub.pocket \
-        "$SD/System/pocketjs/apps/gamehub.pocket.new"
-    mv -f "$SD/System/pocketjs/apps/gamehub.pocket.new" "$SD/System/pocketjs/apps/gamehub.pocket"
+# Refresh the games catalogue before the launcher reads it, so a ROM copied
+# onto the card shows up as a card on this boot.
+scanner="$SD/System/compat/bin/pocketshell-games"
+[ -x "$scanner" ] || scanner=/usr/bin/pocketshell-games
+if mountpoint -q "$SD" 2>/dev/null && [ -x "$scanner" ]; then
+    "$scanner" scan >/dev/null 2>&1 || :
 fi
 
 if mountpoint -q "$SD" 2>/dev/null \

@@ -40,6 +40,11 @@ echo 'Libs: -L/usr/lib -lSDL2' >> "$S/usr/lib/pkgconfig/sdl2.pc"
 
 cd /src/retroarch
 rm -rf obj-unix config.mk config.h
+# SDL re-enumerates input devices when the window is created; on this pad the
+# controller path then reads the wrong device and the first face button stops
+# reporting. Open the joystick subsystem before the window exists.
+python3 /build/apply-sdl-joypad-preinit.py /src/retroarch
+python3 /build/apply-retroarch-linuxraw-autoconf.py /src/retroarch
 # SDL2 (mali-fbdev) is the only available display backend; every desktop
 # backend, FFmpeg and systemd are absent on the device.
 ./configure --host=aarch64-nextui-linux-gnu --prefix=/usr \
@@ -63,6 +68,8 @@ docker run --rm --platform linux/amd64 \
     -v "$TMP/source:/src/retroarch" \
     -v "$OUT:/out" \
     -v "$TMP/build.sh:/build.sh:ro" \
+    -v "$HERE/src/apply-retroarch-sdl-joypad-preinit.py:/build/apply-sdl-joypad-preinit.py:ro" \
+    -v "$HERE/src/apply-retroarch-linuxraw-autoconf.py:/build/apply-retroarch-linuxraw-autoconf.py:ro" \
     "$IMAGE" sh /build.sh
 
 for artifact in retroarch libSDL2-2.0.so.0 libsamplerate.so.0 libUMP.so.3.0.0 libUMP.so.3; do

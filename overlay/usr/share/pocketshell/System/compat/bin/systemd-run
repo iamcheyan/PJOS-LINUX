@@ -1,0 +1,13 @@
+#!/bin/sh
+# BaseOS has no systemd. The PocketJS runtime detaches players through
+# systemd-run; drop the unit flags and background the command instead so the
+# runtime's ROM arm sees a successful start.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --unit=*|--collect|--no-block|--scope|--user|--quiet|-q) shift ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || exit 1
+setsid "$@" >/dev/null 2>&1 &
+exit 0

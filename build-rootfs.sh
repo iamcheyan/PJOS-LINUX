@@ -129,10 +129,11 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
     install -m 0644 "$COMPAT/lib/libUMP.so.3.0.0" "$R/usr/lib/libUMP.so.3.0.0"
     ln -sf libUMP.so.3.0.0 "$R/usr/lib/libUMP.so.3"
     install -m 0644 "$COMPAT/share/retroarch/retroarch.cfg" "$R/usr/share/retroarch/retroarch.cfg"
+    [ ! -f "$COMPAT/share/retroarch/driver.cfg" ] || install -m 0644 "$COMPAT/share/retroarch/driver.cfg" "$R/usr/share/retroarch/driver.cfg"
     for core in gambatte; do
       [ ! -f "$COMPAT/lib/libretro/${core}_libretro.so" ] || install -m 0644 "$COMPAT/lib/libretro/${core}_libretro.so" "$R/usr/lib/libretro/${core}_libretro.so"
     done
-    for script in pocket-game-play pocket-gamehub-play pocketshell-games; do
+    for script in pocket-game-play pocketshell-play systemd-run pocketshell-games; do
       [ ! -x "$COMPAT/bin/$script" ] || install -m 0755 "$COMPAT/bin/$script" "$R/usr/bin/$script"
     done
   fi

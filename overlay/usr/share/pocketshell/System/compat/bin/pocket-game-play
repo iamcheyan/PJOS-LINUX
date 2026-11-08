@@ -1,0 +1,71 @@
+#!/bin/sh
+# Run one ROM with the bundled H700-compatible frontend.
+#
+# Two placements are supported so the same script serves both a flashed image
+# and the current card: the image installs into /usr/bin + /usr/lib/libretro,
+# while an adb push drops everything under $SD/System/compat, which needs no
+# rootfs write and no flash.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: pocket-game-play <rom>" >&2; exit 2; }
+rom=$1
+
+# /storage is a bind of the SD card's FAT partition, so a ROM may be named by
+# either path. Accept both spellings rather than guess which one the caller has.
+case "$rom" in
+    /mnt/sdcard/*) rom=/storage/${rom#/mnt/sdcard/} ;;
+esac
+case "$rom" in
+    /storage/content/games/*|/storage/roms/*|/storage/games-internal/roms/*|/storage/games-external/roms/*|/media/*/content/games/*|/media/*/roms/*) ;;
+    *) echo "ROM must be under a scanned storage games directory" >&2; exit 2 ;;
+esac
+case "$rom" in
+    *"/../"*|*/..|*"/./"*|*/.) echo "invalid ROM path" >&2; exit 2 ;;
+esac
+[ -f "$rom" ] || { echo "ROM not found: $rom" >&2; exit 2; }
+
+compat=${PJOS_COMPAT:-/storage/System/compat}
+if [ -x /usr/bin/retroarch ] && [ -d /usr/lib/libretro ]; then
+    frontend=/usr/bin/retroarch
+    core_dir=/usr/lib/libretro
+    config=/usr/share/retroarch/retroarch.cfg
+    lib_dir=
+elif [ -x "$compat/lib/retroarch" ]; then
+    frontend=$compat/lib/retroarch
+    core_dir=$compat/lib/libretro
+    config=$compat/share/retroarch/retroarch.cfg
+    lib_dir=$compat/lib
+else
+    echo "emulator not installed (looked in /usr/bin and $compat/lib)" >&2
+    exit 4
+fi
+
+case "$rom" in
+    *.gba) core=$core_dir/mgba_libretro.so ;;
+    *.gb|*.gbc) core=$core_dir/gambatte_libretro.so ;;
+    *) echo "unsupported game extension: $rom" >&2; exit 3 ;;
+esac
+[ -f "$core" ] || { echo "libretro core missing: $core" >&2; exit 4; }
+[ -f "$config" ] || { echo "retroarch config missing: $config" >&2; exit 4; }
+
+# The built-in pad is /dev/input/js0 (name ANBERNIC-keys). Its vendor
+# GameController mapping carries "platform:Linux", an element SDL rejects with
+# "Unexpected controller element platform" — and the gamecontroller path then
+# aborts, which is why buttons did nothing. Install a positional mapping over
+# the pad's real js indices before SDL initialises; measured on the device:
+#   304->b0 (A) 305->b1 (B) 306->b2 (X) 307->b3 (Y)
+#   308->b4 (L1) 309->b5 (R1) 310->b6 (Select) 311->b7 (Start)
+#   312->b8 (Menu) 314->b9 (L2) 315->b10 (R2)
+# The kernel reports 12 buttons and 5 axes for this pad, so nothing may
+# reference b11+ or a5+: SDL rejects the whole mapping if an entry is out of
+# range, which reads on the device as "ANBERNIC-keys (0/0) not configured".
+SDL_GAMECONTROLLERCONFIG='19000000010000000100000000016e01,ANBERNIC-keys,a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,back:b6,start:b7,guide:b8,lefttrigger:b9,righttrigger:b10,leftx:a0,lefty:a1,rightx:a2,righty:a3,dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,'
+export SDL_GAMECONTROLLERCONFIG
+# fbdev gives the window no focus, and SDL drops joystick events for an
+# unfocused window unless this is set — the second half of "every button is
+# dead" on this device.
+SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
+export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS
+export SDL_VIDEODRIVER=mali
+export SDL_RENDER_DRIVER=opengles2
+[ -z "$lib_dir" ] || export LD_LIBRARY_PATH=$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+exec "$frontend" -v --config "$config" --appendconfig "/storage/System/compat/share/retroarch/driver.cfg" -L "$core" "$rom"

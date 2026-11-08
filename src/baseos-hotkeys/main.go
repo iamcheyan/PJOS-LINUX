@@ -8,9 +8,11 @@
 //     press to suspend via logind; BaseOS has no logind and its kernel suspend is
 //     unreliable, so the panel goes dark instead of freezing the board.
 //
-//   - SELECT + START on the gamepad. ROCKNIX quits the running program on that
-//     combo; here the "program" is the PocketJS frontend, so the daemon terminates
-//     it and `frontend-session` respawns the launcher.
+//   - SELECT + START held for three seconds on the gamepad. ROCKNIX quits the
+//     running program on that combo; here the "program" may be a PocketJS app
+//     (pocket-linux-kms) or the emulator (retroarch), so the daemon terminates
+//     whichever owns the panel and the frontend supervisor respawns the launcher.
+//     A short press does nothing: three seconds of intent avoids a lost game.
 //
 // Build (static, for the card):
 //
@@ -24,6 +26,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -40,8 +43,8 @@ const (
 	btnSelectAlt = 314
 	btnStartAlt  = 315
 
-	comboWindow = 400 * time.Millisecond
-	longPress   = 2 * time.Second
+	comboHold = 1500 * time.Millisecond
+	longPress = 2 * time.Second
 )
 
 type inputEvent struct {
@@ -123,7 +126,6 @@ func panelSet(level int) error {
 	}
 	return os.WriteFile(opt.panel, []byte(strconv.Itoa(level)), 0o644)
 }
-
 
 // panelHelper returns the baseos-panel binary, which owns the FBIOBLANK ioctl.
 func panelHelper() string {
@@ -213,30 +215,43 @@ func powerOff() {
 	}
 }
 
-// forceQuit stops the PocketJS runtime; frontend-session respawns the launcher.
+// forceQuit ends whatever owns the panel: a PocketJS app runtime or the
+// emulator started for a ROM. The frontend supervisor sees its child exit and
+// brings the launcher back.
 func forceQuit() {
-	pids := runtimePids(opt.runtime)
-	if len(pids) == 0 {
-		logf("combo: SELECT+START but no %s running", opt.runtime)
-		return
-	}
-	for _, pid := range pids {
-		if pid == os.Getpid() {
+	names := strings.Split(opt.runtime, ",")
+	killed := 0
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
-		logf("combo: SELECT+START -> SIGTERM %s pid %d", opt.runtime, pid)
-		syscall.Kill(pid, syscall.SIGTERM)
+		for _, pid := range runtimePids(name) {
+			if pid == os.Getpid() {
+				continue
+			}
+			logf("combo: SIGTERM %s pid %d", name, pid)
+			syscall.Kill(pid, syscall.SIGTERM)
+			killed++
+		}
+	}
+	if killed == 0 {
+		logf("combo: nothing to stop (%s)", opt.runtime)
+		return
 	}
 	go func() {
-		time.Sleep(2 * time.Second)
-		for _, pid := range runtimePids(opt.runtime) {
-			logf("combo: still alive, SIGKILL pid %d", pid)
-			syscall.Kill(pid, syscall.SIGKILL)
+		time.Sleep(1500 * time.Millisecond)
+		for _, name := range names {
+			name = strings.TrimSpace(name)
+			for _, pid := range runtimePids(name) {
+				logf("combo: still alive, SIGKILL %s pid %d", name, pid)
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
 		}
 	}()
 }
 
-// runtimePids finds processes whose executable basename matches name.
+// runtimePids finds processes whose executable basename or comm matches name.
 func runtimePids(name string) []int {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -248,15 +263,64 @@ func runtimePids(name string) []int {
 		if err != nil {
 			continue
 		}
-		exe, err := os.Readlink("/proc/" + e.Name() + "/exe")
-		if err != nil {
+		// Match by comm
+		commBytes, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if strings.TrimSpace(string(commBytes)) == name {
+			out = append(out, pid)
 			continue
 		}
-		if strings.HasSuffix(strings.TrimSuffix(exe, " (deleted)"), "/"+name) {
-			out = append(out, pid)
+		// Match by exe
+		exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+		if err == nil {
+			if strings.HasSuffix(strings.TrimSuffix(exe, " (deleted)"), "/"+name) {
+				out = append(out, pid)
+			}
 		}
 	}
 	return out
+}
+
+// combo tracks SELECT+START so the hold can be timed from the moment both
+// buttons are down, without blocking on evdev reads. Jitter/bounce under 250ms
+// is debounced so micro-switch bounce does not reset the hold timer.
+var combo = struct {
+	sync.Mutex
+	selectDown     bool
+	startDown      bool
+	selectDownAt   time.Time
+	startDownAt    time.Time
+	selectReleased time.Time
+	startReleased  time.Time
+	fired          bool
+}{}
+
+func watchCombo() {
+	for now := range time.Tick(50 * time.Millisecond) {
+		combo.Lock()
+		if !combo.selectDown && !combo.selectReleased.IsZero() && now.Sub(combo.selectReleased) > 250*time.Millisecond {
+			combo.selectDownAt = time.Time{}
+			combo.fired = false
+		}
+		if !combo.startDown && !combo.startReleased.IsZero() && now.Sub(combo.startReleased) > 250*time.Millisecond {
+			combo.startDownAt = time.Time{}
+			combo.fired = false
+		}
+
+		both := !combo.selectDownAt.IsZero() && !combo.startDownAt.IsZero()
+		since := combo.selectDownAt
+		if combo.startDownAt.After(since) {
+			since = combo.startDownAt
+		}
+		fire := both && !combo.fired && now.Sub(since) >= comboHold
+		if fire {
+			combo.fired = true
+		}
+		combo.Unlock()
+		if fire {
+			logf("combo: SELECT+START held %s -> ending the foreground program", comboHold)
+			forceQuit()
+		}
+	}
 }
 
 func readLoop(dev string) {
@@ -268,12 +332,7 @@ func readLoop(dev string) {
 	defer f.Close()
 
 	size := int(unsafe.Sizeof(inputEvent{}))
-	var (
-		powerDownAt time.Time
-		selectDown  time.Time
-		startDown   time.Time
-		comboFired  bool
-	)
+	var powerDownAt time.Time
 	for {
 		buf := make([]byte, size)
 		n, err := f.Read(buf)
@@ -302,27 +361,31 @@ func readLoop(dev string) {
 				}
 			}
 		case btnSelect, btnSelectAlt:
+			combo.Lock()
 			if ev.Value == 1 {
-				selectDown = time.Now()
-				if !startDown.IsZero() && time.Since(startDown) < comboWindow && !comboFired {
-					comboFired = true
-					forceQuit()
+				combo.selectDown = true
+				if combo.selectDownAt.IsZero() {
+					combo.selectDownAt = time.Now()
 				}
+				combo.selectReleased = time.Time{}
 			} else if ev.Value == 0 {
-				selectDown = time.Time{}
-				comboFired = false
+				combo.selectDown = false
+				combo.selectReleased = time.Now()
 			}
+			combo.Unlock()
 		case btnStart, btnStartAlt:
+			combo.Lock()
 			if ev.Value == 1 {
-				startDown = time.Now()
-				if !selectDown.IsZero() && time.Since(selectDown) < comboWindow && !comboFired {
-					comboFired = true
-					forceQuit()
+				combo.startDown = true
+				if combo.startDownAt.IsZero() {
+					combo.startDownAt = time.Now()
 				}
+				combo.startReleased = time.Time{}
 			} else if ev.Value == 0 {
-				startDown = time.Time{}
-				comboFired = false
+				combo.startDown = false
+				combo.startReleased = time.Now()
 			}
+			combo.Unlock()
 		}
 	}
 }
@@ -334,7 +397,7 @@ func main() {
 	flag.StringVar(&opt.level, "level", "/run/panel.level", "where the pre-sleep level is stored")
 	flag.StringVar(&opt.marker, "marker", "/run/panel.off", "marker written while the panel is off on purpose")
 	flag.StringVar(&opt.logPath, "log", "/tmp/baseos-hotkeys.log", "log file")
-	flag.StringVar(&opt.runtime, "runtime", "pocket-linux-kms", "frontend process to force-quit on SELECT+START")
+	flag.StringVar(&opt.runtime, "runtime", "pocket-linux-kms,retroarch", "comma-separated processes force-quit by SELECT+START")
 	flag.StringVar(&opt.poweroff, "poweroff", "/usr/sbin/baseos-poweroff", "poweroff helper")
 	flag.BoolVar(&opt.dryRun, "dry-run", false, "log actions without touching the panel or powering off")
 	flag.Parse()
@@ -361,5 +424,6 @@ func main() {
 
 	go readLoop(opt.powerDev)
 	go readLoop(opt.padDev)
+	go watchCombo()
 	select {}
 }

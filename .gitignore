@@ -13,12 +13,9 @@ work/
 *.o
 .runtime-build-online.sh
 
-# Vendor compat binaries: not ours to version. tools/sync-gamehub.sh and the
-# build host place them here; build-rootfs.sh installs them into the image.
+# Vendor compat binaries: not ours to version. The build host places them here;
+# build-rootfs.sh installs them into the image. The player and systemd-run
+# shims are ours, so they stay tracked.
 /overlay/usr/share/pocketshell/System/compat/lib/
-/overlay/usr/share/pocketshell/System/compat/bin/pocket-gamehub-play
-/overlay/usr/share/pocketshell/System/compat/bin/pocketshell-play
-/overlay/usr/share/pocketshell/System/compat/bin/pocket-game-play
 /overlay/usr/share/pocketshell/System/compat/install/
-/overlay/usr/share/pocketshell/System/pocketjs/apps/gamehub.pocket
 /overlay/usr/share/pocketshell/System/pocketjs/apps/apotris.gba

@@ -289,6 +289,7 @@ fi
 			/usr/sbin/systemctl start bluetooth
 			bluetoothctl power on >/dev/null 2>&1 || true
 		fi
+	fi
 	) >/run/bluetooth-init.log 2>&1 &
 
 # First boot on a fresh flash: grow this card's data partition to fill the
@@ -443,6 +444,7 @@ if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-hotkeys ]; then
 	/usr/sbin/baseos-hotkeys \
 		--power-dev "${power_dev:-/dev/input/event0}" \
 		--pad-dev "${pad_dev:-/dev/input/event1}" \
+		--runtime "pocket-linux-kms,retroarch" \
 		</dev/null >/dev/null 2>&1 &
 fi
 
