@@ -412,6 +412,20 @@ if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/h700-speaker-amp-load ]; then
 	/usr/sbin/h700-speaker-amp-load >/run/h700-speaker-amp.log 2>&1
 fi
 
+# The vendor codec powers up with every output switch off, so the speaker stays
+# silent until a mixer opens the path. Unmute DAC -> output and the speaker, and
+# leave a sane level on a fresh card; the settings row only moves the volume
+# afterwards.
+if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -c /dev/snd/controlC0 ] && command -v amixer >/dev/null 2>&1; then
+	amixer -q -c 0 sset 'OutputL Mixer DACL' on >/dev/null 2>&1 || :
+	amixer -q -c 0 sset 'OutputR Mixer DACR' on >/dev/null 2>&1 || :
+	amixer -q -c 0 sset 'SPK' on >/dev/null 2>&1 || :
+	level=$(amixer -c 0 sget 'digital volume' 2>/dev/null | sed -n 's/.*\[\([0-9]*\)%\].*/\1/p' | head -1)
+	if [ -z "$level" ] || [ "$level" -eq 0 ]; then
+		amixer -q -c 0 sset 'digital volume' '60%' >/dev/null 2>&1 || :
+	fi
+fi
+
 # Optional TF1 startup sound. The audio repair must finish before playback;
 # maintenance boots never open a card exported to the USB host.
 if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-startup-sound ]; then

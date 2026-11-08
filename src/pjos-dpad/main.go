@@ -10,13 +10,21 @@
 // keyboard device ("PJOS D-pad") that emits only arrow keys. The frontend
 // passes that node to the runtime and skips the raw D-pad node, so exactly one
 // source of directions exists no matter which node the kernel updates.
+//
+// The volume wheel is wired to KEY_VOLUMEUP/DOWN on the same two nodes and had
+// no listener at all, so rolling it did nothing. Those codes step the mixer
+// through the same heya-control the settings row uses, which also plays the
+// per-step tick.
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -39,6 +47,9 @@ const (
 	keyDown  = 108
 	keyLeft  = 105
 	keyRight = 106
+
+	keyVolumeUp   = 114
+	keyVolumeDown = 115
 )
 
 type inputID struct {
@@ -71,9 +82,10 @@ type padState struct {
 }
 
 var (
-	ui       *os.File
-	state    padState
-	dirNames = [4]uint16{keyUp, keyDown, keyLeft, keyRight}
+	ui          *os.File
+	state       padState
+	dirNames    = [4]uint16{keyUp, keyDown, keyLeft, keyRight}
+	volumeSteps = make(chan int, 8)
 )
 
 func ioctlErr(fd uintptr, req uintptr, arg uintptr) error {
@@ -152,6 +164,17 @@ func readDevices(path string, hat bool) {
 		}
 		ev := *(*inputEvent)(unsafe.Pointer(&buf[0]))
 		switch {
+		case hat && ev.Type == evKey && (ev.Code == keyVolumeUp || ev.Code == keyVolumeDown):
+			if ev.Value == 1 {
+				step := 5
+				if ev.Code == keyVolumeDown {
+					step = -5
+				}
+				select {
+				case volumeSteps <- step:
+				default:
+				}
+			}
 		case hat && ev.Type == evAbs && (ev.Code == absHat0X || ev.Code == absHat0Y):
 			if ev.Code == absHat0Y {
 				state.hat[0] = ev.Value < 0
@@ -163,6 +186,22 @@ func readDevices(path string, hat bool) {
 			publish()
 		case !hat && ev.Type == evKey:
 			switch ev.Code {
+			case keyVolumeUp:
+				if ev.Value == 1 {
+					select {
+					case volumeSteps <- 5:
+					default:
+					}
+				}
+				continue
+			case keyVolumeDown:
+				if ev.Value == 1 {
+					select {
+					case volumeSteps <- -5:
+					default:
+					}
+				}
+				continue
 			case keyUp:
 				state.keys[0] = ev.Value != 0
 			case keyDown:
@@ -175,6 +214,61 @@ func readDevices(path string, hat bool) {
 				continue
 			}
 			publish()
+		}
+	}
+}
+
+// heya-control is the single place that knows the mixer, and it plays the tick,
+// so the wheel goes through it instead of talking to amixer itself.
+func volumeControlPath() string {
+	for _, candidate := range []string{
+		"/storage/System/compat/bin/heya-control",
+		"/usr/share/pocketshell/System/compat/bin/heya-control",
+		"/usr/bin/heya-control",
+	} {
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func currentVolume() int {
+	for _, candidate := range []string{"/bin/amixer", "/usr/bin/amixer"} {
+		out, err := exec.Command(candidate, "-c", "0", "sget", "digital volume").Output()
+		if err != nil {
+			continue
+		}
+		fields := strings.Split(string(out), "[")
+		for _, field := range fields {
+			end := strings.IndexByte(field, '%')
+			if end <= 0 {
+				continue
+			}
+			if value, err := strconv.Atoi(field[:end]); err == nil {
+				return value
+			}
+		}
+	}
+	return 50
+}
+
+func volumeWorker() {
+	control := volumeControlPath()
+	if control == "" {
+		fmt.Fprintln(os.Stderr, "pjos-dpad: heya-control not found; volume keys ignored")
+		return
+	}
+	for step := range volumeSteps {
+		next := currentVolume() + step
+		if next < 0 {
+			next = 0
+		}
+		if next > 100 {
+			next = 100
+		}
+		if err := exec.Command(control, "volume", strconv.Itoa(next)).Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "pjos-dpad: volume %d: %v\n", next, err)
 		}
 	}
 }
@@ -200,6 +294,7 @@ func main() {
 		os.Exit(0)
 	}()
 
+	go volumeWorker()
 	go readDevices(*keyDev, false)
 	readDevices(*hatDev, true)
 }

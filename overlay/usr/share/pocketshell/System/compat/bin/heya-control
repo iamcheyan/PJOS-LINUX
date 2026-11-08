@@ -8,7 +8,29 @@ case "${1-}" in
         value=${2-}
         case "$value" in ''|*[!0-9]*) exit 2 ;; esac
         [ "$value" -le 100 ] || exit 2
-        exec /bin/amixer -q set "digital volume" "${value}%"
+        mixer=$(command -v amixer 2>/dev/null || echo /bin/amixer)
+        # The codec's DAC gain alone did not change the speaker loudness on this
+        # panel; lineout is the analog stage that does. Drive both from the same
+        # percentage so the UI, the wheel and the tick all agree.
+        "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 \
+            || "$mixer" -q set "digital volume" "${value}%" >/dev/null 2>&1 || exit 1
+        "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || :
+        # Zero really means silent: the amp stays enabled at 0% on this codec, so
+        # close the speaker switch as well and reopen it on the next step.
+        if [ "$value" -eq 0 ]; then
+            "$mixer" -q -c 0 sset 'SPK' off >/dev/null 2>&1 || :
+        else
+            "$mixer" -q -c 0 sset 'SPK' on >/dev/null 2>&1 || :
+        fi
+        # One short tick per step, played at the level just set: the user hears
+        # the volume land without looking at the panel.
+        for beep in /storage/System/compat/share/audio/beep.wav \
+                    /usr/share/pocketshell/System/compat/share/audio/beep.wav; do
+            [ -f "$beep" ] || continue
+            command -v aplay >/dev/null 2>&1 && aplay -q "$beep" >/dev/null 2>&1
+            break
+        done
+        exit 0
         ;;
     brightness)
         value=${2-}
