@@ -13,9 +13,16 @@
 // driver's own backlight path runs. Measured on the RG34XX: 0 -> duty 0 ns,
 // 100 -> 7891 ns, 255 -> 19922 ns; disp/attr/sys then reports "backlight(N)".
 //
-//	baseos-panel level 120    # set the backlight (0..255)
+//	baseos-panel level        # print the driver's backlight (0..255)
+//	baseos-panel level 120    # set it, and remember it for the next wake
+//	baseos-panel down         # one step dimmer (GBA L2)
+//	baseos-panel up           # one step brighter (GBA R2)
 //	baseos-panel off          # backlight off; the framebuffer keeps running
 //	baseos-panel on           # restore the saved level
+//
+// down/up move by 15 and stop at 10, so a shoulder key cannot blank the panel.
+// Blanking stays with off/on. A level above 0 is written to /run/panel.level
+// after the driver read-back matches, which is the value on restores.
 //
 // Build: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o baseos-panel .
 package main
@@ -38,6 +45,11 @@ const (
 	dispDbgDir   = "/sys/kernel/debug/dispdbg"
 	dispDisplay  = "lcd0"
 	dispLevelMax = 255
+
+	// Shoulder keys step the backlight. The floor stays lit: 0 is "panel off",
+	// which off/on and the power key already own.
+	stepDelta = 15
+	stepFloor = 10
 
 	// The driver prints its live level here as "backlight( 50)".
 	dispSysFile = "/sys/class/disp/disp/attr/sys"
@@ -98,7 +110,56 @@ func setLevel(level int) error {
 	if got, ok := brightness(); ok && got != level {
 		return fmt.Errorf("backlight reads %d after setting %d", got, level)
 	}
+	// 0 is the blanked value, not a preference. Waking must restore the last lit level.
+	if level > 0 {
+		if err := os.WriteFile(levelFile, []byte(strconv.Itoa(level)+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// stepped applies one shoulder-key step. Dimmer never crosses the floor, and a
+// level already below the floor is left alone so L2 cannot jump the panel up.
+func stepped(current, delta int) int {
+	next := current + delta
+	if delta < 0 && next < stepFloor {
+		if current <= stepFloor {
+			return current
+		}
+		return stepFloor
+	}
+	if next < 0 {
+		return 0
+	}
+	if next > dispLevelMax {
+		return dispLevelMax
+	}
+	return next
+}
+
+// step changes the live backlight by one shoulder-key step and prints nothing.
+// A blanked panel is left blank: waking is baseos-panel on, not a brighter step.
+func step(delta int) (int, error) {
+	current, ok := brightness()
+	if !ok {
+		return 0, fmt.Errorf("cannot read driver's backlight level")
+	}
+	if current == 0 {
+		return 0, fmt.Errorf("panel is off")
+	}
+	next := stepped(current, delta)
+	if next == current {
+		return current, nil
+	}
+	if err := setLevel(next); err != nil {
+		return 0, err
+	}
+	got, ok := brightness()
+	if !ok {
+		return 0, fmt.Errorf("cannot read driver's backlight level")
+	}
+	return got, nil
 }
 
 func clampLevel(level int) int {
@@ -169,7 +230,7 @@ func on() error {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: baseos-panel off|on|level [N]")
+		fmt.Fprintln(os.Stderr, "usage: baseos-panel off|on|level [N]|up|down")
 		os.Exit(2)
 	}
 	var err error
@@ -178,6 +239,18 @@ func main() {
 		err = offLevel(0)
 	case "on":
 		err = on()
+	case "up":
+		var value int
+		value, err = step(stepDelta)
+		if err == nil {
+			fmt.Println(value)
+		}
+	case "down":
+		var value int
+		value, err = step(-stepDelta)
+		if err == nil {
+			fmt.Println(value)
+		}
 	case "level":
 		if len(os.Args) == 2 {
 			if value, ok := brightness(); ok {

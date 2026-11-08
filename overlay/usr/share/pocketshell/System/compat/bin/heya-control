@@ -10,6 +10,19 @@ case "${1-}" in
         [ "$value" -le 100 ] || exit 2
         exec /bin/amixer -q set "digital volume" "${value}%"
         ;;
+    brightness)
+        value=${2-}
+        case "$value" in ''|*[!0-9]*) exit 2 ;; esac
+        [ "$value" -le 100 ] || exit 2
+        # enhance_bright is not the backlight: baseos-panel drives dispdbg and
+        # verifies the driver's read-back. Floor at the same 10 the helper uses.
+        panel=/mnt/sdcard/System/bin/baseos-panel
+        [ -x "$panel" ] || panel=/usr/sbin/baseos-panel
+        [ -x "$panel" ] || exit 1
+        level=$(( (value * 255 + 50) / 100 ))
+        [ "$level" -ge 10 ] || level=10
+        exec "$panel" level "$level"
+        ;;
     wifi)
         state=${2-}
         case "$state" in on|off) ;; *) exit 2 ;; esac

@@ -155,9 +155,31 @@ syscall.Syscall(SYS_IOCTL, fd, 0x104, uintptr(unsafe.Pointer(&args[0])))  // 开
 
 ### 仍未做
 
-- 亮度调节接不上：`0x102 LCD_SET_BRIGHT` / `0x106 BACKLIGHT_SET_BRIGHT` 在 sel=0/1/2、
-  指针与数值两种形态下**一律 EPERM**（内核自己管亮度），所以设置页滑条还是写
-  `enhance_bright`。`baseos-panel level N` 会先试 ioctl，失败再写节点。
 - 前端那个「睡眠黑屏 overlay」已移除：背光由主机真正断开，双路径只会让黑帧活过失败的唤醒。
 - 长按关机：用 `--poweroff /bin/true` 的测试实例 + 2.4 秒按住实测到
   `power: long press -> poweroff`，真机断电那一步留给人手验证。
+
+## 8. 亮度档位走 dispdbg，GBA 的 L2 / R2 调同一档
+
+上面的 `/dev/disp` ioctl `0x102` / `0x106` 在这块板上仍然是 `EPERM`，不能当背光接口。
+`enhance_bright` 也不是背光。现在的实现在 `src/baseos-panel/main.go`：写
+`/sys/kernel/debug/dispdbg` 的 `setbl`（显示名 `lcd0`，0..255），再用
+`/sys/class/disp/disp/attr/sys` 里的 `backlight(N)` 核对。对得上才算成功。
+
+| 命令 | 作用 |
+|---|---|
+| `level` | 打印驱动回读 |
+| `level N` | 设为 N。N > 0 时写入 `/run/panel.level` |
+| `down` / `up` | 减 / 加 15，最低 10。面板已经是 0 时拒绝，避免用加亮度冒充唤醒 |
+| `off` | 把当前回读记入 `/run/panel.level`，`setbl 0`，写 `/run/panel.off` |
+| `on` | 按记下的档位恢复（没有则 120），删标记，刷新 `/run/screen-idle.stamp` |
+
+`baseos-screen-idle` 和电源键都调这几个命令。熄屏期间 `/run/panel.off` 在，idle 循环不改档位。
+
+GBA 游戏在前台时（RetroArch 命令行里有 `.gba`），`baseos-hotkeys` 看 `/dev/input/event1`：
+L2（键 314）调 `down`，R2（键 315）调 `up`。点一下一档；按住 380 ms 后每 150 ms 再一档。
+启动器里这两个键不改亮度。把屏幕唤醒的那一下也不改档位。
+
+这块板的设备树把 Linux 的 `BTN_SELECT`（314）和 `BTN_START`（315）接到了 L2 / R2。
+Select / Start 是 310 / 311。退出组合只认后者，按住 L2+R2 不会退出游戏。
+键位细节在 [22-retroarch-gba.md](22-retroarch-gba.md)。
