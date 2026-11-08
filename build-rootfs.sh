@@ -133,6 +133,9 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
     for core in gambatte; do
       [ ! -f "$COMPAT/lib/libretro/${core}_libretro.so" ] || install -m 0644 "$COMPAT/lib/libretro/${core}_libretro.so" "$R/usr/lib/libretro/${core}_libretro.so"
     done
+    if [ -x /overlay/usr/share/pocketshell/System/bin/pjos-dpad ]; then
+      install -m 0755 /overlay/usr/share/pocketshell/System/bin/pjos-dpad "$R/usr/bin/pjos-dpad"
+    fi
     for script in pocket-game-play pocketshell-play systemd-run pocketshell-games; do
       [ ! -x "$COMPAT/bin/$script" ] || install -m 0755 "$COMPAT/bin/$script" "$R/usr/bin/$script"
     done

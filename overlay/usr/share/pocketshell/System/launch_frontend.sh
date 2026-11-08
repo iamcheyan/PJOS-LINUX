@@ -26,18 +26,6 @@ read_failures() {
     case "$failures" in ''|*[!0-9]*) failures=0 ;; esac
 }
 
-kill_matching() {
-    helper_pattern=$1
-    for helper_dir in /proc/[0-9]*; do
-        helper_pid=${helper_dir##*/}
-        [ "$helper_pid" = "$$" ] && continue
-        helper_cmd=$(tr '\0' ' ' < "$helper_dir/cmdline" 2>/dev/null) || continue
-        case "$helper_cmd" in
-        *"$helper_pattern"*) kill -9 "$helper_pid" 2>/dev/null || : ;;
-        esac
-    done
-}
-
 backoff() {
     read_failures
     failures=$((failures + 1))
@@ -86,6 +74,18 @@ fi
 # A target is either an installed package id (apps/<id>.pocket) or a ROM name
 # shipped on the card (apps/<name>.gba|gb|gbc), so the same bridge arm serves
 # both without a second command.
+kill_matching() {
+    helper_pattern=$1
+    for helper_dir in /proc/[0-9]*; do
+        helper_pid=${helper_dir##*/}
+        [ "$helper_pid" = "$$" ] && continue
+        helper_cmd=$(tr '\0' ' ' < "$helper_dir/cmdline" 2>/dev/null) || continue
+        case "$helper_cmd" in
+        *"$helper_pattern"*) kill -9 "$helper_pid" 2>/dev/null || : ;;
+        esac
+    done
+}
+
 ACTIVE="$SD/System/pocketjs/active"
 CLEAR_ACTIVE=0
 ROM_PLAY=
@@ -181,6 +181,45 @@ else
     display_args="--fb /dev/fb0"
 fi
 
+# One D-pad source for the runtime: the vendor DTB reports directions as hat
+# axes on ANBERNIC-keys and (depending on the driver path) as arrow key codes
+# on dierct-keys-polled. pjos-dpad mirrors both into one uinput keyboard device,
+# so the runtime only needs to understand arrow keys.
+if [ -x "$SD/System/bin/pjos-dpad" ]; then
+    dpad=$SD/System/bin/pjos-dpad
+elif [ -x /usr/bin/pjos-dpad ]; then
+    dpad=/usr/bin/pjos-dpad
+else
+    dpad=
+fi
+if [ -n "$dpad" ]; then
+    kill_matching pjos-dpad
+    # Let the previous daemon's uinput node leave /dev/input first, otherwise the
+    # runtime receives two "PJOS D-pad" nodes and every press steps twice.
+    tries=0
+    while [ "$tries" -lt 15 ]; do
+        stale=
+        for candidate in /dev/input/event*; do
+            [ -e "$candidate" ] || continue
+            [ "$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null)" = "PJOS D-pad" ] && stale=1
+        done
+        [ -z "$stale" ] && break
+        tries=$((tries + 1))
+        sleep 0.1
+    done
+    "$dpad" </dev/null >>"$LOG" 2>&1 &
+    tries=0
+    while [ "$tries" -lt 15 ]; do
+        for candidate in /dev/input/event*; do
+            [ -e "$candidate" ] || continue
+            [ "$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null)" = "PJOS D-pad" ] && break 2
+        done
+        tries=$((tries + 1))
+        sleep 0.1
+    done
+    log "helpers: pad arrows started"
+fi
+
 inputs=
 add_input() {
     candidate=$1
@@ -198,6 +237,9 @@ for candidate in /dev/input/event*; do
 done
 for candidate in /dev/input/event*; do
     [ -e "$candidate" ] || continue
+    name=$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null || :)
+    # pjos-dpad already publishes these directions as arrow keys.
+    [ "$name" = "dierct-keys-polled" ] && continue
     add_input "$candidate"
 done
 if [ -n "$inputs" ]; then
