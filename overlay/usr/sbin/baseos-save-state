@@ -8,9 +8,11 @@
 #   kind=app
 #   target=<package-id>
 #
-# If RetroArch is running, request a save state through network command
-# (RetroArch must have network_cmd_enable=true in its config) and wait briefly.
-# This is best-effort: failures must not block power-off.
+# RetroArch saves the configured auto state during its normal termination
+# (savestate_auto_save=true). rcK delivers SIGTERM before its final sync.
+# Avoid enabling the unauthenticated UDP network-command listener just to force
+# an extra save; this helper records the launch target and lets shutdown exit
+# cleanly. The configured savestate_auto_load=true restores it on next launch.
 set -u
 
 STATE_DIR=/storage/.config/pocketjs
@@ -20,7 +22,6 @@ mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo now)" "$*" >>/tmp/baseos-save-state.log 2>/dev/null || :; }
 
-# If RetroArch is active, try to save a state and record the ROM target.
 if pidof retroarch >/dev/null 2>&1; then
     rom=
     if [ -r /tmp/pocketjs-current-rom ]; then
@@ -29,17 +30,6 @@ if pidof retroarch >/dev/null 2>&1; then
         kind=$(sed -n 's/^kind=//p' "$LAST_ACTIVE" | head -1)
         target=$(sed -n 's/^target=//p' "$LAST_ACTIVE" | head -1)
         [ "$kind" = "rom" ] && rom=$target
-    fi
-    # Best-effort RetroArch save state via network command.
-    # RetroArch UDP command interface: SAVE_STATE (slot) or default hotkey path.
-    if command -v retroarch >/dev/null 2>&1 && [ -S /tmp/retroarch.cmd ] 2>/dev/null; then :; fi
-    # Try UDP localhost command port if enabled.
-    if command -v nc >/dev/null 2>&1; then
-        printf 'SAVE_STATE\n' | nc -u -w1 127.0.0.1 55355 >/dev/null 2>&1 || :
-        sleep 1
-    elif command -v timeout >/dev/null 2>&1 && [ -x /bin/busybox ]; then
-        printf 'SAVE_STATE\n' | timeout 1 /bin/busybox nc -u 127.0.0.1 55355 >/dev/null 2>&1 || :
-        sleep 1
     fi
     if [ -n "$rom" ]; then
         printf 'kind=rom\ntarget=%s\nsaved=%s\n' "$rom" "$(date +%s 2>/dev/null || echo 0)" > "$RESUME" 2>/dev/null || :

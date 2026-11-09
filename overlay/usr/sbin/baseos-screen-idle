@@ -190,6 +190,30 @@ spawn_readers
 
 blanked=0
 while :; do
+    # Power-off is independent of screen blanking. Evaluate it before either the
+    # "never blank" or manual panel-off branches, which would otherwise skip
+    # this loop's later idle check forever.
+    now=$(date +%s)
+    last=$(stat -c %Y "$STAMP" 2>/dev/null || echo 0)
+    idle=$(( now - last ))
+    auto_stop_timeout=$(configured_auto_stop_timeout)
+    if [ "$auto_stop_timeout" -gt 0 ] && [ "$idle" -ge "$auto_stop_timeout" ]; then
+        log "auto power-off after ${idle}s idle (timeout ${auto_stop_timeout}s)"
+        # This card-side helper records the ROM/app before the OS poweroff path
+        # runs; the image's read-only poweroff binary may predate the hook.
+        saver=/mnt/sdcard/System/bin/baseos-save-state
+        [ -x "$saver" ] || saver=/storage/System/bin/baseos-save-state
+        [ ! -x "$saver" ] || "$saver" >/dev/null 2>&1 || :
+        sync
+        if [ -x /usr/sbin/baseos-poweroff ]; then
+            /usr/sbin/baseos-poweroff 2>/dev/null || /sbin/poweroff 2>/dev/null || :
+        else
+            /sbin/poweroff 2>/dev/null || :
+        fi
+        sleep 60
+        continue
+    fi
+
     timeout=$(configured_timeout)
     if [ "$timeout" -le 0 ]; then
         if [ "$blanked" = 1 ]; then
@@ -219,23 +243,6 @@ while :; do
     if [ "$blanked" = 0 ]; then
         current=$(read_level)
         case "$current" in ''|*[!0-9]*) ;; *) [ "$current" -gt 0 ] && saved=$current ;; esac
-    fi
-
-    last=$(stat -c %Y "$STAMP" 2>/dev/null || echo 0)
-    now=$(date +%s)
-    idle=$(( now - last ))
-
-    auto_stop_timeout=$(configured_auto_stop_timeout)
-    if [ "$auto_stop_timeout" -gt 0 ] && [ "$idle" -ge "$auto_stop_timeout" ]; then
-        log "auto power-off after ${idle}s idle (timeout ${auto_stop_timeout}s)"
-        sync
-        if [ -x /usr/sbin/baseos-poweroff ]; then
-            /usr/sbin/baseos-poweroff 2>/dev/null || /sbin/poweroff 2>/dev/null || :
-        else
-            /sbin/poweroff 2>/dev/null || :
-        fi
-        sleep 60
-        continue
     fi
 
     if [ "$blanked" = 0 ] && [ "$idle" -ge "$timeout" ]; then
