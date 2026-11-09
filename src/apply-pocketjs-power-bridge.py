@@ -59,7 +59,7 @@ POWER_ARM = '''        [\"POWER\", timeout] if [\"never\", \"1m\", \"5m\", \"10m
             }
             match std::fs::write(path, new_lines.join("\\n") + "\\n") {
                 Ok(_) => {
-                    let label = if timeout == "never" { "Never".to_string() } else { timeout.to_string() };
+                    let label = if *timeout == "never" { "Never".to_string() } else { timeout.to_string() };
                     format!("Auto power-off: {}", label)
                 }
                 Err(_) => "Failed to save auto power-off".into(),
