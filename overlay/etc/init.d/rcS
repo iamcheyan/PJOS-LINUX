@@ -444,6 +444,20 @@ if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -c /dev/snd/controlC0 ] && command -v amix
 	if [ -z "$level" ] || [ "$level" -eq 0 ]; then
 		amixer -q -c 0 sset 'digital volume' '60%' >/dev/null 2>&1 || :
 	fi
+	# The three sset calls above are best-effort by design (control names differ
+	# across H700 variants), which is also why a wrong name used to be invisible:
+	# the speaker simply stayed off and nothing was logged. Read the state back
+	# so a silent device is diagnosable from one file.
+	if [ -x /usr/sbin/pocket-audio-check ]; then
+		/usr/sbin/pocket-audio-check >/run/h700-audio.log 2>&1
+	fi
+else
+	# No mixer or no card at this point is itself the finding.
+	{
+		echo "audio: mixer step skipped"
+		echo "  controlC0: $([ -c /dev/snd/controlC0 ] && echo present || echo missing)"
+		echo "  amixer: $(command -v amixer 2>/dev/null || echo missing)"
+	} >/run/h700-audio.log
 fi
 
 # Optional TF1 startup sound. The audio repair must finish before playback;

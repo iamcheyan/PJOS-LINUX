@@ -1,0 +1,80 @@
+#!/bin/sh
+# One-shot audio chain report for the H700 handhelds.
+#
+# Written after an RG34XX reported "no sound in games" with an otherwise
+# healthy image: every step of the chain (amp module, mixer path, ALSA card,
+# RetroArch driver) failed silently, so the log said nothing and the only
+# symptom was a quiet speaker. This prints the state of each link and, with
+# --tone, plays a short test tone so the speaker is proven rather than assumed.
+#
+#   pocket-audio-check            # report
+#   pocket-audio-check --tone     # report + 1 kHz tone for two seconds
+set -u
+TONE=0
+[ "${1:-}" = "--tone" ] && TONE=1
+
+say() { printf '%s\n' "$*"; }
+
+say "== module =="
+if [ -f /lib/modules/h700_speaker_amp.ko ]; then
+    say "h700_speaker_amp.ko present"
+else
+    say "h700_speaker_amp.ko MISSING: the amp repair cannot attach, the vendor"
+    say "  codec keeps its own SPK gating and the speaker stays silent"
+fi
+if grep -q '^h700_speaker_amp ' /proc/modules 2>/dev/null; then
+    say "loaded: $(grep '^h700_speaker_amp ' /proc/modules | cut -d' ' -f1-3)"
+else
+    say "NOT loaded"
+    [ -r /run/h700-speaker-amp.log ] && say "  log: $(cat /run/h700-speaker-amp.log)"
+fi
+
+say "== kernel =="
+say "uname: $(uname -r)"
+command -v sha256sum >/dev/null 2>&1 && say "image sha256: $(sha256sum /boot/Image 2>/dev/null | cut -d' ' -f1)"
+
+say "== alsa =="
+if [ -r /proc/asound/cards ]; then
+    sed -n '1,20p' /proc/asound/cards
+else
+    say "no /proc/asound/cards: the codec never bound"
+fi
+if [ -c /dev/snd/controlC0 ] && command -v amixer >/dev/null 2>&1; then
+    say "-- playback path controls --"
+    for ctl in 'OutputL Mixer DACL' 'OutputR Mixer DACR' 'SPK' 'digital volume'; do
+        state=$(amixer -c 0 sget "$ctl" 2>/dev/null | tr '\n' ' ')
+        if [ -z "$state" ]; then
+            say "  $ctl: ABSENT (a name mismatch here leaves the speaker off)"
+        else
+            say "  $ctl: $(printf '%s' "$state" | sed -n 's/.*\[\(on\|off\)\].*/\1/p' | head -1)$(printf '%s' "$state" | sed -n 's/.*\[\([0-9]*%\)\].*/ \1/p' | head -1)"
+        fi
+    done
+else
+    say "no controlC0 or no amixer: mixer path cannot be opened"
+fi
+
+say "== retroarch =="
+if [ -x /usr/bin/retroarch ] || [ -x /storage/System/compat/lib/retroarch ]; then
+    say "binary present; drivers compiled in:"
+    ( /usr/bin/retroarch --features 2>/dev/null || /storage/System/compat/lib/retroarch --features 2>/dev/null ) \
+        | sed -n 's/^ *\(alsa\|alsathread\|sdl\|null\).*/  \1/p' | head -6
+else
+    say "retroarch not installed"
+fi
+
+if [ "$TONE" = 1 ]; then
+    say "== tone =="
+    if command -v aplay >/dev/null 2>&1; then
+        # 2 s of 1 kHz mono 44.1 kHz, generated without ffmpeg/sox.
+        tmp=${TMPDIR:-/tmp}/pocket-tone.raw
+        awk 'BEGIN{for(i=0;i<88200;i++)printf "%c%c",int(120*sin(2*3.14159265*1000*i/44100))+128,int(120*sin(2*3.14159265*1000*i/44100))+128}' > "$tmp" 2>/dev/null
+        if aplay -q -f S16_LE -r 44100 -c 1 -t raw "$tmp" 2>/tmp/pocket-tone.err; then
+            say "tone played (hear it?)"
+        else
+            say "tone FAILED: $(cat /tmp/pocket-tone.err 2>/dev/null | tail -2 | tr '\n' ' ')"
+        fi
+        rm -f "$tmp"
+    else
+        say "aplay missing"
+    fi
+fi

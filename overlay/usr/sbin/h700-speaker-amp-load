@@ -6,8 +6,14 @@ CONFIG="${BASEOS_AUDIO_CONFIG:-/run/baseos.conf}"
 MODULE="${BASEOS_AUDIO_MODULE:-/lib/modules/h700_speaker_amp.ko}"
 INSMOD="${BASEOS_AUDIO_INSMOD:-/sbin/insmod}"
 
-# Builds without a validated module keep their existing audio behaviour.
-[ -f "$MODULE" ] || exit 0
+# Builds without a validated module keep their existing audio behaviour, but
+# that silence has to be visible: on RG34XX the speaker amp is gated by the
+# widget events this module replaces, so "no module" is the first thing to rule
+# out when a game has no sound.
+if [ ! -f "$MODULE" ]; then
+    echo "h700_amp: no module at $MODULE (audio repair inactive)"
+    exit 0
+fi
 headphone_pop_fix=false
 if [ -r "$CONFIG" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
