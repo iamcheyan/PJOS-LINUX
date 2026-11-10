@@ -51,8 +51,10 @@ fn kanade_endpoint(verb: &str, arg: &str) -> Option<(&'static str, String, Optio
         "downloads"   => Some(("GET",  "/api/downloads?limit=100".into(), None)),
         "settings"    => Some(("GET",  "/api/settings".into(), None)),
         "storage"     => Some(("GET",  "/api/storage".into(), None)),
-        "sync"        => Some(("POST", "/api/sync".into(), None)),
+        "sync"        => Some(("POST", "/api/sync".into(), Some("{\"what\":\"library\"}".into()))),
         "clear"       => Some(("POST", "/api/storage/clear?scope=orphans".into(), None)),
+        // Raw RGBA at the row cover size; kanade-ctl base64s octet-stream bodies.
+        "thumb" if safe(arg) && !arg.is_empty()    => Some(("GET", format!("/api/thumb/{}?w=32&h=16", arg), None)),
         "play" if safe(arg) && !arg.is_empty()     => got(arg, "POST", "/api/player/play".into()),
         "watched" if safe(arg) && !arg.is_empty()  => got(arg, "POST", format!("/api/library/{}/watched", arg)),
         "later" if safe(arg) && !arg.is_empty()    => got(arg, "POST", format!("/api/watch_later/{}", arg)),
