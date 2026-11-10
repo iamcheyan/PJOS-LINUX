@@ -61,7 +61,10 @@ fn kanade_endpoint(verb: &str, arg: &str) -> Option<(&'static str, String, Optio
     }
 }
 
-fn kanade_call(verb: &str, arg: &str) -> String {
+fn kanade_call<S: AsRef<str>>(verb: S, arg: &str) -> String {
+    // Slice patterns over `&[&str]` bind `&&str`, so the verb is normalised here
+    // instead of forcing every arm to guess the level of indirection.
+    let verb = verb.as_ref();
     let Some((method, path, body)) = kanade_endpoint(verb, arg) else {
         return "error:bad-verb".into();
     };
@@ -71,10 +74,12 @@ fn kanade_call(verb: &str, arg: &str) -> String {
         .copied();
     let Some(ctl) = ctl else { return "error:no-ctl".into() };
 
-    let mut argv: Vec<&str> = vec!["12", ctl, method, &path];
+    // Explicit &str conversions: a Vec<&str> built from String references only
+    // coerces at some call sites, which makes this fragile across rustc versions.
+    let mut argv: Vec<&str> = vec!["12", ctl, method, path.as_str()];
     let owned = body.unwrap_or_default();
     if !owned.is_empty() {
-        argv.push(&owned);
+        argv.push(owned.as_str());
     }
     match Command::new("/usr/bin/timeout")
         .args(&argv)

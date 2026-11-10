@@ -142,14 +142,14 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-power-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-restore.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-kanade.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
-    grep -q 'fn kanade_call' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
+    grep -q "fn kanade_call" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: KANADE bridge arm missing" >&2; exit 1; }
-    echo "rom_launch hits: $(grep -c 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
-    echo "power_timeout hits: $(grep -c 'power_timeout' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
-    echo "resume_get hits: $(grep -c 'resume_get' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
-    grep -q 'power_timeout' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
+    echo "rom_launch hits: $(grep -c "rom_launch" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    echo "power_timeout hits: $(grep -c "power_timeout" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    echo "resume_get hits: $(grep -c "resume_get" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"
+    grep -q "power_timeout" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: auto power-off bridge arm missing" >&2; exit 1; }
-    grep -q 'rom_launch' /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
+    grep -q "rom_launch" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: ROM launch arm missing from the built source" >&2; exit 1; }
 
     export LIBCLANG_PATH=/usr/lib/llvm-14/lib
