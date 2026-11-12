@@ -1,0 +1,38 @@
+#!/bin/sh
+# BaseOS mpv entry: the H700 build lives in compat/mpv with its own libs.
+# Video goes through SDL2 mali-fbdev (/dev/fb0, there is no DRM) and audio
+# through SDL audio.
+#
+# Because BaseOS has no window manager, pocket-linux-kms (Kanade UI) and mpv
+# both write directly to /dev/fb0. pocket-linux-kms MUST be paused (SIGSTOP)
+# during playback to prevent violent flickering between the video buffer
+# (pan 0,0) and the UI list buffer (pan 0,480).
+D=/storage/System/compat/mpv
+PAN=/sys/class/graphics/fb0/pan
+export LD_LIBRARY_PATH="$D:/storage/System/compat/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+pan=$(cat "$PAN" 2>/dev/null)
+
+# Find and suspend pocket-linux-kms instances while video plays
+POCKET_PIDS=$(pidof pocket-linux-kms 2>/dev/null)
+if [ -n "$POCKET_PIDS" ]; then
+    kill -STOP $POCKET_PIDS 2>/dev/null
+fi
+
+cleanup() {
+    # Restore pocket-linux-kms and pan offset
+    if [ -n "$POCKET_PIDS" ]; then
+        kill -CONT $POCKET_PIDS 2>/dev/null
+    fi
+    [ -n "$pan" ] && [ "$pan" != "0,0" ] && echo "$pan" > "$PAN" 2>/dev/null
+}
+
+trap 'kill $pid 2>/dev/null; cleanup' TERM INT HUP
+trap 'cleanup' EXIT
+
+"$D/mpv" --vo=sdl --ao=sdl --fs --input-conf="$D/input.conf" --really-quiet "$@" &
+pid=$!
+wait $pid
+rc=$?
+
+exit $rc
