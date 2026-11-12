@@ -125,7 +125,9 @@ if [ -r "$ACTIVE" ]; then
             esac ;;
     esac
     wanted=$(printf '%s' "$wanted" | tr -cd 'a-zA-Z0-9._-' | cut -c1-64)
-    if [ -z "$ROM_PLAY" ] && [ -n "$wanted" ] && [ -f "$SD/apps/$wanted.pocket" ]; then
+    bare=${wanted%.*}
+    if [ -z "$ROM_PLAY" ] && [ -n "$wanted" ] && { [ -f "$SD/apps/$wanted.pocket" ] || [ -f "$SD/apps/$bare.pocket" ]; }; then
+        [ -f "$SD/apps/$wanted.pocket" ] || wanted=$bare
         log "installed app requested: $wanted"
         PACKAGE="$SD/apps/$wanted.pocket"
         CLEAR_ACTIVE=1
@@ -322,6 +324,13 @@ if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
         --runtime "pocket-linux-kms,retroarch" \
         </dev/null >/dev/null 2>&1 &
     log "helpers: hotkeys started"
+fi
+if [ -x "$SD/System/bin/videod" ] && ! pidof videod >/dev/null 2>&1; then
+    mkdir -p /storage/.config/kanade /tmp/kanade-ipc
+    export KANADE_MPV=/storage/System/compat/bin/mpv
+    export KANADE_IPC=/tmp/kanade-ipc
+    setsid "$SD/System/bin/videod" -addr 127.0.0.1:8732 -data /storage/.config/kanade >/tmp/videod.log 2>&1 </dev/null &
+    log "helpers: videod started"
 fi
 
 started=$(date +%s 2>/dev/null || printf '0')

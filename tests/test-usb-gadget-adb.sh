@@ -6,6 +6,8 @@ SCRIPT="$HERE/overlay/usr/sbin/usb-gadget-adb"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 : > "$TMP/mounts-empty"
+mkdir -p "$TMP/data" "$TMP/run"
+export BASEOS_DATA_ROOT="$TMP/data" BASEOS_RUN_ROOT="$TMP/run"
 
 # Build a fake /sys tree: one UDC and an (empty) configfs usb_gadget dir. On
 # macOS these are all just ordinary files/dirs, so the script's mkdir/echo
@@ -125,5 +127,32 @@ G8="$TMP/sys8/kernel/config/usb_gadget/g1"
 [ -L "$G8/configs/c.1/ffs.adb" ]
 [ ! -e "$G8/configs/c.1/mass_storage.usb0" ]
 [ "$(cat "$G8/configs/c.1/strings/0x409/configuration")" = "adb" ]
+
+# Explicit switch persists policy, removes only ADB, and can reactivate it.
+run_gadget "$TMP/sys" disable
+[ -f "$TMP/data/no-adb" ]
+[ ! -e "$G/configs/c.1/ffs.adb" ]
+[ -z "$(cat "$G/UDC")" ]
+[ "$(run_gadget "$TMP/sys" status)" = off ]
+run_gadget "$TMP/sys" enable
+[ ! -e "$TMP/data/no-adb" ]
+[ -L "$G/configs/c.1/ffs.adb" ]
+[ "$(cat "$G/UDC")" = "5100000.udc-controller" ]
+[ "$(run_gadget "$TMP/sys" status)" = on ]
+
+# An unplugged/unbound gadget must still remove ADB without an invalid unbind.
+printf '\n' > "$G/UDC"
+run_gadget "$TMP/sys" disable
+[ ! -e "$G/configs/c.1/ffs.adb" ]
+run_gadget "$TMP/sys" enable
+
+# Disable keeps an already configured storage function bound and untouched.
+run_gadget "$TMP/sys4" disable
+[ ! -e "$G4/configs/c.1/ffs.adb" ]
+[ -L "$G4/configs/c.1/mass_storage.usb0" ]
+[ "$(cat "$G4/functions/mass_storage.usb0/lun.0/file")" = "$TMP/card.img" ]
+[ "$(cat "$G4/UDC")" = "5100000.udc-controller" ]
+[ "$(cat "$G4/configs/c.1/strings/0x409/configuration")" = "usb storage" ]
+rm -f "$TMP/data/no-adb"
 
 echo "usb-gadget-adb tests passed"

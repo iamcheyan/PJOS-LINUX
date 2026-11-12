@@ -1,0 +1,52 @@
+#!/bin/sh
+# Event-driven USB ADB recovery. The H700 kernel already invokes /sbin/hotplug;
+# do not install a polling daemon or write sunxi role-control attributes.
+case "${SUBSYSTEM:-}:${ACTION:-}" in
+    power_supply:change|udc:add|udc:change) ;;
+    *) exit 0 ;;
+esac
+
+SYS=${BASEOS_SYS_ROOT:-/sys}
+RUN=${BASEOS_RUN_ROOT:-/run}
+DATA=${BASEOS_DATA_ROOT:-/data}
+SETUP=${BASEOS_ADB_SETUP:-/usr/sbin/usb-gadget-adb}
+GADGET="$SYS/kernel/config/usb_gadget/g1"
+
+# init.d/dev marks readiness only after the initial gadget/storage decision and
+# bounded setup have completed. Never compose a gadget during early coldplug.
+[ -e "$RUN/usb-adb-hotplug-ready" ] || exit 0
+[ ! -e "$DATA/no-adb" ] && [ -z "${BASEOS_DISABLE_ADB:-}" ] || exit 0
+[ -x "$SETUP" ] || exit 0
+# Only recover the ADB composition selected at boot, including ADB+storage.
+# Do not introduce ADB into storage-only mode or change a storage-mode decision.
+[ -e "$GADGET/configs/c.1/ffs.adb" ] || exit 0
+
+# Serialise bursts of power-supply/UDC events. The lock is released on normal
+# completion/signals; no daemon or repeated work while the gadget is bound.
+lock="$RUN/usb-adb-hotplug.lock"
+mkdir "$lock" 2>/dev/null || exit 0
+trap 'rmdir "$lock" 2>/dev/null || :' EXIT
+trap 'exit 0' HUP INT TERM
+
+bound=
+[ ! -r "$GADGET/UDC" ] || IFS= read -r bound < "$GADGET/UDC"
+[ -z "$bound" ] || exit 0
+
+# Reading otg_role is safe; usb_device/usb_host/usb_null siblings are READ
+# TRIGGERS and must never be opened. Fail closed on unknown or host role.
+role=
+[ ! -r "$SYS/devices/platform/soc/usbc0/otg_role" ] \
+    || IFS= read -r role < "$SYS/devices/platform/soc/usbc0/otg_role"
+[ "$role" = usb_device ] || exit 0
+online=
+for supply in "$SYS"/class/power_supply/*usb*/online; do
+    [ -r "$supply" ] || continue
+    IFS= read -r online < "$supply"
+    [ "$online" != 1 ] || break
+done
+[ "$online" = 1 ] || exit 0
+
+# setup is bounded and leaves an already-bound gadget alone. No forced USB role,
+# unbind, storage selection, daemon stop, or reboot is performed here.
+"$SETUP" setup >/dev/null 2>&1 || :
+exit 0

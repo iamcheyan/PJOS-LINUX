@@ -88,8 +88,8 @@ fn kanade_call<S: AsRef<str>>(verb: S, arg: &str) -> String {
     let resolved = if verb == "nas_password" {
         match kanade_unhex(arg) {
             Some(password) => {
-                let escaped = password.replace('\\\\', "\\\\\\\\").replace('"', "\\\\\\"");
-                Some(("POST", "/api/share/password".to_string(), Some(format!("{{\\"password\\":\\"{}\\"}}", escaped))))
+                let escaped: String = password.chars().map(|c| match c { '\\' => "\\\\".into(), '"' => "\\\"".into(), c if c <= '\u{1f}' => format!("\\u{:04x}", c as u32), c => c.to_string() }).collect();
+                Some(("POST", "/api/share/password".to_string(), Some(format!("{{\"password\":\"{}\"}}", escaped))))
             }
             None => None,
         }

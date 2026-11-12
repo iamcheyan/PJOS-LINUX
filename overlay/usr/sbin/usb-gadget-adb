@@ -1,9 +1,9 @@
 #!/bin/sh
 # Bring up the BaseOS USB gadget once during boot.
 #
-# The optional argument is `setup`; omitting it has the same effect. The script
-# composes the configfs gadget, starts adbd, and performs one bounded initial
-# bind. Run once by init.d/dev.
+# `setup` (the default) composes the configfs gadget and performs a bounded
+# initial bind. `enable`/`disable` persist the settings switch using /data/no-adb
+# and asynchronously apply it. `status` prints the requested on/off policy.
 #
 # This is an optional convenience and NEVER a boot dependency: there is no
 # `set -e`, every failure path exits 0 silently, and every wait is a bounded
@@ -12,10 +12,10 @@
 #
 # The sunxi OTG role manager clears the gadget's UDC binding on disconnect and
 # may select host role when a cable is attached later. BaseOS deliberately does
-# not run a reconnect helper or force the role: this shared port must remain
-# available for intentional USB-host peripherals. The supported contract is to
-# connect the host cable before powering on. After a disconnect, reboot with the
-# cable connected to restore adb.
+# not force the role: this shared port remains available for intentional USB
+# host peripherals. /sbin/hotplug may retry setup on a device-role cable event;
+# host-role attaches are left alone. Cable-connected startup remains the reliable
+# fallback when the vendor manager selects host role on a later attach.
 #
 # CRITICAL sunxi trap (measured on rg40xxv, 4.9.170): the role manager's role
 # attributes must NOT be touched by this script.
@@ -38,6 +38,8 @@ FFS_DIR="${BASEOS_FFS_DIR:-/dev/usb-ffs/adb}"
 ADBD="${BASEOS_ADBD:-/usr/sbin/adbd}"
 STORAGE_DEVICE_FILE="${BASEOS_STORAGE_DEVICE_FILE:-/run/usb-storage-device}"
 MOUNTS="${BASEOS_PROC_MOUNTS:-/proc/mounts}"
+DATA="${BASEOS_DATA_ROOT:-/data}"
+RUN="${BASEOS_RUN_ROOT:-/run}"
 
 UDC_DIR="$SYS/class/udc"
 CONFIGFS="$SYS/kernel/config"
@@ -97,7 +99,7 @@ do_setup() {
 	# the safely-unmounted block device into /run. The env overrides are test
 	# hooks and also make one-off diagnosis possible without changing policy.
 	adb_enabled=1
-	if [ -e /data/no-adb ] || [ -n "${BASEOS_DISABLE_ADB:-}" ]; then
+	if [ -e "$DATA/no-adb" ] || [ -n "${BASEOS_DISABLE_ADB:-}" ]; then
 		adb_enabled=
 	fi
 	storage_device="${BASEOS_STORAGE_DEVICE:-}"
@@ -265,8 +267,68 @@ do_setup() {
 	fi
 }
 
+# Remove only the ADB interface. Preserve the selected storage LUN and rebind
+# it immediately when present; turning debugging off must not select a new mode.
+do_disable() {
+    if [ -e "$GADGET/configs/c.1/ffs.adb" ]; then
+        if gadget_is_bound; then
+            printf '\n' > "$GADGET/UDC" 2>/dev/null || return 0
+        fi
+        rm -f "$GADGET/configs/c.1/ffs.adb" 2>/dev/null
+    fi
+    if [ -z "$TEST_MODE" ]; then
+        killall adbd >/dev/null 2>&1 || :
+    fi
+    if [ -e "$GADGET/configs/c.1/mass_storage.usb0" ]; then
+        echo 'usb storage' > "$GADGET/configs/c.1/strings/0x409/configuration" 2>/dev/null
+        udc=$(first_udc)
+        [ -z "$udc" ] || echo "$udc" > "$GADGET/UDC" 2>/dev/null
+    fi
+}
+
+# Serialise boot setup, cable-event recovery, and on/off requests. A setting
+# writes desired policy first, then this worker applies the latest policy so
+# an in-flight enable cannot resurrect ADB after a later disable.
+do_locked() {
+    lock="$RUN/usb-adb-setup.lock"
+    attempts=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        attempts=$((attempts + 1))
+        [ "$attempts" -lt 80 ] || return 0
+        sleep 0.25 2>/dev/null || sleep 1
+    done
+    trap 'rmdir "$lock" 2>/dev/null || :' EXIT
+    trap 'exit 0' HUP INT TERM
+    if [ "$1" = reconcile ] && { [ -e "$DATA/no-adb" ] || [ -n "${BASEOS_DISABLE_ADB:-}" ]; }; then
+        do_disable
+    else
+        do_setup
+    fi
+    rmdir "$lock" 2>/dev/null || :
+    trap - EXIT HUP INT TERM
+}
+
 case "${1:-setup}" in
-	setup) do_setup ;;
+    setup) do_locked setup ;;
+    reconcile) do_locked reconcile ;;
+    status)
+        if [ -e "$DATA/no-adb" ] || [ -n "${BASEOS_DISABLE_ADB:-}" ]; then echo off; else echo on; fi
+        ;;
+    enable|disable)
+        mkdir -p "$DATA" "$RUN" 2>/dev/null || exit 1
+        if [ "$1" = enable ]; then
+            rm -f "$DATA/no-adb" || exit 1
+        else
+            : > "$DATA/no-adb" || exit 1
+        fi
+        # Keep render-thread requests short; reconciliation is bounded and owns
+        # no caller pipes. Tests execute synchronously against their fake tree.
+        if [ -n "$TEST_MODE" ]; then
+            do_locked reconcile
+        else
+            "$0" reconcile </dev/null >/dev/null 2>&1 &
+        fi
+        ;;
 esac
 
 exit 0

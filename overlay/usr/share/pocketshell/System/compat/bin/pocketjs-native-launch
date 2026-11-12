@@ -1,0 +1,22 @@
+#!/bin/sh
+# Launcher hand-off for native applications / packages
+set -u
+app=${1:-}
+[ -n "$app" ] || exit 1
+
+sd=/mnt/sdcard
+[ -d "$sd/System/pocketjs" ] || sd=/storage
+
+case "$app" in
+    kanade|kanade.pocket)
+        printf 'kanade\n' > "$sd/System/pocketjs/active" || exit 1
+        ;;
+    disk|xmplayer|*)
+        printf '%s\n' "$app" > "$sd/System/pocketjs/active" || exit 1
+        ;;
+esac
+
+printf '0\n' > /tmp/pocketjs-frontend-failures 2>/dev/null || :
+sleep 0.4
+pid=$(pidof pocket-linux-kms 2>/dev/null) && kill -9 $pid 2>/dev/null
+exit 0

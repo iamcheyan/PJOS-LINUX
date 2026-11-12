@@ -1,0 +1,154 @@
+#!/bin/sh
+# BaseOS settings exposed through the launcher's SETTING protocol.
+set -u
+ROOT=${BASEOS_SETTINGS_ROOT:-}
+key=${1-}
+want=${2-}
+fail() { printf 'error:%s\n' "$1"; exit 1; }
+flag() { case "$1" in 1|Y|y|yes|true|on) echo on ;; *) echo off ;; esac; }
+read_value() { cat "$ROOT$1" 2>/dev/null; }
+config_set() {
+    file="$ROOT/mnt/sdcard/baseos.conf"
+    mkdir -p "${file%/*}" || return 1
+    [ -f "$file" ] || : > "$file"
+    awk -v name="$1" -v value="$2" '
+        $0 ~ "^[[:space:]]*" name "[[:space:]]*=" { if (!done++) print name "=" value; next }
+        { print }
+        END { if (!done) print name "=" value }
+    ' "$file" > "$file.new" && mv "$file.new" "$file"
+}
+radio() {
+    for node in "$ROOT"/sys/class/rfkill/rfkill*; do
+        [ "$(cat "$node/type" 2>/dev/null)" = "$1" ] || continue
+        cat "$node/state" 2>/dev/null
+        return
+    done
+    return 1
+}
+if [ "$#" -gt 1 ]; then
+    case "$key" in
+        bluetooth|wifi|btAudio|headphoneFix|ntp|adb) case "$want" in on|off) ;; *) fail invalid ;; esac ;;
+    esac
+fi
+case "$key" in
+    adb)
+        services=${BASEOS_SETTINGS_SERVICES:-/storage/System/compat/bin/rocknix-services}
+        [ -x "$services" ] || services=/usr/share/pocketshell/System/compat/bin/rocknix-services
+        [ -x "$services" ] || fail unsupported
+        if [ "$#" -gt 1 ]; then
+            # Rebuild FunctionFS on every explicit ON, outside the render thread.
+            "$services" set adbusb.enabled "$want" </dev/null >"${BASEOS_ADB_SETTINGS_LOG:-/run/adb-settings.log}" 2>&1 &
+            attempt=0
+            while [ "$attempt" -lt 10 ]; do
+                state=$("$services" status adbusb.enabled | sed 's/^[^=]*=//')
+                [ "$(flag "$state")" != "$want" ] || break
+                sleep 0.05
+                attempt=$((attempt + 1))
+            done
+        fi
+        state=$("$services" status adbusb.enabled | sed 's/^[^=]*=//')
+        flag "$state"
+        ;;
+    hostname)
+        [ "$#" -eq 1 ] || fail unsupported
+        read_value /proc/sys/kernel/hostname || read_value /etc/hostname
+        ;;
+    headphoneFix)
+        param=/sys/module/h700_speaker_amp/parameters/headphone_pop_fix
+        [ -r "$ROOT$param" ] || fail unsupported
+        current=$(read_value "$param")
+        if [ "$#" -gt 1 ]; then
+            saved=false; [ "$want" != on ] || saved=true
+            config_set headphone_pop_fix "$saved" || fail save
+            [ "$(flag "$current")" = "$want" ] || fail reboot-required
+        fi
+        flag "$current"
+        ;;
+    ntp)
+        if [ "$#" -gt 1 ]; then
+            mkdir -p "$ROOT/data" || fail save
+            state=no; [ "$want" != on ] || state=yes
+            printf '%s\n' "$state" > "$ROOT/data/ntp-enabled" || fail save
+            if [ "$want" = on ]; then
+                /usr/sbin/baseos-ntp </dev/null >/run/baseos-ntp.log 2>&1 &
+            else
+                /usr/sbin/baseos-ntp stop >/dev/null 2>&1 || fail stop
+            fi
+        fi
+        flag "$(read_value /data/ntp-enabled || :)"
+        ;;
+    wifi)
+        if [ "$#" -gt 1 ]; then
+            changed=0
+            for iface in wlan0 wlan1; do
+                [ -d "$ROOT/sys/class/net/$iface" ] || continue
+                if [ "$want" = on ]; then
+                    ip link set "$iface" up >/dev/null 2>&1 || fail wifi
+                    wpa_cli -i "$iface" reconnect >/dev/null 2>&1 || fail wifi
+                else
+                    ip link set "$iface" down >/dev/null 2>&1 || fail wifi
+                fi
+                changed=1
+                break
+            done
+            [ "$changed" = 1 ] || fail unsupported
+        fi
+        for iface in wlan0 wlan1; do
+            state=$(wpa_cli -i "$iface" status 2>/dev/null | sed -n 's/^wpa_state=//p' | head -1)
+            case "$state" in ''|INTERFACE_DISABLED) ;; *) echo on; exit 0 ;; esac
+        done
+        echo off
+        ;;
+    bluetooth)
+        if [ "$#" -gt 1 ]; then
+            if [ "$want" = on ]; then
+                mkdir -p "$ROOT/data" || fail save
+                printf yes > "$ROOT/data/baseos-bluetooth-enabled" || fail save
+                /usr/sbin/rfkill unblock bluetooth >/dev/null 2>&1 || fail bluetooth
+                # Starting D-Bus/BlueZ or attaching the UART can exceed the
+                # bridge deadline even when an HCI device already exists.
+                (
+                    if [ ! -d /sys/class/bluetooth/hci0 ]; then
+                        /mnt/vendor/ctrl/setBluetooth.sh all || exit 1
+                    fi
+                    if [ "$(cat /data/baseos-bluetooth-enabled 2>/dev/null)" != yes ]; then
+                        /usr/sbin/rfkill block bluetooth
+                        exit 0
+                    fi
+                    /usr/sbin/systemctl start bluetooth && bluetoothctl power on
+                    if [ "$(cat /data/baseos-bluetooth-enabled 2>/dev/null)" = no ]; then
+                        /usr/sbin/rfkill block bluetooth
+                    fi
+                ) </dev/null >/run/bluetooth-settings.log 2>&1 &
+                fail starting
+            else
+                /usr/sbin/rfkill block bluetooth >/dev/null 2>&1 || fail bluetooth
+                mkdir -p "$ROOT/data" || fail save
+                printf no > "$ROOT/data/baseos-bluetooth-enabled" || fail save
+            fi
+        fi
+        state=$(radio bluetooth) || fail unsupported
+        if [ -d "$ROOT/sys/class/bluetooth/hci0" ]; then flag "$state"; else echo off; fi
+        ;;
+    btAudio)
+        if [ "$#" -gt 1 ]; then
+            if [ "$want" = on ]; then
+                pidof bluetoothd >/dev/null 2>&1 || fail bluetooth-off
+                command -v bluealsa >/dev/null 2>&1 || fail unsupported
+                if ! pidof bluealsa >/dev/null 2>&1; then
+                    bluealsa -p a2dp-source -p a2dp-sink </dev/null >/run/bluealsa.log 2>&1 &
+                    sleep 0.1
+                fi
+                pidof bluealsa >/dev/null 2>&1 || fail audio-start
+                mkdir -p "$ROOT/data" || fail save
+                printf yes > "$ROOT/data/baseos-btaudio-enabled" || fail save
+            else
+                killall bluealsa-aplay bluealsa >/dev/null 2>&1 || :
+                mkdir -p "$ROOT/data" || fail save
+                printf no > "$ROOT/data/baseos-btaudio-enabled" || fail save
+            fi
+        fi
+        if pidof bluealsa >/dev/null 2>&1; then echo on; else echo off; fi
+        ;;
+    *) fail unsupported ;;
+esac

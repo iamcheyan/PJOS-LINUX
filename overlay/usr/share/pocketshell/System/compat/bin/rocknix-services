@@ -1,16 +1,35 @@
 #!/bin/sh
 # BaseOS has no rocknix-services. Map the keys the PocketShell UI uses to
-# actual processes; refuse changes that would cut the active ADB/USB session.
+# actual processes and the persistent USB debugging policy.
 set -u
+ADBGADGET=${BASEOS_USB_GADGET_ADB:-/usr/sbin/usb-gadget-adb}
 
 is_on() {
     case "$1" in
         ssh.enabled) pidof dropbear >/dev/null 2>&1 ;;
-        adbusb.enabled|adbd.enabled) pidof adbd >/dev/null 2>&1 ;;
+        adbusb.enabled|adbd.enabled) [ "$("$ADBGADGET" status 2>/dev/null)" = on ] ;;
         avahi.enabled) pidof avahi-daemon >/dev/null 2>&1 ;;
         *) return 2 ;;
     esac
 }
+
+# Explicit on/off is idempotent in policy, but every on still requests setup
+# so pressing enable again can recover a cable without a reboot.
+case "${1-}:${2-}" in
+    set:adbusb.enabled|set:adbd.enabled|toggle:adbusb.enabled|toggle:adbd.enabled)
+        state=${3-}
+        if [ -z "$state" ] && [ "$1" = toggle ]; then
+            if is_on "$2"; then state=off; else state=on; fi
+        fi
+        case "$state" in
+            on) "$ADBGADGET" enable || exit 1 ;;
+            off) "$ADBGADGET" disable || exit 1 ;;
+            *) exit 2 ;;
+        esac
+        if is_on "$2"; then printf '%s=1\n' "$2"; else printf '%s=0\n' "$2"; fi
+        exit 0
+        ;;
+esac
 
 case "${1-}" in
     status)
@@ -35,10 +54,6 @@ case "${1-}" in
                         -r /data/dropbear/dropbear_ed25519_host_key -B || exit 1
                 fi
                 if is_on "$key"; then printf '%s=1\n' "$key"; else printf '%s=0\n' "$key"; fi
-                ;;
-            adbusb.enabled|adbd.enabled)
-                echo "refusing to toggle the active ADB transport" >&2
-                exit 1
                 ;;
             *)
                 echo "service is unsupported on BaseOS" >&2

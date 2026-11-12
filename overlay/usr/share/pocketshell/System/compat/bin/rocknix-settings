@@ -4,9 +4,15 @@
 set -u
 node=/sys/class/disp/disp/attr/enhance_bright
 value=
+command=
+key=
 args=$*
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --command)
+            shift; command=${1-} ;;
+        --key)
+            shift; key=${1-} ;;
         --value)
             shift
             value=${1-}
@@ -14,6 +20,19 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+# The launcher asks for enabled state, which is distinct from association.
+if [ "$command" = load ] && [ "$key" = wifi.enabled ]; then
+    for iface in wlan0 wlan1; do
+        state=$(wpa_cli -i "$iface" status 2>/dev/null | sed -n 's/^wpa_state=//p' | head -1)
+        case "$state" in
+            INTERFACE_DISABLED) echo 0; exit 0 ;;
+            '') continue ;;
+            *) echo 1; exit 0 ;;
+        esac
+    done
+    echo 0
+    exit 0
+fi
 case "$args" in
     *brightness*) ;;
     *) exit 2 ;;

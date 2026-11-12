@@ -193,7 +193,7 @@ PY
   mkdir -p "$R/mnt/vendor/bin"
   printf "%s\n" "$BASEOS_MODEL_STRING" > "$R/mnt/vendor/bin/dmenu.bin"
   chmod 755 "$R/init" \
-            "$R/etc/init.d/rcS" "$R/etc/init.d/rcK" "$R/etc/init.d/dev" \
+            "$R/etc/init.d/rcS" "$R/etc/init.d/rcK" "$R/etc/init.d/dev" "$R/sbin/hotplug" \
             "$R/usr/bin/baseos-splash" "$R/usr/bin/timedatectl" \
             "$R/usr/sbin/baseos-ntp" "$R/usr/sbin/baseos-ntp-notify" \
             "$R/usr/sbin/frontend-session" "$R/usr/sbin/systemctl" \
@@ -212,7 +212,7 @@ PY
   ln -s /run/shadow "$R/etc/shadow"
   # Guard: every boot-critical script must be executable (a non-exec script is
   # skipped by its `[ -x ]` guard and fails silently — cost us one flash).
-  for s in /init /etc/init.d/rcS /etc/init.d/rcK /usr/sbin/frontend-session \
+  for s in /init /etc/init.d/rcS /etc/init.d/rcK /sbin/hotplug /usr/sbin/frontend-session \
            /usr/bin/baseos-splash /usr/bin/timedatectl \
            /usr/sbin/baseos-ntp /usr/sbin/baseos-ntp-notify \
            /usr/sbin/expand-storage /usr/sbin/baseos-update /usr/sbin/systemctl \

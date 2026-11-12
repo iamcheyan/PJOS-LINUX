@@ -304,10 +304,13 @@ fi
 # vendor-compatible script loads rtl_btlpm, attaches ttyS1 with rtk_hciattach,
 # then raises hci0. Keep attach alive independently of a PocketJS request.
 (
-	if [ -x /mnt/vendor/ctrl/setBluetooth.sh ]; then
+	if [ "$(cat /data/baseos-bluetooth-enabled 2>/dev/null)" != no ] && [ -x /mnt/vendor/ctrl/setBluetooth.sh ]; then
 		if /mnt/vendor/ctrl/setBluetooth.sh all; then
 			/usr/sbin/systemctl start bluetooth
 			bluetoothctl power on >/dev/null 2>&1 || true
+			if [ "$(cat /data/baseos-btaudio-enabled 2>/dev/null)" = yes ] && command -v bluealsa >/dev/null 2>&1; then
+				bluealsa -p a2dp-source -p a2dp-sink </dev/null >/run/bluealsa.log 2>&1 &
+			fi
 		fi
 	fi
 	) >/run/bluetooth-init.log 2>&1 &

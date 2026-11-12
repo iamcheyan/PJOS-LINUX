@@ -4,13 +4,16 @@
 
 ## Supported behavior
 
-BaseOS enables USB-only adb by default alongside BaseOS's SSH/SFTP service. For reliable adb,
-the data cable must be connected before the handheld is powered on. If the cable is
-disconnected, restart with it connected. BaseOS does not run a reconnect watcher,
-poll the port or force a USB role. The boot files hold back five USB host
-controllers so the kernel reaches init sooner, and `h700_late_usb.ko` starts
-them during startup. EHCI 2 is not held back, because the OTG port does not
-enumerate as a device without it. See [boot files](12-kernel-gzip.md).
+BaseOS enables USB-only adb by default alongside SSH/SFTP. The settings switch
+persists through `/data/no-adb`; every enable request actively retries setup.
+For reliable startup, connect the data cable before powering on. Once initial
+setup has completed, an event-driven `/sbin/hotplug` helper can restore a lost
+binding on a later attach **only when the kernel already reports device role**.
+It never forces a USB role and does not run a resident polling watcher.
+The boot files hold back five USB host controllers so the kernel reaches init
+sooner, and `h700_late_usb.ko` starts them during startup. EHCI 2 is not held
+back, because the OTG port does not enumerate as a device without it.
+See [boot files](12-kernel-gzip.md).
 
 A BaseOS-owned maintenance boot exposes user storage as writable
 USB mass storage. Connect the cable, then hold MENU from power-on. A one-shot state
@@ -70,11 +73,25 @@ bind loop. That loop handles boot ordering; it is not reconnect machinery.
 
 ## Disconnect and reconnect
 
-On VBUS loss the vendor manager clears `usb_gadget/g1/UDC`. Rebinding cannot
-reliably restore access because a later attach may select host role. Restart
-with the cable connected to restore peripheral access. BaseOS preserves stock
-OTG support and does not run a resident reconnect watcher.
+On VBUS loss the vendor manager clears `usb_gadget/g1/UDC`. A kernel hotplug
+helper may retry the existing ADB composition after power-supply/UDC events,
+provided the boot USB-mode selection is complete, ADB is enabled, USB power is
+online, and safely read `usbc0/otg_role` is already `usb_device`. Host role is
+left untouched. The helper never reads the role-trigger sibling files.
 
+Settings expose persistent enable/disable, independent of cable presence. Every
+enable requests bounded setup even if the switch was already on. Disabling
+removes only ADB; an existing maintenance storage LUN remains selected and is
+rebound as storage-only. Serialized workers apply the latest requested policy.
+
+Rebinding still cannot fix a later attach that the vendor kernel selects as
+host role. If enable does not restore access, restart with the cable connected.
+Actual cable-replug validation remains separate from fake-tree policy tests.
+
+
+For an RG34XX incident with `adbd` running but an unbound UDC, see the
+[RG34XX ADB recovery record](24-rg34xx-adb-recovery.md) for the 2026-11-12
+diagnosis and verified `usb-gadget-adb setup` recovery.
 Configfs attribute sizes are synthetic; inspect the contents of `g1/UDC` to
 check whether the gadget is bound.
 

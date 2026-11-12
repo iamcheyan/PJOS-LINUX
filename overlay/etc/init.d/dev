@@ -13,9 +13,12 @@ done
 dropbear -r /data/dropbear/dropbear_rsa_host_key \
          -r /data/dropbear/dropbear_ed25519_host_key -B 2>/dev/null
 
-# adb-over-USB gadget. `setup` composes the gadget, starts adbd, does the first
-# bind, and starts one blocking uevent listener that re-binds on later replugs
-# (the sunxi OTG manager clears the UDC binding on every disconnect). Safe no-op
-# when the kernel/hardware USB bits are absent; backgrounded so dropbear keygen
-# and the gadget bring-up don't serialise.
-[ -x /usr/sbin/usb-gadget-adb ] && /usr/sbin/usb-gadget-adb setup &
+# adb-over-USB gadget. Initial setup is bounded and backgrounded. Once it has
+# completed, the kernel's /sbin/hotplug handler may recover a later device-role
+# attach; it never forces the shared port out of host role or changes storage.
+if [ -x /usr/sbin/usb-gadget-adb ]; then
+    (
+        /usr/sbin/usb-gadget-adb setup
+        : > /run/usb-adb-hotplug-ready
+    ) &
+fi

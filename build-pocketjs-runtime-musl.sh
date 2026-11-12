@@ -96,6 +96,9 @@ docker run --rm --platform linux/arm64 \
   -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
   -v "$HERE/src/apply-pocketjs-battery.py:/in/apply-battery.py:ro" \
   -v "$HERE/src/apply-pocketjs-panel.py:/in/apply-panel.py:ro" \
+  -v "$HERE/src/apply-pocketjs-settings.py:/in/apply-settings.py:ro" \
+  -v "$HERE/src/apply-pocketjs-system-info.py:/in/apply-system-info.py:ro" \
+  -v "$HERE/src/apply-pocketjs-network-bridge.py:/in/apply-network-bridge.py:ro" \
   -v "$HERE/src/apply-pocketjs-power-bridge.py:/in/apply-power-bridge.py:ro" \
   -v "$HERE/src/apply-pocketjs-restore.py:/in/apply-restore.py:ro" \
   -v "$HERE/src/apply-pocketjs-kanade.py:/in/apply-kanade.py:ro" \
@@ -139,6 +142,9 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-rom-arm.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-battery.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-panel.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-settings.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-system-info.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-network-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-power-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-restore.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-kanade.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs

@@ -232,7 +232,27 @@ func volumeControlPath() string {
 	return ""
 }
 
+// PCM startup/shutdown ramps temporarily expose maximum codec gain. Read the
+// same requested level as the settings UI rather than stepping from that ramp.
+func requestedVolume(control string) (int, bool) {
+	if control == "" {
+		return 0, false
+	}
+	out, err := exec.Command(control, "volume-state").Output()
+	if err != nil {
+		return 0, false
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || value < 0 || value > 100 {
+		return 0, false
+	}
+	return value, true
+}
+
 func currentVolume() int {
+	if value, ok := requestedVolume(volumeControlPath()); ok {
+		return value
+	}
 	for _, candidate := range []string{"/bin/amixer", "/usr/bin/amixer"} {
 		out, err := exec.Command(candidate, "-c", "0", "sget", "digital volume").Output()
 		if err != nil {

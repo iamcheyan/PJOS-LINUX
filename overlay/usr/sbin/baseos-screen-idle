@@ -33,14 +33,24 @@ BACKLIGHT_NODES="
 log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >>"$LOG" 2>/dev/null || :; }
 
 seconds() {
-    case "$1" in
-    never|off|none) echo 0 ;;
-    *s) echo "${1%s}" ;;
-    *m) echo $(( ${1%m} * 60 )) ;;
-    *h) echo $(( ${1%h} * 3600 )) ;;
-    ''|*[!0-9]*) echo 30 ;;
-    *) echo "$1" ;;
+    duration=$1
+    multiplier=1
+    case "$duration" in
+        never|off|none) echo 0; return ;;
+        *s) duration=${duration%s} ;;
+        *m) duration=${duration%m}; multiplier=60 ;;
+        *h) duration=${duration%h}; multiplier=3600 ;;
     esac
+    # Malformed power settings must never become a 30-second shutdown. Validate
+    # before arithmetic (which would otherwise terminate the daemon on junk).
+    case "$duration" in
+        ''|*[!0-9]*) echo "${2:-30}"; return ;;
+    esac
+    # Strip leading zeroes so POSIX shells do not interpret 08/09 as octal.
+    while [ "${duration#0}" != "$duration" ]; do duration=${duration#0}; done
+    duration=${duration:-0}
+    [ "${#duration}" -le 7 ] || { echo "${2:-30}"; return; }
+    echo $(( duration * multiplier ))
 }
 
 configured_timeout() {
@@ -77,7 +87,7 @@ configured_auto_stop_timeout() {
             }' /storage/.config/pocketjs/runtime.conf)
     fi
     [ -n "$value" ] || value=never
-    seconds "$value"
+    seconds "$value" 0
 }
 
 find_backlight() {
@@ -231,7 +241,9 @@ while :; do
 
     # The power key turns the panel off on purpose. Leave the node alone until it is
     # toggled back, otherwise the idle loop fights the hotkey daemon every second.
-    if [ -e /run/panel.off ]; then
+    # baseos-panel off also creates this marker for our own automatic blank.
+    # Keep ownership in that case so the next input reaches the wake branch.
+    if [ -e /run/panel.off ] && [ "$blanked" = 0 ]; then
         blanked=0
         sleep 1
         continue
