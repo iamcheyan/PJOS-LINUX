@@ -36,13 +36,13 @@ case "${1-}" in
         "$mixer" -q -c 0 cset numid=2 "$digital" >/dev/null 2>&1 \
             || "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 || exit 1
         "$mixer" -q -c 0 cset numid=3 "$lineout" >/dev/null 2>&1 \
-            || "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || exit 1
+            || "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || :
         # Zero really means silent: the amp stays enabled at 0% on this codec, so
         # close the speaker switch as well and reopen it on the next step.
         if [ "$value" -eq 0 ]; then
-            "$mixer" -q -c 0 sset 'SPK' off >/dev/null 2>&1 || exit 1
+            "$mixer" -q -c 0 sset 'SPK' off >/dev/null 2>&1 || :
         else
-            "$mixer" -q -c 0 sset 'SPK' on >/dev/null 2>&1 || exit 1
+            "$mixer" -q -c 0 sset 'SPK' on >/dev/null 2>&1 || :
         fi
         # Atomic publication prevents readers seeing a truncated/empty value.
         printf '%s\n' "$value" > "$volume_state.$$" &&
