@@ -26,7 +26,8 @@ if [ -n "$POCKET_PIDS" ]; then
 fi
 
 cleanup() {
-    # Restore pocket-linux-kms and pan offset
+    # Terminate input helper, restore pocket-linux-kms and pan offset
+    [ -n "${keys_pid:-}" ] && kill -9 "$keys_pid" 2>/dev/null
     if [ -n "$POCKET_PIDS" ]; then
         kill -CONT $POCKET_PIDS 2>/dev/null
     fi
@@ -36,8 +37,23 @@ cleanup() {
 trap 'kill $pid 2>/dev/null; cleanup' TERM INT HUP
 trap 'cleanup' EXIT
 
+sock=
+for arg in "$@"; do
+    case "$arg" in
+        --input-ipc-server=*) sock="${arg#--input-ipc-server=}" ;;
+    esac
+done
+
 "$D/mpv" --vo=sdl --ao=sdl --fs --input-conf="$D/input.conf" --really-quiet "$@" &
 pid=$!
+
+# Companion key daemon: maps RG34XX physical buttons to mpv & audio
+# B / Select / Start = quit, A = pause, Up/Down = volume, Left/Right = seek
+if [ -x /storage/System/compat/bin/baseos-mpv-keys ]; then
+    /storage/System/compat/bin/baseos-mpv-keys "$pid" "$sock" >/dev/null 2>&1 &
+    keys_pid=$!
+fi
+
 wait $pid
 rc=$?
 
