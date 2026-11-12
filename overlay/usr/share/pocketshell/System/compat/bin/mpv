@@ -20,10 +20,6 @@ if [ -n "$POCKET_PIDS" ]; then
 fi
 
 cleanup() {
-    # Stop idle inhibitor
-    if [ -n "$inhibit_pid" ]; then
-        kill "$inhibit_pid" 2>/dev/null || :
-    fi
     # Restore pocket-linux-kms and pan offset
     if [ -n "$POCKET_PIDS" ]; then
         kill -CONT $POCKET_PIDS 2>/dev/null
@@ -36,17 +32,6 @@ trap 'cleanup' EXIT
 
 "$D/mpv" --vo=sdl --ao=sdl --fs --input-conf="$D/input.conf" --really-quiet "$@" &
 pid=$!
-
-# While video plays, inhibit screen blanking and auto power-off by keeping
-# the idle stamp refreshed every 5 seconds.
-(
-    while kill -0 "$pid" 2>/dev/null; do
-        touch /run/screen-idle.stamp 2>/dev/null || :
-        sleep 5
-    done
-) &
-inhibit_pid=$!
-
 wait $pid
 rc=$?
 

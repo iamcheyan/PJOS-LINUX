@@ -201,13 +201,6 @@ spawn_readers
 
 blanked=0
 while :; do
-    # Active video/media playback must not be blanked or shut down while playing.
-    if pidof mpv >/dev/null 2>&1; then
-        touch "$STAMP" 2>/dev/null || :
-        sleep 5
-        continue
-    fi
-
     # Power-off is independent of screen blanking. Evaluate it before either the
     # "never blank" or manual panel-off branches, which would otherwise skip
     # this loop's later idle check forever.
