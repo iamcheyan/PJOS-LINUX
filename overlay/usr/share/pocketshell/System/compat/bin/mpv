@@ -11,6 +11,12 @@ D=/storage/System/compat/mpv
 PAN=/sys/class/graphics/fb0/pan
 export LD_LIBRARY_PATH="$D:/storage/System/compat/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+# Gamepad mapping for RG34XX ANBERNIC-keys in SDL2:
+# Physical A=b1 (GAMEPAD_ACTION_DOWN), Physical B=b0 (GAMEPAD_ACTION_RIGHT),
+# Physical X=b2 (GAMEPAD_ACTION_LEFT), Physical Y=b3 (GAMEPAD_ACTION_UP),
+# Select=b6 (GAMEPAD_BACK), Start=b7 (GAMEPAD_START), Menu=b8 (GAMEPAD_GUIDE)
+export SDL_GAMECONTROLLERCONFIG='19000000010000000100000000016e01,ANBERNIC-keys,a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,back:b6,start:b7,guide:b8,lefttrigger:b9,righttrigger:b10,leftx:a0,lefty:a1,rightx:a2,righty:a3,dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,'
+
 pan=$(cat "$PAN" 2>/dev/null)
 
 # Find and suspend pocket-linux-kms instances while video plays
