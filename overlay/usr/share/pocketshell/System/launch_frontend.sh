@@ -313,7 +313,8 @@ fi
 # copy each. Two idle daemons fight over the panel and the screen never sleeps.
 if [ -x "$SD/System/baseos-screen-idle" ]; then
     kill_matching baseos-screen-idle
-    rm -f /run/baseos-screen-idle.pid
+    kill_matching .screen-idle-
+    rm -f /run/baseos-screen-idle.pid /tmp/.screen-idle-*
     /bin/sh "$SD/System/baseos-screen-idle" </dev/null >/dev/null 2>&1 &
     log "helpers: card screen-idle started"
 fi

@@ -178,8 +178,9 @@ spawn_readers() {
             buffer="/tmp/.screen-idle-${dev##*/}"
             while :; do
                 timeout 3600 dd if="$dev" bs=24 count=1 of="$buffer" 2>/dev/null || :
-                if [ "$(wc -c <"$buffer" 2>/dev/null || echo 0)" -eq 24 ]; then
+                if [ -s "$buffer" ]; then
                     touch "$STAMP" 2>/dev/null || :
+                    : > "$buffer"
                 else
                     # dd returns instantly when the device is gone. Refreshing the stamp
                     # here would keep the panel lit forever (and burn the CPU), so brake,
@@ -200,6 +201,13 @@ spawn_readers
 
 blanked=0
 while :; do
+    # Active video/media playback must not be blanked or shut down while playing.
+    if pidof mpv >/dev/null 2>&1; then
+        touch "$STAMP" 2>/dev/null || :
+        sleep 5
+        continue
+    fi
+
     # Power-off is independent of screen blanking. Evaluate it before either the
     # "never blank" or manual panel-off branches, which would otherwise skip
     # this loop's later idle check forever.
