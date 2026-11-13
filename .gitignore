@@ -18,4 +18,5 @@ work/
 # shims are ours, so they stay tracked.
 /overlay/usr/share/pocketshell/System/compat/lib/
 /overlay/usr/share/pocketshell/System/compat/install/
-/overlay/usr/share/pocketshell/System/pocketjs/apps/apotris.gba
+/overlay/usr/share/pocketshell/System/pocketjs/apps/*.gba
+/overlay/usr/share/pocketshell/System/pocketjs/apps/kanade.pocket

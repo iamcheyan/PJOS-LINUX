@@ -88,6 +88,25 @@ fn kanade_call<S: AsRef<str>>(verb: S, arg: &str) -> String {
     // Slice patterns over `&[&str]` bind `&&str`, so the verb is normalised here
     // instead of forcing every arm to guess the level of indirection.
     let verb = verb.as_ref();
+    if verb == "exit" || verb == "quit" {
+        for helper in ["/storage/System/compat/bin/pocketjs-native-launch", "/usr/bin/pocketjs-native-launch"] {
+            if std::path::Path::new(helper).is_file() {
+                let _ = Command::new(helper).arg("exit").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+                return "ok".into();
+            }
+        }
+        for marker in ["/storage/System/pocketjs/active", "/mnt/sdcard/System/pocketjs/active"] {
+            let _ = std::fs::remove_file(marker);
+        }
+        let pid = std::process::id();
+        let _ = Command::new("/bin/sh")
+            .args(["-c", &format!("sleep 0.2; kill -9 {}", pid)])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        return "ok".into();
+    }
     if verb == "screen_off" {
         for helper in ["/usr/sbin/baseos-panel", "/storage/System/bin/baseos-panel"] {
             if !std::path::Path::new(helper).is_file() { continue; }

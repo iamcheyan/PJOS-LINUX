@@ -8,6 +8,9 @@ sd=/mnt/sdcard
 [ -d "$sd/System/pocketjs" ] || sd=/storage
 
 case "$app" in
+    exit|quit|boot)
+        rm -f "$sd/System/pocketjs/active" || :
+        ;;
     kanade|kanade.pocket)
         printf 'kanade\n' > "$sd/System/pocketjs/active" || exit 1
         ;;

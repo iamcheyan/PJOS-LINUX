@@ -73,7 +73,22 @@ for arg in "$@"; do
     esac
 done
 
-"$D/mpv" --vo=sdl --ao=sdl --fs --input-conf="$D/input.conf" --really-quiet "$@" &
+"$D/mpv" \
+    --vo=sdl \
+    --ao=sdl \
+    --fs \
+    --vd-lavc-threads=4 \
+    --vd-lavc-fast=yes \
+    --scale=bilinear \
+    --cscale=bilinear \
+    --dscale=bilinear \
+    --sws-scaler=fast-bilinear \
+    --framedrop=vo \
+    --video-sync=audio \
+    --demuxer-max-bytes=32MiB \
+    --demuxer-readahead-secs=10 \
+    --input-conf="$D/input.conf" \
+    --really-quiet "$@" &
 pid=$!
 
 # Companion key daemon: maps RG34XX physical buttons to mpv & audio

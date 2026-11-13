@@ -110,13 +110,26 @@ if mountpoint -q "$SD" 2>/dev/null && [ -x "$scanner" ]; then
     "$scanner" scan >/dev/null 2>&1 || :
 fi
 
-if mountpoint -q "$SD" 2>/dev/null \
-    && [ -f /usr/share/pocketshell/System/pocketjs/apps/apotris.gba ] \
-    && [ -d "$SD/apps" ]; then
-    if [ ! -f "$SD/apps/apotris.gba" ]; then
-        install -m 0644 /usr/share/pocketshell/System/pocketjs/apps/apotris.gba "$SD/apps/apotris.gba.new"
-        mv -f "$SD/apps/apotris.gba.new" "$SD/apps/apotris.gba"
-    fi
+if mountpoint -q "$SD" 2>/dev/null && [ -d "$SD/apps" ]; then
+    mkdir -p "$SD/content/games/homebrew" 2>/dev/null || :
+    for rom in /usr/share/pocketshell/System/pocketjs/apps/*.gba; do
+        [ -f "$rom" ] || continue
+        base=${rom##*/}
+        if [ ! -f "$SD/apps/$base" ]; then
+            install -m 0644 "$rom" "$SD/apps/$base" 2>/dev/null || :
+        fi
+        if [ ! -f "$SD/content/games/homebrew/$base" ]; then
+            install -m 0644 "$rom" "$SD/content/games/homebrew/$base" 2>/dev/null || :
+        fi
+    done
+    for app in /usr/share/pocketshell/System/pocketjs/apps/*.pocket; do
+        [ -f "$app" ] || continue
+        base=${app##*/}
+        [ "$base" = "boot.pocket" ] && continue
+        if [ ! -f "$SD/apps/$base" ]; then
+            install -m 0644 "$app" "$SD/apps/$base" 2>/dev/null || :
+        fi
+    done
 fi
 
 # Which loader started this boot, and a diagnostics block when it is useful:
