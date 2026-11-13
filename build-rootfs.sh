@@ -157,10 +157,17 @@ if int.from_bytes(d[18:20], "little") != 183:
 if b"/lib/ld-linux" in d or b"ld-musl" in d:
     sys.exit("FATAL: PocketJS runtime is dynamically linked; build it with "
              "build-pocketjs-runtime-musl.sh (glibc on the card is 2.35)")
+if b"PJOS_HEADLESS_CAPTURE" in d:
+    sys.exit("FATAL: debug PocketJS runtime cannot be installed in a SYSTEM image")
 PY
-    mkdir -p "$R/usr/share/baseos/pocketjs"
+    if [ -f /overlay/usr/share/pocketshell/System/pocketjs/apps/boot.pocket ]; then
+      /pocketjs-runtime/pocket-linux-kms \
+        --package /overlay/usr/share/pocketshell/System/pocketjs/apps/boot.pocket --check \
+        || { echo "FATAL: PocketShell package and runtime do not match" >&2; exit 1; }
+    fi
+    mkdir -p "$R/usr/share/baseos/pocketjs/launcher"
     install -m 0755 /pocketjs-runtime/pocket-linux-kms \
-      "$R/usr/share/baseos/pocketjs/pocket-linux-kms"
+      "$R/usr/share/baseos/pocketjs/launcher/pocket-linux-kms"
   else
     echo "WARNING: no PocketJS runtime input; SYSTEM will not carry one" >&2
   fi

@@ -17,11 +17,8 @@ ROCKNIX="${PJOS_ROCKNIX_TREE:-$HOME/development/.worktrees/rocknix-h700-pocketjs
 VERSION=e6770376626a4de5c93eaa6fb048e7e9ffb81f9f
 TARBALL="$ROCKNIX/sources/pocketjs-runtime/pocketjs-runtime-$VERSION.tar.gz"
 BUILD="$ROCKNIX/build.ROCKNIX-H700.aarch64/build/pocketjs-runtime-$VERSION"
-# The profile must be the one the card's boot.pocket was built against, or the
-# runtime rejects it with Admission(ProfileHashMismatch). BaseOS's launcher uses
-# the 360x240@2 profile exported from the main ROCKNIX checkout; some feature
-# worktrees carry a 720x480@1 variant that does not match it.
-PROFILE="${PJOS_PROFILE_RS:-$HOME/development/rocknix/build.ROCKNIX-H700.aarch64/build/pocketjs-runtime-e6770376626a4de5c93eaa6fb048e7e9ffb81f9f/generated/pocket_profile.rs}"
+# The runtime profile must match the launcher's exported package profile.
+PROFILE="${PJOS_PROFILE_RS:-$HERE/work/runtime-profile/pocket_profile.rs}"
 # The PocketShell bridge (patch-runtime.py + pocketshell-*.rs) lives in the main
 # ROCKNIX checkout; feature worktrees carry only the build scripts. Pointing this
 # at a tree without it silently produced a bridge-less runtime (dead battery and
@@ -33,6 +30,8 @@ OUT="$HERE/work/pocketjs-runtime/pocket-linux-kms"
 [ -f "$TARBALL" ] || { echo "missing $TARBALL" >&2; exit 1; }
 [ -f "$BRIDGE_SCRIPTS/patch-runtime.py" ] || { echo "missing $BRIDGE_SCRIPTS/patch-runtime.py (set PJOS_BRIDGE_SCRIPTS)" >&2; exit 1; }
 [ -f "$PROFILE" ] || { echo "missing profile export $PROFILE (run the host build first)" >&2; exit 1; }
+grep -Fq 'logical_viewports: ::pocket_runtime::Cow::Borrowed(&[[480, 320]])' "$PROFILE" || { echo "profile is not the RG34XX 480x320 export: $PROFILE" >&2; exit 1; }
+grep -Fq 'density: 1,' "$PROFILE" || { echo "profile is not the RG34XX 1x raster export: $PROFILE" >&2; exit 1; }
 
 mkdir -p "$HERE/work/pocketjs-runtime" "$HERE/work/bridge-scripts"
 # Work from a copy: the committed ROCKNIX script has one doubly-escaped char
@@ -93,6 +92,8 @@ docker run --rm --platform linux/arm64 \
   -v "$TARBALL:/in/src.tar.gz:ro" \
   -v "$PROFILE:/in/pocket_profile.rs:ro" \
   -v "$HERE/src/apply-pocketjs-input.py:/in/apply-input.py:ro" \
+  -v "$HERE/src/apply-pocketjs-fractional-display.py:/in/apply-fractional-display.py:ro" \
+  -v "$HERE/src/apply-pocketjs-gba3x-package-budget.py:/in/apply-gba3x-package-budget.py:ro" \
   -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
   -v "$HERE/src/apply-pocketjs-battery.py:/in/apply-battery.py:ro" \
   -v "$HERE/src/apply-pocketjs-panel.py:/in/apply-panel.py:ro" \
@@ -100,6 +101,10 @@ docker run --rm --platform linux/arm64 \
   -v "$HERE/src/apply-pocketjs-system-info.py:/in/apply-system-info.py:ro" \
   -v "$HERE/src/apply-pocketjs-network-bridge.py:/in/apply-network-bridge.py:ro" \
   -v "$HERE/src/apply-pocketjs-power-bridge.py:/in/apply-power-bridge.py:ro" \
+  -v "$HERE/src/apply-pocketjs-forcequit.py:/in/apply-forcequit.py:ro" \
+  -v "$HERE/src/apply-pocketjs-favorites.py:/in/apply-favorites.py:ro" \
+  -v "$HERE/src/apply-pocketjs-cover.py:/in/apply-cover.py:ro" \
+  -v "$HERE/src/apply-pocketjs-player-path.py:/in/apply-player-path.py:ro" \
   -v "$HERE/src/apply-pocketjs-restore.py:/in/apply-restore.py:ro" \
   -v "$HERE/src/apply-pocketjs-kanade.py:/in/apply-kanade.py:ro" \
   -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
@@ -130,11 +135,13 @@ docker run --rm --platform linux/arm64 \
     python3 /in/rocknix-scripts/prepare-workspace.py /work/src cargo
 
     python3 /in/apply-input.py /work/src
+    python3 /in/apply-fractional-display.py /work/src
 
     # The card launcher talks to the host through the PocketShell bridge
     # (__launcher / __pocketshell: battery, volume, services, library). Building
     # bare upstream drops it, which reads on the panel as a dead battery gauge.
     python3 /in/rocknix-scripts/patch-runtime.py /work/src
+    python3 /in/apply-gba3x-package-budget.py /work/src/programs/linux-kms/src/main.rs
     echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
     # One ROM hand-off arm, anchored on the LAUNCH arm every revision carries.
     # The older BaseOS bridge rewrite (apply-pocketjs-bridge.py) is not used: it
@@ -146,6 +153,10 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-system-info.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-network-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-power-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-forcequit.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-favorites.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-cover.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-player-path.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-restore.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-kanade.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     grep -q "fn kanade_call" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
@@ -177,7 +188,7 @@ docker run --rm --platform linux/arm64 \
       tail -5 /tmp/evdev-tests.log
     fi
 
-    cargo build --release --offline \
+    cargo build --release \
       --manifest-path /work/src/Cargo.toml \
       --target aarch64-unknown-linux-musl \
       --package pocket-linux-kms --package rocknix-pocketjs-bindings
