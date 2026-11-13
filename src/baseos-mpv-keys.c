@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
             while (read(pfds[i].fd, &ev, sizeof(ev)) == sizeof(ev)) {
                 if (ev.type == EV_KEY && ev.value == 1) { // Key down
                     switch (ev.code) {
-                        case 304: // BTN_SOUTH (Physical B)
+                        case 305: // Physical B on RG34XX (Back): QUIT playback
                         case 310: // BTN_TL (Physical Select)
                         case 311: // BTN_TR (Physical Start)
                         case 1:   // KEY_ESC
@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
                             kill(mpv_pid, SIGTERM);
                             return 0;
 
-                        case 305: // BTN_EAST (Physical A)
+                        case 304: // Physical A on RG34XX (Confirm): PAUSE / RESUME
                         case 57:  // KEY_SPACE
                         case 28:  // KEY_ENTER
                             send_ipc(sock_path, "{\"command\":[\"cycle\",\"pause\"]}");

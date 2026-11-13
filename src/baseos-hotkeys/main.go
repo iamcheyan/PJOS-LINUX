@@ -25,6 +25,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -66,15 +67,17 @@ type inputEvent struct {
 }
 
 type options struct {
-	powerDev string
-	padDev   string
-	panel    string
-	level    string
-	marker   string
-	logPath  string
-	runtime  string
-	poweroff string
-	dryRun   bool
+	powerDev        string
+	padDev          string
+	panel           string
+	level           string
+	marker          string
+	logPath         string
+	runtime         string
+	foregroundApp   string
+	forceQuitMarker string
+	poweroff        string
+	dryRun          bool
 }
 
 var opt options
@@ -361,8 +364,77 @@ func powerOff() {
 // emulator started for a ROM. The frontend supervisor sees its child exit and
 // brings the launcher back.
 func forceQuit() {
-	names := strings.Split(opt.runtime, ",")
+	targets := captureRuntimeTargets(strings.Split(opt.runtime, ","))
+	// Capture identity before signaling: the supervisor clears it on child exit.
+	appRaw, _ := os.ReadFile(opt.foregroundApp)
+	app := strings.TrimSpace(string(appRaw))
+	hasPocket := false
+	for _, target := range targets {
+		hasPocket = hasPocket || target.name == "pocket-linux-kms"
+	}
+	if app == "kanade" && !opt.dryRun && hasPocket {
+		// Give the service a bounded chance to save playback before its UI dies.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		cmd := exec.CommandContext(ctx, "/storage/System/compat/bin/kanade-ctl", "POST", "/api/player/stop")
+		if err := cmd.Run(); err != nil {
+			logf("combo: stop Kanade playback: %v", err)
+		}
+		cancel()
+	}
+	signaled := make(map[int]string)
 	killed := 0
+	foregroundKilled := false
+	for _, target := range targets {
+		logf("combo: SIGTERM %s pid %d", target.name, target.pid)
+		if opt.dryRun {
+			continue
+		}
+		if signalRuntimeTarget(target, syscall.SIGTERM) {
+			signaled[target.pid] = target.started
+			killed++
+			if target.name == "pocket-linux-kms" || target.name == "retroarch" {
+				foregroundKilled = true
+			}
+		}
+	}
+	if killed == 0 {
+		logf("combo: nothing to stop (%s)", opt.runtime)
+		return
+	}
+	// launch_frontend owns this volatile id only while an installed app runtime
+	// is foreground. Never use last-active here: it survives ordinary exits and
+	// would turn a later launcher quit into a false notification.
+	if foregroundKilled && !opt.dryRun {
+		if validAppID(app) {
+			tmp := opt.forceQuitMarker + ".tmp"
+			if err := os.WriteFile(tmp, []byte(app+"\n"), 0o600); err == nil {
+				if err := os.Rename(tmp, opt.forceQuitMarker); err != nil {
+					_ = os.Remove(tmp)
+				}
+			}
+		}
+	}
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		// Only retry the original children; a new launcher has the same name.
+		for pid, started := range signaled {
+			if started != "" && processStart(pid) == started {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	}()
+}
+
+// Snapshot before calling a helper that can block: a normal exit during that
+// call must never retarget the subsequently respawned launcher.
+type runtimeTarget struct {
+	name    string
+	pid     int
+	started string
+}
+
+func captureRuntimeTargets(names []string) []runtimeTarget {
+	var targets []runtimeTarget
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -372,25 +444,45 @@ func forceQuit() {
 			if pid == os.Getpid() {
 				continue
 			}
-			logf("combo: SIGTERM %s pid %d", name, pid)
-			syscall.Kill(pid, syscall.SIGTERM)
-			killed++
-		}
-	}
-	if killed == 0 {
-		logf("combo: nothing to stop (%s)", opt.runtime)
-		return
-	}
-	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		for _, name := range names {
-			name = strings.TrimSpace(name)
-			for _, pid := range runtimePids(name) {
-				logf("combo: still alive, SIGKILL %s pid %d", name, pid)
-				syscall.Kill(pid, syscall.SIGKILL)
+			if started := processStart(pid); started != "" {
+				targets = append(targets, runtimeTarget{name, pid, started})
 			}
 		}
-	}()
+	}
+	return targets
+}
+
+func signalRuntimeTarget(target runtimeTarget, signal syscall.Signal) bool {
+	return target.started != "" && processStart(target.pid) == target.started && syscall.Kill(target.pid, signal) == nil
+}
+
+// /proc stat field 22 identifies the original process even if its PID is reused.
+func processStart(pid int) string {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return ""
+	}
+	end := strings.LastIndexByte(string(raw), ')')
+	if end < 0 {
+		return ""
+	}
+	fields := strings.Fields(string(raw)[end+1:])
+	if len(fields) <= 19 {
+		return ""
+	}
+	return fields[19]
+}
+
+func validAppID(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // runtimePids finds processes whose executable basename or comm matches name.
@@ -545,6 +637,8 @@ func main() {
 	flag.StringVar(&opt.marker, "marker", "/run/panel.off", "marker written while the panel is off on purpose")
 	flag.StringVar(&opt.logPath, "log", "/tmp/baseos-hotkeys.log", "log file")
 	flag.StringVar(&opt.runtime, "runtime", "pocket-linux-kms,retroarch", "comma-separated processes force-quit by SELECT+START")
+	flag.StringVar(&opt.foregroundApp, "foreground-app", "/run/baseos-foreground-app", "volatile installed-app id while its runtime is foreground")
+	flag.StringVar(&opt.forceQuitMarker, "force-quit-marker", "/run/baseos-force-quit", "one-shot installed-app force-quit notification")
 	flag.StringVar(&opt.poweroff, "poweroff", "/usr/sbin/baseos-poweroff", "poweroff helper")
 	flag.BoolVar(&opt.dryRun, "dry-run", false, "log actions without touching the panel or powering off")
 	flag.Parse()

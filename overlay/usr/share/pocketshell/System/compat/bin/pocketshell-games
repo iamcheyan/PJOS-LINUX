@@ -57,8 +57,24 @@ emit_file() {
     [ -n "$size" ] || size=0
     kind=rom
     [ "$ext" = pocket ] && kind=pocketjs
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$rank" "$section" "$group" "$title" "$path" "$size" "$kind" >> "$ROWS"
+    cover=
+    if [ "$section" = games ]; then
+        directory=${path%/*}
+        for candidate in "$directory/$title.png" "$directory/$title.jpg" "$directory/$title.jpeg" \
+            "$directory/images/$title.png" "$directory/images/$title.jpg" "$directory/images/$title.jpeg" \
+            "$directory/images/$title-image.png" "$directory/images/$title-image.jpg" \
+            "$directory/downloaded_images/$title.png" "$directory/downloaded_images/$title.jpg" \
+            "$directory/downloaded_images/$title-image.png" "$directory/downloaded_images/$title-image.jpg" \
+            "$directory/Imgs/$title.png" "$directory/Imgs/$title.jpg"; do
+            if [ -f "$candidate" ]; then
+                case "$candidate" in *"$TAB"*) continue ;; esac
+                cover=$candidate
+                break
+            fi
+        done
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$rank" "$section" "$group" "$title" "$path" "$size" "$kind" "$cover" >> "$ROWS"
 }
 
 scan_dir() {
@@ -101,18 +117,22 @@ scan_plain() {
 scan() {
     mkdir -p "$STATE_DIR" || return 1
     : > "$ROWS"
-    scan_games_root /storage/content/games
-    for root in /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
-        scan_games_root "$root"
-    done
-    for mount in /media/*; do
-        [ -d "$mount" ] || continue
-        scan_games_root "$mount/content/games"
-        scan_games_root "$mount/roms"
-    done
-    scan_plain music 2 /storage/content/music /storage/music /storage/roms/music
-    scan_plain videos 3 /storage/content/videos /storage/videos
-    scan_plain books 4 /storage/content/books /storage/books
+    if [ -n "${POCKETSHELL_TEST_GAMES_ROOT:-}" ]; then
+        scan_games_root "$POCKETSHELL_TEST_GAMES_ROOT"
+    else
+        scan_games_root /storage/content/games
+        for root in /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
+            scan_games_root "$root"
+        done
+        for mount in /media/*; do
+            [ -d "$mount" ] || continue
+            scan_games_root "$mount/content/games"
+            scan_games_root "$mount/roms"
+        done
+        scan_plain music 2 /storage/content/music /storage/music /storage/roms/music
+        scan_plain videos 3 /storage/content/videos /storage/videos
+        scan_plain books 4 /storage/content/books /storage/books
+    fi
 
     LC_ALL=C sort -t "$TAB" -k1,1n -k2,2 -k3,3 -k4,4f "$ROWS" > "$SORTED"
     generated=$(date +%s 2>/dev/null || printf '0')
@@ -140,7 +160,7 @@ scan() {
             }
             count[key]++
             cnt = count[key]
-            items[key SUBSEP cnt] = sprintf("{\"title\":\"%s\",\"path\":\"%s\",\"size\":%s,\"kind\":\"%s\"}", esc($4), esc($5), $6, $7)
+            items[key SUBSEP cnt] = sprintf("{\"title\":\"%s\",\"path\":\"%s\",\"size\":%s,\"kind\":\"%s\",\"cover\":\"%s\"}", esc($4), esc($5), $6, $7, esc($8))
             total++
         }
         END {
@@ -180,6 +200,7 @@ scan() {
 
 case "${1:-scan}" in
     scan) scan ;;
+    capabilities) printf '%s\n' 'cover-v1' ;;
     watch)
         trap 'exit 0' TERM INT
         while :; do
@@ -188,7 +209,7 @@ case "${1:-scan}" in
         done
         ;;
     *)
-        echo "usage: pocketshell-games scan|watch" >&2
+        echo "usage: pocketshell-games scan|watch|capabilities" >&2
         exit 2
         ;;
 esac

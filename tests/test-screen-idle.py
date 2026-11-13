@@ -30,6 +30,51 @@ class ScreenIdle(unittest.TestCase):
             env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
             subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)
             self.assertEqual((base/'actions').read_text().splitlines(), ['off', 'on'])
+    def test_audio_owner_defers_poweroff_but_stale_marker_does_not(self):
+        for owner, expected in [(str(os.getpid()), False), ('99999999', True)]:
+            with self.subTest(owner=owner), tempfile.TemporaryDirectory() as d:
+                base = Path(d)
+                for name in ['bin', 'run', 'input']: (base/name).mkdir()
+                (base/'run/baseos-audio-playing').write_text(owner+'\n')
+                (base/'config').write_text('timeout = never\nauto_stop_timeout = 10s\n')
+                def program(name, body):
+                    path = base/'bin'/name
+                    path.write_text('#!/bin/sh\n'+body+'\n'); path.chmod(0o755)
+                program('date', 'echo 100')
+                program('stat', 'echo 0')
+                program('poweroff', 'touch "$TEST_BASE/powered-off"')
+                program('sync', 'exit 0')
+                program('sleep', 'kill -TERM "$PPID"')
+                program('panel', 'echo 50')
+                source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseos-panel', str(base/'bin/panel')).replace('/usr/sbin/baseos-poweroff', str(base/'bin/poweroff')).replace('/mnt/sdcard/System/bin/baseos-save-state', str(base/'none')).replace('/storage/System/bin/baseos-save-state', str(base/'none'))
+                daemon = base/'idle.sh'; daemon.write_text(source)
+                env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
+                subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)
+                self.assertEqual((base/'powered-off').exists(), expected)
+
+    def test_charger_defers_auto_poweroff(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            for name in ['bin', 'run', 'input', 'sys/power_supply/usb']: (base/name).mkdir(parents=True, exist_ok=True)
+            (base/'sys/power_supply/usb/online').write_text('1\n')
+            (base/'sys/power_supply/usb/type').write_text('USB\n')
+            (base/'config').write_text('timeout = never\nauto_stop_timeout = 10s\n')
+            def program(name, body):
+                path = base/'bin'/name
+                path.write_text('#!/bin/sh\n'+body+'\n'); path.chmod(0o755)
+            program('date', 'echo 100')
+            program('stat', 'echo 0')
+            program('poweroff', 'touch "$TEST_BASE/powered-off"')
+            program('sync', 'exit 0')
+            program('sleep', 'kill -TERM "$PPID"')
+            program('panel', 'echo 50')
+            source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/sys/class/power_supply/*', str(base/'sys/power_supply')+'/*').replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseos-panel', str(base/'bin/panel')).replace('/usr/sbin/baseos-poweroff', str(base/'bin/poweroff')).replace('/mnt/sdcard/System/bin/baseos-save-state', str(base/'none')).replace('/storage/System/bin/baseos-save-state', str(base/'none'))
+            daemon = base/'idle.sh'; daemon.write_text(source)
+            env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
+            subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)
+            self.assertFalse((base/'powered-off').exists())
+            self.assertIn('charger state changed: connected; idle timer reset', (base/'log').read_text())
+
     def test_valid_duration_units_and_leading_zeroes(self):
         prefix = SOURCE.read_text().split('configured_timeout() {')[0]
         for value, expected in [('never', 0), ('off', 0), ('none', 0), ('0', 0), ('10s', 10), ('1m', 60), ('2h', 7200), ('08s', 8)]:

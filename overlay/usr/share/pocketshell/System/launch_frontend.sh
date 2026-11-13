@@ -3,8 +3,12 @@
 # from the SD root and respawns it after return.
 set -u
 
+FOREGROUND=/run/baseos-foreground-app
+FOREGROUND_APP=
+rm -f "$FOREGROUND"
 SD=/mnt/sdcard
 RUNTIME="$SD/System/pocketjs/bin/pocket-linux-kms"
+LAUNCHER_RUNTIME="$SD/System/pocketjs/bin/launcher/pocket-linux-kms"
 PACKAGE="$SD/System/pocketjs/apps/boot.pocket"
 APPROVED="$SD/System/pocketjs/apps/boot.approved.pocket"
 LOG=/tmp/pocketjs-frontend.log
@@ -45,6 +49,17 @@ check_package() {
     return "$admission_status"
 }
 
+select_runtime() {
+    for candidate_runtime in "$LAUNCHER_RUNTIME" "$SD/System/pocketjs/bin/pocket-linux-kms"; do
+        [ -x "$candidate_runtime" ] || continue
+        RUNTIME=$candidate_runtime
+        if check_package "$1"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 log "starting; package=$PACKAGE"
 if [ -r "$SD/baseos.conf" ]; then
     log "baseos.conf readable; SSH/ADB are enabled by BaseOS defaults"
@@ -52,7 +67,7 @@ else
     log "baseos.conf unavailable; SSH/ADB are enabled by BaseOS defaults"
 fi
 
-if [ ! -x "$RUNTIME" ]; then
+if [ ! -x "$RUNTIME" ] && [ ! -x "$LAUNCHER_RUNTIME" ]; then
     log "runtime missing or not executable: $RUNTIME"
     backoff
     exit 1
@@ -79,9 +94,18 @@ kill_matching() {
     for helper_dir in /proc/[0-9]*; do
         helper_pid=${helper_dir##*/}
         [ "$helper_pid" = "$$" ] && continue
-        helper_cmd=$(tr '\0' ' ' < "$helper_dir/cmdline" 2>/dev/null) || continue
-        case "$helper_cmd" in
-        *"$helper_pattern"*) kill -9 "$helper_pid" 2>/dev/null || : ;;
+        # comm is readable by the shell itself. Only shell-script processes
+        # need cmdline decoding; launching tr/sed twice for every /proc entry
+        # made each frontend handoff needlessly slow.
+        IFS= read -r helper_name < "$helper_dir/comm" 2>/dev/null || continue
+        case "$helper_name" in
+            sh|ash|dash|bash)
+                helper_arg1=$(tr '\0' '\n' < "$helper_dir/cmdline" 2>/dev/null | sed -n '2p')
+                helper_name=${helper_arg1##*/} ;;
+        esac
+        case "$helper_pattern" in
+            .screen-idle-) case "$helper_name" in .screen-idle-*) kill -9 "$helper_pid" 2>/dev/null || : ;; esac ;;
+            *) [ "$helper_name" = "$helper_pattern" ] && kill -9 "$helper_pid" 2>/dev/null || : ;;
         esac
     done
 }
@@ -116,7 +140,7 @@ if [ -r "$ACTIVE" ]; then
         /*)
             case "$wanted" in
                 *"/../"*|*/..|*"/./"*|*/.) log "active marker rejected: $wanted" ;;
-                *.gba|*.gb|*.gbc)
+                *.[gG][bB][aA]|*.[gG][bB]|*.[gG][bB][cC])
                     if [ -f "$wanted" ]; then
                         ROM_PLAY=$wanted
                         log "ROM requested: $ROM_PLAY"
@@ -130,6 +154,7 @@ if [ -r "$ACTIVE" ]; then
         [ -f "$SD/apps/$wanted.pocket" ] || wanted=$bare
         log "installed app requested: $wanted"
         PACKAGE="$SD/apps/$wanted.pocket"
+        FOREGROUND_APP=$wanted
         CLEAR_ACTIVE=1
         mkdir -p /storage/.config/pocketjs 2>/dev/null || :
         printf 'kind=app
@@ -179,9 +204,11 @@ if [ -n "$ROM_PLAY" ]; then
             --runtime "pocket-linux-kms,retroarch" </dev/null >/dev/null 2>&1 &
         log "helpers: hotkeys started for ROM session"
     fi
-    play=/usr/bin/pocket-game-play
-    [ -x "$play" ] || play=/storage/System/compat/bin/pocket-game-play
+    play=/storage/System/compat/bin/pocket-game-play
+    [ -x "$play" ] || play=/usr/bin/pocket-game-play
+    printf 'game\n' > "$FOREGROUND.tmp" && mv "$FOREGROUND.tmp" "$FOREGROUND"
     "$play" "$ROM_PLAY" >> "$LOG" 2>&1 || log "ROM player exit=$?"
+    rm -f "$FOREGROUND"
     kill_matching pjos-padmerge
     killall -9 pjos-padmerge 2>/dev/null || :
     log "ROM session ended; returning to the launcher"
@@ -296,8 +323,8 @@ else
     log "/storage bind skipped (mount point missing or already mounted)"
 fi
 
-if ! check_package "$PACKAGE"; then
-    if [ "$PACKAGE" != "$APPROVED" ] && [ -f "$APPROVED" ] && check_package "$APPROVED"; then
+if ! select_runtime "$PACKAGE"; then
+    if [ "$PACKAGE" != "$APPROVED" ] && [ -f "$APPROVED" ] && select_runtime "$APPROVED"; then
         log "primary package rejected; using approved fallback $APPROVED"
         PACKAGE=$APPROVED
     else
@@ -334,6 +361,10 @@ if [ -x "$SD/System/bin/videod" ] && ! pidof videod >/dev/null 2>&1; then
     log "helpers: videod started"
 fi
 
+# Publish only the installed app that this invocation actually launches.
+if [ -n "$FOREGROUND_APP" ] && [ "$PACKAGE" = "$SD/apps/$FOREGROUND_APP.pocket" ]; then
+    printf '%s\n' "$FOREGROUND_APP" > "$FOREGROUND.tmp" && mv "$FOREGROUND.tmp" "$FOREGROUND"
+fi
 started=$(date +%s 2>/dev/null || printf '0')
 log "launching runtime; package=$PACKAGE args=$display_args $input_args"
 (
@@ -342,6 +373,7 @@ log "launching runtime; package=$PACKAGE args=$display_args $input_args"
 runtime_pid=$!
 wait "$runtime_pid"
 runtime_status=$?
+rm -f "$FOREGROUND"
 finished=$(date +%s 2>/dev/null || printf '0')
 log "PocketJS exit code=$runtime_status"
 if [ "$CLEAR_ACTIVE" = 1 ]; then

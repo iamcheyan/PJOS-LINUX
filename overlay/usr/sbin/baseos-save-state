@@ -39,10 +39,24 @@ if pidof retroarch >/dev/null 2>&1; then
     exit 0
 fi
 
-# PocketJS/native app: record last-active target if present.
-if [ -r "$LAST_ACTIVE" ]; then
-    cp "$LAST_ACTIVE" "$RESUME" 2>/dev/null || :
-    log "saved last-active session for resume"
-    sync
+# last-active survives normal exits: it is not evidence of an active app.
+# launch_frontend owns this volatile identity only during the child lifecycle.
+app=
+if pidof pocket-linux-kms >/dev/null 2>&1 && [ -r /run/baseos-foreground-app ]; then
+    app=$(head -n 1 /run/baseos-foreground-app 2>/dev/null | tr -d '\r')
 fi
+case "$app" in
+    ''|*[!a-zA-Z0-9._-]*) app= ;;
+esac
+[ "${#app}" -le 64 ] || app=
+if [ -n "$app" ]; then
+    if printf 'kind=app\ntarget=%s\n' "$app" > "$RESUME.new" 2>/dev/null; then
+        mv "$RESUME.new" "$RESUME" 2>/dev/null || :
+        log "saved foreground app for resume: $app"
+    fi
+else
+    rm -f "$RESUME" "$RESUME.new" 2>/dev/null || :
+    log "no foreground app; cleared stale resume target"
+fi
+sync
 exit 0

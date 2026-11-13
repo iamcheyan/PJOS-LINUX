@@ -44,7 +44,12 @@ fn kanade_endpoint(verb: &str, arg: &str) -> Option<(&'static str, String, Optio
     let got = |what: &str, method: &'static str, path: String| Some((method, path, Some(format!("{{\"video_id\":\"{}\"}}", what))));
     match verb {
         "status"      => Some(("GET",  "/api/health".into(), None)),
-        "library"     => Some(("GET",  "/api/library?limit=100".into(), None)),
+        "library"     => Some(("GET",  "/api/library?limit=100&media_type=video".into(), None)),
+        "music"       => Some(("GET", "/api/library?limit=100&media_type=audio".into(), None)),
+        "player_state" => Some(("GET", "/api/player/state".into(), None)),
+        "player_pause" => Some(("POST", "/api/player/pause".into(), Some("{}".into()))),
+        "player_stop" => Some(("POST", "/api/player/stop".into(), Some("{}".into()))),
+        "music_play" if safe(arg) && !arg.is_empty() => Some(("POST", "/api/player/play".into(), Some(format!("{{\"video_id\":\"{}\",\"mode\":\"audio\"}}", arg)))),
         "watch_later" => Some(("GET",  "/api/watch_later?limit=100".into(), None)),
         "favorites"   => Some(("GET",  "/api/favorites?limit=100".into(), None)),
         "history"     => Some(("GET",  "/api/history?limit=100".into(), None)),
@@ -83,6 +88,16 @@ fn kanade_call<S: AsRef<str>>(verb: S, arg: &str) -> String {
     // Slice patterns over `&[&str]` bind `&&str`, so the verb is normalised here
     // instead of forcing every arm to guess the level of indirection.
     let verb = verb.as_ref();
+    if verb == "screen_off" {
+        for helper in ["/usr/sbin/baseos-panel", "/storage/System/bin/baseos-panel"] {
+            if !std::path::Path::new(helper).is_file() { continue; }
+            return match Command::new(helper).arg("off").stdin(Stdio::null()).stderr(Stdio::null()).output() {
+                Ok(out) if out.status.success() => "ok".into(),
+                _ => "error:screen-off".into(),
+            };
+        }
+        return "error:screen-helper".into();
+    }
     // The share password arrives hex-encoded: argv is readable by every process
     // on the panel, so a passphrase must not sit in plain sight in \`ps\`.
     let resolved = if verb == "nas_password" {

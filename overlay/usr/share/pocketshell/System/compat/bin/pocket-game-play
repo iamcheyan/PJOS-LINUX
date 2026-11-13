@@ -40,8 +40,8 @@ else
 fi
 
 case "$rom" in
-    *.gba) core=$core_dir/mgba_libretro.so ;;
-    *.gb|*.gbc) core=$core_dir/gambatte_libretro.so ;;
+    *.[gG][bB][aA]) core=$core_dir/mgba_libretro.so ;;
+    *.[gG][bB]|*.[gG][bB][cC]) core=$core_dir/gambatte_libretro.so ;;
     *) echo "unsupported game extension: $rom" >&2; exit 3 ;;
 esac
 [ -f "$core" ] || { echo "libretro core missing: $core" >&2; exit 4; }

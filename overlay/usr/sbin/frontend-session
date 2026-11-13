@@ -79,10 +79,33 @@ if mountpoint -q "$SD" 2>/dev/null \
     fi
 fi
 
+if mountpoint -q "$SD" 2>/dev/null \
+    && [ -x /usr/share/baseos/pocketjs/launcher/pocket-linux-kms ] \
+    && [ -f "$SD/System/launch_frontend.sh" ] \
+    && [ -d "$SD/System/pocketjs/bin" ]; then
+    runtime="$SD/System/pocketjs/bin/launcher/pocket-linux-kms"
+    if mkdir -p "${runtime%/*}" && ! cmp -s /usr/share/baseos/pocketjs/launcher/pocket-linux-kms "$runtime"; then
+        runtime_tmp="$runtime.baseos-new"
+        if cp /usr/share/baseos/pocketjs/launcher/pocket-linux-kms "$runtime_tmp" \
+            && chmod 0755 "$runtime_tmp" \
+            && cmp -s /usr/share/baseos/pocketjs/launcher/pocket-linux-kms "$runtime_tmp" \
+            && mv -f "$runtime_tmp" "$runtime"; then
+            log "installed SYSTEM-matched PocketShell runtime on frontend card"
+        else
+            rm -f "$runtime_tmp"
+            log "WARNING: failed to install PocketShell runtime; keeping card copy"
+        fi
+    fi
+fi
+
 # Refresh the games catalogue before the launcher reads it, so a ROM copied
 # onto the card shows up as a card on this boot.
 scanner="$SD/System/compat/bin/pocketshell-games"
 [ -x "$scanner" ] || scanner=/usr/bin/pocketshell-games
+if [ "$scanner" != /usr/bin/pocketshell-games ] && [ -x /usr/bin/pocketshell-games ] \
+    && [ "$("$scanner" capabilities 2>/dev/null)" != cover-v1 ]; then
+    scanner=/usr/bin/pocketshell-games
+fi
 if mountpoint -q "$SD" 2>/dev/null && [ -x "$scanner" ]; then
     "$scanner" scan >/dev/null 2>&1 || :
 fi

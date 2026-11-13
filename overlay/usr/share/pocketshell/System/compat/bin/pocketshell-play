@@ -9,7 +9,7 @@ set -u
 rom=${1:-}
 [ -n "$rom" ] && [ -f "$rom" ] || exit 1
 case "$rom" in
-    *.gba|*.gb|*.gbc) ;;
+    *.[gG][bB][aA]|*.[gG][bB]|*.[gG][bB][cC]) ;;
     *) exit 1 ;;
 esac
 sd=/mnt/sdcard

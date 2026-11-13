@@ -90,6 +90,22 @@ configured_auto_stop_timeout() {
     seconds "$value" 0
 }
 
+charger_connected() {
+    for supply in /sys/class/power_supply/*; do
+        [ -d "$supply" ] || continue
+        if [ -r "$supply/online" ] && [ "$(cat "$supply/online" 2>/dev/null)" = 1 ]; then
+            supply_type=$(cat "$supply/type" 2>/dev/null || :)
+            case "$supply_type" in
+                USB*|Mains|Wireless) return 0 ;;
+            esac
+        fi
+        if [ -r "$supply/status" ] && [ "$(cat "$supply/status" 2>/dev/null)" = Charging ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 find_backlight() {
     for node in $BACKLIGHT_NODES; do
         [ -w "$node" ] && { echo "$node"; return 0; }
@@ -124,7 +140,6 @@ read_level() {
 BL=$(find_backlight || true)
 if [ -z "$BL" ] && [ -z "$PANEL" ]; then
     log "no writable backlight node; idle blanking disabled"
-    exit 0
 fi
 log "panel helper: ${PANEL:-none (brightness node only)}"
 log "backlight node: ${BL:-none}"
@@ -200,6 +215,7 @@ READERS=
 spawn_readers
 
 blanked=0
+charger_previous=unknown
 while :; do
     # Power-off is independent of screen blanking. Evaluate it before either the
     # "never blank" or manual panel-off branches, which would otherwise skip
@@ -208,7 +224,24 @@ while :; do
     last=$(stat -c %Y "$STAMP" 2>/dev/null || echo 0)
     idle=$(( now - last ))
     auto_stop_timeout=$(configured_auto_stop_timeout)
-    if [ "$auto_stop_timeout" -gt 0 ] && [ "$idle" -ge "$auto_stop_timeout" ]; then
+    audio_playing=0
+    if [ -r /run/baseos-audio-playing ]; then
+        read -r audio_owner < /run/baseos-audio-playing || audio_owner=
+        case "$audio_owner" in ''|*[!0-9]*) ;; *) kill -0 "$audio_owner" 2>/dev/null && audio_playing=1 ;; esac
+    fi
+    charger_is_connected=0
+    if [ "$auto_stop_timeout" -gt 0 ]; then
+        charger_connected && charger_is_connected=1
+        if [ "$charger_is_connected" != "$charger_previous" ]; then
+            touch "$STAMP" 2>/dev/null || :
+            now=$(date +%s)
+            last=$(stat -c %Y "$STAMP" 2>/dev/null || echo "$now")
+            idle=$(( now - last ))
+            log "charger state changed: $([ "$charger_is_connected" = 1 ] && echo connected || echo disconnected); idle timer reset"
+            charger_previous=$charger_is_connected
+        fi
+    fi
+    if [ "$audio_playing" = 0 ] && [ "$charger_is_connected" = 0 ] && [ "$auto_stop_timeout" -gt 0 ] && [ "$idle" -ge "$auto_stop_timeout" ]; then
         log "auto power-off after ${idle}s idle (timeout ${auto_stop_timeout}s)"
         # This card-side helper records the ROM/app before the OS poweroff path
         # runs; the image's read-only poweroff binary may predate the hook.

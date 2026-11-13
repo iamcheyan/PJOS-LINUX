@@ -17,6 +17,27 @@ export LD_LIBRARY_PATH="$D:/storage/System/compat/lib${LD_LIBRARY_PATH:+:$LD_LIB
 # Select=b6 (GAMEPAD_BACK), Start=b7 (GAMEPAD_START), Menu=b8 (GAMEPAD_GUIDE)
 export SDL_GAMECONTROLLERCONFIG='19000000010000000100000000016e01,ANBERNIC-keys,a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,back:b6,start:b7,guide:b8,lefttrigger:b9,righttrigger:b10,leftx:a0,lefty:a1,rightx:a2,righty:a3,dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,'
 
+# Audio-only sessions leave the launcher alive for transport controls and
+# screen-off operation. Arguments are per child, never a daemon-wide setting.
+for arg in "$@"; do
+    case "$arg" in
+        --vo=null|--vid=no)
+            AUDIO_MARKER=/run/baseos-audio-playing
+            printf '%s\n' "$$" > "$AUDIO_MARKER"
+            audio_cleanup() {
+                [ "$(cat "$AUDIO_MARKER" 2>/dev/null)" = "$$" ] && rm -f "$AUDIO_MARKER"
+                :
+            }
+            trap 'kill "${audio_pid:-}" 2>/dev/null; wait "${audio_pid:-}" 2>/dev/null; exit 143' TERM INT HUP
+            trap 'audio_cleanup' EXIT
+            "$D/mpv" --ao=sdl --really-quiet "$@" &
+            audio_pid=$!
+            wait "$audio_pid"
+            exit $?
+            ;;
+    esac
+done
+
 pan=$(cat "$PAN" 2>/dev/null)
 
 # Find and suspend pocket-linux-kms instances while video plays
@@ -34,7 +55,15 @@ cleanup() {
     [ -n "$pan" ] && [ "$pan" != "0,0" ] && echo "$pan" > "$PAN" 2>/dev/null
 }
 
-trap 'kill $pid 2>/dev/null; cleanup' TERM INT HUP
+terminate_video() {
+    # Keep the panel owner stopped until mpv has released the framebuffer.
+    # A shell wait interrupted by TERM returns before its child exits.
+    trap '' TERM INT HUP
+    [ -z "${pid:-}" ] || kill "$pid" 2>/dev/null
+    [ -z "${pid:-}" ] || wait "$pid" 2>/dev/null
+    exit 143
+}
+trap 'terminate_video' TERM INT HUP
 trap 'cleanup' EXIT
 
 sock=
