@@ -152,3 +152,58 @@ PJOS_PROFILE_RS="$PWD/work/runtime-profile/pocket_profile.rs" \
 6. 更新本表为实际结果，固定源码和构建命令；未验证项保留开放，不以测试通过代替硬件验收。当前固定哈希为 `140b465dcedb1458383e1561b92c9747cf222aa0dac074f9a8d92dcfef9fae7e`。
 
 相关记录：[USB/OTG 设计](08-usb-adb-and-otg.md)、[ADB 恢复记录](24-rg34xx-adb-recovery.md)、[音频与空闲策略历史记录](23-rg34xx-gba-audio-and-idle-notes.md)。
+
+## 像素视觉改版（2026-11-12 后续）
+
+用户否定照片/灰绿方案，改为 GBA 像素风。前端已替换为原创像素插画、
+直角卡片、紫底金色选中、像素中文字体；设置/系统/连接页/电源弹窗统一配色。
+Wi-Fi/蓝牙/SSH/ADB/文件传输/电池全部状态图标恢复，未启用服务显示灰色。
+名称保留最多两行。TypeScript、构建与设备 admission 通过，并部署到 RG34XX。
+首页、设置、系统概览实机截图已核查；视觉方案等待用户反馈，不视为旧硬件问题关闭。
+前端说明及截图：`../pocketshell/docs/design/pixel-handheld.md`。
+
+## Kanade 与启动器后续整合（2026-11-13）
+
+| 项目 | 实际状态与证据 |
+| --- | --- |
+| 视频／音乐／同步 | 三分类前端已构建、admission、部署；视频与音乐按 download mode 分源 |
+| 只有声音无画面 | 确认 `.audio.webm` 误索引及 AV1 解码器不可用两项原因；修复旧路径/音乐行，并过滤 AV1；H.264 实际画面已截图 |
+| 音乐控制与熄屏 | 专用控制页；熄屏 panel level 0、音频 time-pos 23.30；按键唤醒 level 50、time-pos 24.62，仍 playing |
+| 视频与音乐分别续播 | 后台每 2 秒持久化，暂停/切换/停止补存；音乐 resume_sec 46.08，视频 resume_sec 30.96，各自独立 |
+| AV1 策略 | 用户要求停止软件解码构建，已停止且撤回构建脚本改动；MP4/WebM/MKV按编码标记和moov过滤，不删除文件；81 视频行→35 非AV1行 |
+| NAS 通用格式 | OfflineVideos 队列和直接 provider 共享 H.264＋AAC/M4A 优先、回退全排除 AV1、默认720p；真实 yt-dlp synthetic format 测试通过，NAS服务已备份、重编、重启 |
+| 列表清理和操作 | UI 过滤时长0后为28项；首项按上实测28/28；末尾按住下1.2秒实测5/28，松手停止 |
+| 强退通知 | app生命周期ID、一过性事件、全局通知的旧版已部署，真实SELECT＋START触发并返回启动器；本轮新增调用播放器停止接口前的原PID/starttime快照，避免等待期间误杀新启动器，此修复仅完成本地验证、尚未部署 |
+| 临时目录 | 调试raw截图占满256MB /tmp导致传输失败；清理已本地保存的raw文件、重新上传比对SHA256，恢复服务健康；媒体与数据库保留 |
+| 代理状态 | 用户恢复Sol审查；已按 PJOS→PocketShell→Kanade 的顺序完成并修复明确问题，见 [27-sol-code-review.md](27-sol-code-review.md) |
+
+当前设备服务 SHA256：`a3e7694e5ddbc5e0cff72f95f20ae1e7b57d56d943d4ffec881cefa7d933a64f`。
+当前运行时两处 SHA256：`808e88c2de938bd9087daddccf58e27821a08b52c468018b4933b9298ed2f587`。
+NAS OfflineVideos SHA256：`87f03d37c2f00fbcc410582855597267f9b33f83b6602d85c732f6184ec7a497`。
+备份：设备 `/data/pjos-final-backup/`，NAS `/opt/offlinevideos/videod.before-compatible-20261113`。
+前端截图和细节：`~/development/Kanade/pocket/docs/ui/pixel-two-page.md`；
+强退审查说明：[26-launcher-force-quit-review.md](26-launcher-force-quit-review.md)。
+
+以上不替代旧问题表中蓝牙实耳机、真实USB拔插等尚未完成的硬件验收。
+
+## GBA 原生网格 3× 视觉修正（2026-11-13，本地完成）
+
+RG34XX 的 720×480 面板与 GBA 的 240×160 正好为 3× 整数比例。此前 PocketShell、Kanade 仍用 360×240、2× 栅格。本轮把两者 profile/manifest 改为 240×160、3×，重排卡片、图标、设置、系统信息和播放器列表；Kanade 每屏改四行，让标题完整显示两行。PocketShell 六个状态图标保留，电池为四格 12×7 图标。系统信息三页保留全部不重复的字段；温度所需 `°` 字形已加入字体包。
+
+运行时导出 profile hash：`sha256:b4eff018558f29f58bf10d76a81e1cbb1a5e7dfb965b59a020562ac797a24241`。3× CJK 字体让 Kanade 包达到 64,875,064 字节；运行时原 32 MiB 启动预算会返回 `Package(TooLarge)`，已在本地构建补丁中调为 64 MiB，并重编 ARM64 运行时。初版两包与新运行时的 `--check` 均通过；ARM QEMU 对初版两包各执行 12 帧成功。PocketJS WASM 以模拟数据逐页截图核查首页、设置、系统信息三页、Kanade 列表、同步与 NAS 设置。截图是模拟器输出，**不是实机验收**。后续重打包通过 SDK 检查/编译，尚未重跑模拟器。
+
+本地新 SHA256：启动器 `30d12b3a696de81f56bd98721604f44de3c003c5aef0b2c57dbfb130d1055041`（审查、常用路径优化和共享键盘主题后重新打包）；Kanade `07bea8f9081c6df41797641a3d566463f8250738874603738ad6163fe20cf32c`；运行时 `3fb77cfa0f053b2e49d8e905b8156ca824348b6b6b018ae2c44a61a133b3c74f`。模拟器截图及版面规则见 `../../pocketshell/docs/design/gba3x.md` 与 `../../Kanade/pocket/docs/ui/gba3x.md`。
+
+设备当前 ADB 列表为空，掌机内网地址 SSH 超时；用户表示稍后再连接。因此新包尚未安装，设备继续运行上表所记旧版。连接恢复后先备份，再成套替换 `/usr/share/baseos/pocketjs/pocket-linux-kms`、`/storage/System/pocketjs/bin/pocket-linux-kms`、启动器和 Kanade 包，实机截屏与按键验收。
+
+## 本轮代码审查（2026-11-13，本地完成）
+
+Sol 按 PJOS→PocketShell→Kanade 的顺序审查并修复：视频退出时 framebuffer 归还顺序、陈旧应用恢复、强退等待期间进程误匹配；特殊 SSID、信号去重、设置写入误报成功；播放器并发抢屏和 IPC 释放、NAS 配置数据竞争及漏同步音轨、媒体 ID 碰撞、音视频流选源。具体代码、回归及限制见 [27-sol-code-review.md](27-sol-code-review.md)。
+
+审查后的启动器重新通过 SDK check/compile，包 SHA256 见上。arm64 服务产物 `/tmp/kanade-videod-reviewed` SHA256 `0cdeaaef554cab8baf8420c9a45236d188ba1c6ee2f9c93b1d01b13b0cc3fa63`；热键产物 `/tmp/pjos-baseos-hotkeys-reviewed` SHA256 `5329be7384ae583a2566c6ce2aa9831aa1f18cd52b83bfd549f7f0a13b6fbdd8`。PJOS、PocketShell、Kanade 的 `git diff --check` 均通过。本轮审查修复尚未部署，待设备重新连接后按备份流程部署并验收。
+
+## 常用路径性能检查与共享键盘（2026-11-13，本地完成）
+
+系统前端清理辅助进程减少 `/proc` 遍历时的外部进程启动；启动器设置页快速轮询从 16 项缩为亮度和音量 2 项，完整刷新仍在进入页面、修改其他设置和每 5 秒时进行；系统信息只在其页面读取。Kanade 列表加载从两次桥接调用减为一次，MP4 的 AV1 判定对有效盒结构直接跳到 `moov`，避免先读取视频数据。代码路径与测试见 [28-common-path-performance.md](28-common-path-performance.md)。尚无掌机耗时/FPS 实测，用户要求稍后再连接；本轮未运行模拟器或部署。
+
+启动器和播放器的键盘原本均来自 PocketJS SDK 的 `@pocketjs/framework/osk`。本轮把 PJOS 的直角像素配色作为此共享组件的 `pjos` 主题，两处都改用同一主题，并让两个构建脚本自动应用同一份主题补丁。其他 PocketJS 程序的接入方式见 [29-shared-pocketjs-keyboard.md](29-shared-pocketjs-keyboard.md)。
