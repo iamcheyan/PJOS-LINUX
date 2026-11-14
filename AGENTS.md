@@ -40,6 +40,7 @@
 - Wi-Fi SSH: `root@<device-lan-ip>`, port `22`.
 - The development image uses a fixed throwaway password; it is not recorded in this repository.
 - Prefer USB ADB when connected: run `adb devices -l`, then `adb -s <device-serial> shell 'hostname; id'`. Use the password-assisted Wi-Fi SSH command below if the USB transport is absent/offline or intentionally disabled. Do not stop diagnosis at an empty ADB list.
+  ADB's `adb devices -l` model string is not authoritative: this RG34XX has appeared as `Nexus_4`. Confirm the target by running `adb -s <device-serial> shell 'hostname; cat /etc/os-release; uname -a; id'`; expect hostname `rg34xx`, `PJOS Linux` / `baseos` and an H700 AArch64 kernel, plus `uid=0(root)`. Check `/proc/cmdline` and `/proc/mounts` for the live system and SD card (`/dev/mmcblk0p7` mounted at `/storage`) if needed. Directories or files named `pocketshell`/`rg34xx` on a mounted card alone do not prove the connected live device identity.
 - Example: `ssh root@<device-lan-ip>`.
 - Verified noninteractive login (2026-11-12):
   ```sh
