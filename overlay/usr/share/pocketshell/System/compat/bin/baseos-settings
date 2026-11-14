@@ -57,7 +57,7 @@ case "$key" in
         state=$("$services" status avahi.enabled 2>/dev/null | sed 's/^[^=]*=//')
         flag "$state"
         ;;
-    showClock|animations|fontSize|themeColor)
+    showClock|animations|fontSize|themeColor|zeldaLastRom)
         conf="$ROOT/storage/.config/pocketjs/ui-settings.conf"
         mkdir -p "${conf%/*}" 2>/dev/null || :
         if [ "$#" -gt 1 ]; then
@@ -74,6 +74,7 @@ case "$key" in
             animations) [ -n "$val" ] && echo "$val" || echo "off" ;;
             fontSize) [ -n "$val" ] && echo "$val" || echo "normal" ;;
             themeColor) [ -n "$val" ] && echo "$val" || echo "purple" ;;
+            zeldaLastRom) [ -n "$val" ] && echo "$val" || echo "" ;;
             *) echo "${val:-unknown}" ;;
         esac
         ;;
