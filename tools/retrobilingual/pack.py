@@ -99,7 +99,7 @@ def build_pack(entries, atlas, index, glyph_size, rom_sha256: bytes) -> bytes:
                 seq.append(index[ord(char)])
         first = sum(len(s) for s in sequences)
         sequences.append(seq)
-        table += struct.pack("<HBBHH", int(sid[:2], 16) << 8 | int(sid[2:4], 16), page, 0, first, len(seq))
+        table += struct.pack("<HBBII", int(sid[:2], 16) << 8 | int(sid[2:4], 16), page, 0, first, len(seq))
     out += table
     for seq in sequences:
         for glyph in seq:

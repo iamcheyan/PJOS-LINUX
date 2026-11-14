@@ -20,3 +20,12 @@ work/
 /overlay/usr/share/pocketshell/System/compat/install/
 /overlay/usr/share/pocketshell/System/pocketjs/apps/*.gba
 /overlay/usr/share/pocketshell/System/pocketjs/apps/kanade.pocket
+
+# RetroBilingual / TMC extracted commercial text & intermediate artifacts
+references/
+data/glyphs/
+data/*.db
+data/chinese_utf8.json
+data/tmc_*.json
+data/alignment_report.json
+data/review.html

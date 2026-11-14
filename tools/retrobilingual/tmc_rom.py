@@ -36,7 +36,7 @@ def _u32(data: bytes, offset: int) -> int:
     return struct.unpack_from("<I", data, offset)[0]
 
 
-def _glyph_string(raw: bytes) -> list[dict[str, Any]]:
+def _glyph_string(raw: bytes, language: str = "ja") -> list[dict[str, Any]]:
     """Render only known ASCII and explicit glyph/control tokens."""
     entries: list[dict[str, Any]] = []
     display: list[str] = []
@@ -89,15 +89,47 @@ def _glyph_string(raw: bytes) -> list[dict[str, Any]]:
             controls.append(control)
             display.append(f"[C{control}]")
             continue
-        if code in (0x0B, 0x0C, 0x0D, 0x0E, 0x0F):
-            if cursor >= len(raw):
-                raise ValueError(f"truncated glyph-bank code 0x{code:02x} at text byte {start}")
-            glyph = raw[cursor]
-            cursor += 1
-            group = {0x0B: 4, 0x0C: 7, 0x0D: 5, 0x0E: 6, 0x0F: 3}[code]
-            controls.append(f"{code:02X}:{glyph:02X}")
-            display.append(f"[G{group}:{glyph:02X}]")
-            continue
+        if language == "zh":
+            if code in (0x0B, 0x0C, 0x0D, 0x0E):
+                if cursor >= len(raw):
+                    raise ValueError(f"truncated glyph-bank code 0x{code:02x} at text byte {start}")
+                glyph = raw[cursor]
+                cursor += 1
+                bank = (code & 7) + 1
+                controls.append(f"{code:02X}:{glyph:02X}")
+                display.append(f"[G{bank}:{glyph:02X}]")
+                continue
+            if code == 0x0F:
+                if cursor >= len(raw):
+                    raise ValueError(f"truncated glyph-bank code 0x0f at text byte {start}")
+                b1 = raw[cursor]
+                cursor += 1
+                if b1 <= 0x2F:
+                    controls.append(f"0F:{b1:02X}")
+                    display.append(f"[G2:{b1:02X}]")
+                elif b1 <= 0x3F:
+                    g = b1 & 0x0F
+                    controls.append(f"0F:{b1:02X}")
+                    display.append(f"[G3:{g:02X}]")
+                else:
+                    if cursor >= len(raw):
+                        raise ValueError(f"truncated extended glyph code 0x0f {b1:02x} at text byte {start}")
+                    b2 = raw[cursor]
+                    cursor += 1
+                    bank = (b1 & 0x0F) + 9
+                    controls.append(f"0F:{b1:02X}:{b2:02X}")
+                    display.append(f"[G{bank}:{b2:02X}]")
+                continue
+        else:
+            if code in (0x0B, 0x0C, 0x0D, 0x0E, 0x0F):
+                if cursor >= len(raw):
+                    raise ValueError(f"truncated glyph-bank code 0x{code:02x} at text byte {start}")
+                glyph = raw[cursor]
+                cursor += 1
+                group = {0x0B: 4, 0x0C: 7, 0x0D: 5, 0x0E: 6, 0x0F: 3}[code]
+                controls.append(f"{code:02X}:{glyph:02X}")
+                display.append(f"[G{group}:{glyph:02X}]")
+                continue
         if 0x20 <= code <= 0x7E:
             display.append(chr(code))
         else:
@@ -107,7 +139,7 @@ def _glyph_string(raw: bytes) -> list[dict[str, Any]]:
         finish_page(len(raw))
     return entries
 
-def _read_encoded_string(data: bytes, start: int, limit: int) -> tuple[bytes, int]:
+def _read_encoded_string(data: bytes, start: int, limit: int, language: str = "ja") -> tuple[bytes, int]:
     cursor = start
     while cursor < limit:
         code = data[cursor]
@@ -122,6 +154,8 @@ def _read_encoded_string(data: bytes, start: int, limit: int) -> tuple[bytes, in
         if code == 0x04 and cursor < limit and data[cursor] == 0x10:
             needed = 2
         if code == 0x05 and cursor < limit and data[cursor] != 0xFF:
+            needed = 2
+        if language == "zh" and code == 0x0F and cursor < limit and data[cursor] > 0x3F:
             needed = 2
         if cursor + needed > limit:
             raise ValueError(f"truncated TMC token 0x{code:02x} at ROM offset 0x{cursor - 1:x}")
@@ -176,11 +210,11 @@ def extract_tmc_rom(path: Path, language: str) -> dict[str, Any]:
             if relative_string < table_size or string_start >= category_limit:
                 raise ValueError(f"invalid string offset in category 0x{category:02x}, entry 0x{string_index:02x}")
             try:
-                raw, _ = _read_encoded_string(data, string_start, len(data))
+                raw, _ = _read_encoded_string(data, string_start, len(data), language=language)
             except ValueError as exc:
                 raise ValueError(f"category 0x{category:02x} entry 0x{string_index:02x} at 0x{string_start:x}: {exc}") from exc
             try:
-                pages = _glyph_string(raw)
+                pages = _glyph_string(raw, language=language)
             except ValueError as exc:
                 raise ValueError(f"category 0x{category:02x} entry 0x{string_index:02x} at 0x{string_start:x}: {exc}") from exc
             for page in pages:

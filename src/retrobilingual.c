@@ -71,7 +71,7 @@ typedef struct {
 typedef struct {
     uint16_t text_id;
     uint8_t page;
-    uint16_t first_glyph;
+    uint32_t first_glyph;
     uint16_t glyph_count;
 } RBEntry;
 
@@ -125,7 +125,7 @@ static uint8_t sDlgPage;
 static uint8_t sDlgRender;
 static int sDlgActive;
 static int sDlgChanged;
-static uint16_t sDlgGlyphStart;
+static uint32_t sDlgGlyphStart;
 static uint16_t sDlgGlyphCount;
 
 /* ---------- SHA-256 ---------------------------------------------------- */
@@ -268,7 +268,7 @@ static int rb_pack_load(void) {
 
         sPack.glyph_bytes = ((size_t)sPack.glyph_w * sPack.glyph_h + 7) / 8;
         size_t glyph_table = (size_t)sPack.glyph_count * (4 + sPack.glyph_bytes);
-        size_t entry_table = (size_t)sPack.entry_count * 8;
+        size_t entry_table = (size_t)sPack.entry_count * 12;
         if (off + glyph_table + entry_table > (size_t)size) break;
 
         memset(sPack.codepoint_map, 0xFF, sizeof(sPack.codepoint_map));
@@ -284,9 +284,9 @@ static int rb_pack_load(void) {
         for (uint32_t i = 0; i < sPack.entry_count; i++) {
             sPack.entries[i].text_id = rd16(data + off);
             sPack.entries[i].page = data[off + 2];
-            sPack.entries[i].first_glyph = rd16(data + off + 4);
-            sPack.entries[i].glyph_count = rd16(data + off + 6);
-            off += 8;
+            sPack.entries[i].first_glyph = rd32(data + off + 4);
+            sPack.entries[i].glyph_count = (uint16_t)rd32(data + off + 8);
+            off += 12;
         }
         /* Remaining bytes: glyph index sequences. */
         size_t index_bytes = (size_t)size - off;
@@ -386,7 +386,7 @@ static void glyph(pixel_t* fb, unsigned p, int x, int y, uint16_t index) {
 }
 
 static void draw_sequence(pixel_t* fb, unsigned p, int x, int y, int max_w,
-                          uint16_t start, uint16_t count) {
+                          uint32_t start, uint16_t count) {
     int cx = x, cy = y;
     for (uint16_t i = 0; i < count; i++) {
         uint16_t idx = sPack.indices[start + i];

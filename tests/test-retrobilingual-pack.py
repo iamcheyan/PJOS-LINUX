@@ -41,8 +41,8 @@ def parse(pack_bytes):
         off += glyph_bytes
     entries = []
     for _ in range(ecount):
-        text_id, page, _pad, first, count = struct.unpack_from("<HBBHH", pack_bytes, off)
-        off += 8
+        text_id, page, _pad, first, count = struct.unpack_from("<HBBII", pack_bytes, off)
+        off += 12
         entries.append((text_id, page, first, count))
     indices = list(struct.unpack_from(f"<{(len(pack_bytes)-off)//2}H", pack_bytes, off))
     return dict(version=version, glyphs=glyphs, entries=entries, indices=indices)

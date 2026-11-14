@@ -49,8 +49,14 @@ def font_coverage(chars, font_path: Path, size: int):
     font = ImageFont.truetype(str(font_path), size)
     missing = []
     for char in sorted(chars):
+        if char.isspace():
+            continue
         image = Image.new("L", (size, size), 0)
-        ImageDraw.Draw(image).text((0, 0), char, fill=255, font=font)
+        draw = ImageDraw.Draw(image)
+        bbox = draw.textbbox((0, 0), char, font=font)
+        x = (size - (bbox[2] - bbox[0])) // 2 - bbox[0]
+        y = (size - (bbox[3] - bbox[1])) // 2 - bbox[1]
+        draw.text((x, y), char, fill=255, font=font)
         if max(image.getdata()) == 0:
             missing.append(char)
     return missing
