@@ -30,7 +30,7 @@ OUT="$HERE/work/pocketjs-runtime/pocket-linux-kms"
 [ -f "$TARBALL" ] || { echo "missing $TARBALL" >&2; exit 1; }
 [ -f "$BRIDGE_SCRIPTS/patch-runtime.py" ] || { echo "missing $BRIDGE_SCRIPTS/patch-runtime.py (set PJOS_BRIDGE_SCRIPTS)" >&2; exit 1; }
 [ -f "$PROFILE" ] || { echo "missing profile export $PROFILE (run the host build first)" >&2; exit 1; }
-grep -Fq 'logical_viewports: ::pocket_runtime::Cow::Borrowed(&[[480, 320]])' "$PROFILE" || { echo "profile is not the RG34XX 480x320 export: $PROFILE" >&2; exit 1; }
+grep -Fq 'logical_viewports: ::pocket_runtime::Cow::Borrowed(&[[720, 480]])' "$PROFILE" || { echo "profile is not the RG34XX 720x480 export: $PROFILE" >&2; exit 1; }
 grep -Fq 'density: 1,' "$PROFILE" || { echo "profile is not the RG34XX 1x raster export: $PROFILE" >&2; exit 1; }
 
 mkdir -p "$HERE/work/pocketjs-runtime" "$HERE/work/bridge-scripts"
@@ -94,6 +94,7 @@ docker run --rm --platform linux/arm64 \
   -v "$HERE/src/apply-pocketjs-input.py:/in/apply-input.py:ro" \
   -v "$HERE/src/apply-pocketjs-fractional-display.py:/in/apply-fractional-display.py:ro" \
   -v "$HERE/src/apply-pocketjs-gba3x-package-budget.py:/in/apply-gba3x-package-budget.py:ro" \
+  -v "$HERE/src/apply-pocketjs-apps.py:/in/apply-apps.py:ro" \
   -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
   -v "$HERE/src/apply-pocketjs-battery.py:/in/apply-battery.py:ro" \
   -v "$HERE/src/apply-pocketjs-panel.py:/in/apply-panel.py:ro" \
@@ -146,6 +147,7 @@ docker run --rm --platform linux/arm64 \
     # One ROM hand-off arm, anchored on the LAUNCH arm every revision carries.
     # The older BaseOS bridge rewrite (apply-pocketjs-bridge.py) is not used: it
     # targets a dispatcher revision that no longer exists in any checkout.
+    python3 /in/apply-apps.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-rom-arm.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-battery.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-panel.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
@@ -159,6 +161,8 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-player-path.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-restore.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-kanade.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    grep -q "fn apps_list" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
+      || { echo "FATAL: installed app listing arm missing" >&2; exit 1; }
     grep -q "fn kanade_call" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: KANADE bridge arm missing" >&2; exit 1; }
     echo "rom_launch hits: $(grep -c "rom_launch" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs)"

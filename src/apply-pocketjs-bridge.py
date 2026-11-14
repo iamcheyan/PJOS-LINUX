@@ -528,6 +528,7 @@ text = replace_once(launch_old, launch_new, "installed-app launch arm")
 
 apps_arm_old = '''        ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
 apps_arm_new = '''        ["APPS", "list"] => apps_list(),
+        ["APP", "close"] => app_close(),
         ["LAUNCH", app] if apps_launch_ready(app) => apps_launch(app),'''
 text = replace_once(apps_arm_old, apps_arm_new, "installed app listing arm")
 rom_arm_old = '''        ["APPS", "list"] => apps_list(),
@@ -737,6 +738,27 @@ fn game_launch(path: &str) -> String {
         .stderr(std::process::Stdio::null())
         .spawn();
     format!("launching:{}", path)
+}
+
+fn app_close() -> String {
+    let helper = [
+        "/storage/System/compat/bin/pocketjs-native-launch",
+        "/usr/share/pocketshell/System/compat/bin/pocketjs-native-launch",
+        "/usr/bin/pocketjs-native-launch",
+    ]
+    .iter()
+    .find(|path| std::path::Path::new(path).is_file());
+    let Some(helper) = helper else { return "error:no-launcher".into() };
+    match std::process::Command::new(helper)
+        .arg("exit")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(_) => "ok".into(),
+        Err(_) => "error:launcher".into(),
+    }
 }
 
 fn apps_launch_ready(app: &str) -> bool {

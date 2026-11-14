@@ -104,9 +104,7 @@ const GRID_LAYERS: Partial<Record<OskLayerName, OskKeyDef[][]>> = {
 def main(path: Path) -> None:
     patch_osk_layout(path.parent / "osk-layout.ts")
     source = path.read_text()
-    if 'export type OskThemeName = "dark" | "light" | "classic" | "pjos";' in source:
-        pass
-    else:
+    if '"classic" | "pjos"' not in source and '"pjos-mono"' not in source:
         source = replace_once(
             source,
             'export type OskThemeName = "dark" | "light" | "classic";',
