@@ -5,10 +5,28 @@ import subprocess
 from PIL import Image
 
 def capture_fb(out_png_path, adb_serial=None):
+    device_ip = os.environ.get("PJOS_DEVICE_IP", "")
+    dev_pw = os.environ.get("PJOS_DEV_PW", "")
+    
+    # Try ADB first if adb device present, else fallback to SSH
+    use_ssh = False
     if not adb_serial:
         adb_serial = os.environ.get("PJOS_ADB_SERIAL", "5c0010894414c802512")
-    cmd = f"adb -s {adb_serial} shell 'cat /sys/class/graphics/fb0/pan'"
-    pan = subprocess.check_output(cmd, shell=True, text=True).strip()
+    
+    try:
+        adb_check = subprocess.run(f"adb -s {adb_serial} get-state", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
+        if adb_check.returncode != 0:
+            use_ssh = True
+    except Exception:
+        use_ssh = True
+
+    if use_ssh:
+        ssh_cmd_base = f"sshpass -p '{dev_pw}' ssh -o ConnectTimeout=5 -o UserKnownHostsFile=/tmp/pjos-debug-known-hosts -o StrictHostKeyChecking=accept-new root@{device_ip}"
+        pan = subprocess.check_output(f"{ssh_cmd_base} 'cat /sys/class/graphics/fb0/pan'", shell=True, text=True).strip()
+    else:
+        cmd = f"adb -s {adb_serial} shell 'cat /sys/class/graphics/fb0/pan'"
+        pan = subprocess.check_output(cmd, shell=True, text=True).strip()
+
     try:
         px, py = [int(v) for v in pan.split(",")]
     except Exception:
@@ -16,11 +34,16 @@ def capture_fb(out_png_path, adb_serial=None):
     print(f"Device fb0 pan: {px},{py}")
 
     raw_dev = "/tmp/devfb.raw"
-    subprocess.check_call(f"adb -s {adb_serial} shell 'rm -f {raw_dev} && dd if=/dev/fb0 of={raw_dev} bs=4096 count=675 2>/dev/null && sync'", shell=True)
     raw_local = "/tmp/devfb_local.raw"
     if os.path.exists(raw_local):
         os.remove(raw_local)
-    subprocess.check_call(f"adb -s {adb_serial} pull {raw_dev} {raw_local}", shell=True)
+
+    if use_ssh:
+        subprocess.check_call(f"{ssh_cmd_base} 'rm -f {raw_dev} && dd if=/dev/fb0 of={raw_dev} bs=4096 count=675 2>/dev/null && sync'", shell=True)
+        subprocess.check_call(f"sshpass -p '{dev_pw}' scp -o ConnectTimeout=5 -o UserKnownHostsFile=/tmp/pjos-debug-known-hosts -o StrictHostKeyChecking=accept-new root@{device_ip}:{raw_dev} {raw_local}", shell=True)
+    else:
+        subprocess.check_call(f"adb -s {adb_serial} shell 'rm -f {raw_dev} && dd if=/dev/fb0 of={raw_dev} bs=4096 count=675 2>/dev/null && sync'", shell=True)
+        subprocess.check_call(f"adb -s {adb_serial} pull {raw_dev} {raw_local}", shell=True)
 
     with open(raw_local, "rb") as f:
         data = f.read()
