@@ -65,6 +65,8 @@ and Buildroot non-Android patches plus two local policies:
 - stay root, matching the current root/root development-access posture;
 - remove the TCP 5555 transport fallback, leaving USB as the only externally
   reachable transport.
+- report the BaseOS model as the ADB product, model and device banner properties
+  (`rg34xx`, `RG34XX`, `rg34xx`) instead of Debian's legacy Nexus 4 defaults.
 
 The daemon still owns its private smart socket on `127.0.0.1:5037`, so
 `usb-gadget-adb` brings up loopback before launching it. FunctionFS cannot bind until

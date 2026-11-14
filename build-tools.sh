@@ -175,6 +175,9 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
     patch -g0 -p1 -E -i "debian/patches/$p" >/dev/null
   done < debian/patches/series
   for p in /patches/0*.patch; do patch -g0 -p1 -E -i "$p" >/dev/null; done
+  # Debian's legacy adbd patch hardcodes Nexus 4 banner properties. Keep them
+  # aligned with this BaseOS handheld so adb devices -l identifies it correctly.
+  sed -i 's/"occam"/"rg34xx"/; s/"Nexus 4"/"RG34XX"/; s/"mako"/"rg34xx"/' core/adbd/adb.c
   # musl carries crypt() in libc, so drop the -lcrypt the makefile assumes; link
   # libcrypto statically. Build noise (upstream -Wall warnings) is suppressed.
   mkdir -p build-adbd
