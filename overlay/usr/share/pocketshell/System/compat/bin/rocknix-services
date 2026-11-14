@@ -55,6 +55,12 @@ case "${1-}" in
                 fi
                 if is_on "$key"; then printf '%s=1\n' "$key"; else printf '%s=0\n' "$key"; fi
                 ;;
+            pocketshell-dev.enabled)
+                rm -f /mnt/sdcard/System/pocketjs/active /storage/System/pocketjs/active 2>/dev/null || :
+                (sleep 0.1 && kill -9 $(pidof pocket-linux-kms 2>/dev/null) 2>/dev/null) &
+                printf '%s=0\n' "$key"
+                exit 0
+                ;;
             *)
                 echo "service is unsupported on BaseOS" >&2
                 exit 1

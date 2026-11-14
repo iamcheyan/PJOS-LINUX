@@ -31,16 +31,16 @@ fn baseos_volume_state() -> String {
     "unknown".into()
 }
 '''
-ARMS = r'''        ["SETTING", key] if ["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb"].contains(key) => baseos_setting(key, None),
-        ["SETTING", key, value] if ["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb"].contains(key) => baseos_setting(key, Some(value)),
+ARMS = r'''        ["SETTING", key] if ["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor"].contains(key) => baseos_setting(key, None),
+        ["SETTING", key, value] if ["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor"].contains(key) => baseos_setting(key, Some(value)),
         ["SETTING", "volume"] | ["STATE", "volume"] | ["LEVEL", "volume"] => baseos_volume_state(),
 '''
 
 def main(path):
     text = path.read_text()
     if 'fn baseos_setting(' in text:
-        old_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp"]'
-        new_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb"]'
+        old_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb"]'
+        new_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor"]'
         text = text.replace(old_keys + '.contains(key) => baseos_setting', new_keys + '.contains(key) => baseos_setting')
         path.write_text(text)
         print('settings: already applied')

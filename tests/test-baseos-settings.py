@@ -76,4 +76,18 @@ class Settings(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), 'error:reboot-required')
         self.assertEqual((self.root/'sys/module/h700_speaker_amp/parameters/headphone_pop_fix').read_text().strip(), 'N')
         self.assertIn('headphone_pop_fix=true', (self.root/'mnt/sdcard/baseos.conf').read_text())
+    def test_ui_settings_persistence(self):
+        self.assertEqual(self.run_setting('showClock').stdout.strip(), 'off')
+        self.assertEqual(self.run_setting('animations').stdout.strip(), 'off')
+        self.assertEqual(self.run_setting('fontSize').stdout.strip(), 'normal')
+        self.assertEqual(self.run_setting('themeColor').stdout.strip(), 'purple')
+        self.assertEqual(self.run_setting('showClock', 'on').stdout.strip(), 'on')
+        self.assertEqual(self.run_setting('animations', 'on').stdout.strip(), 'on')
+        self.assertEqual(self.run_setting('fontSize', 'huge').stdout.strip(), 'huge')
+        self.assertEqual(self.run_setting('themeColor', 'pink').stdout.strip(), 'pink')
+        # Check read back
+        self.assertEqual(self.run_setting('showClock').stdout.strip(), 'on')
+        self.assertEqual(self.run_setting('animations').stdout.strip(), 'on')
+        self.assertEqual(self.run_setting('fontSize').stdout.strip(), 'huge')
+        self.assertEqual(self.run_setting('themeColor').stdout.strip(), 'pink')
 if __name__ == '__main__': unittest.main()

@@ -27,10 +27,56 @@ radio() {
 }
 if [ "$#" -gt 1 ]; then
     case "$key" in
-        bluetooth|wifi|btAudio|headphoneFix|ntp|adb) case "$want" in on|off) ;; *) fail invalid ;; esac ;;
+        bluetooth|wifi|btAudio|headphoneFix|ntp|adb|ssh|mdns|showClock|animations) case "$want" in on|off) ;; *) fail invalid ;; esac ;;
+        fontSize) case "$want" in normal|large|huge) ;; *) fail invalid ;; esac ;;
+        themeColor) case "$want" in purple|blue|green|pink|amber) ;; *) fail invalid ;; esac ;;
     esac
 fi
 case "$key" in
+    ssh)
+        services=${BASEOS_SETTINGS_SERVICES:-/storage/System/compat/bin/rocknix-services}
+        [ -x "$services" ] || services=/usr/share/pocketshell/System/compat/bin/rocknix-services
+        [ -x "$services" ] || fail unsupported
+        if [ "$#" -gt 1 ]; then
+            state_val=0; [ "$want" != on ] || state_val=1
+            "$services" set ssh.enabled "$state_val" </dev/null >/dev/null 2>&1 &
+            sleep 0.05
+        fi
+        state=$("$services" status ssh.enabled 2>/dev/null | sed 's/^[^=]*=//')
+        flag "$state"
+        ;;
+    mdns)
+        services=${BASEOS_SETTINGS_SERVICES:-/storage/System/compat/bin/rocknix-services}
+        [ -x "$services" ] || services=/usr/share/pocketshell/System/compat/bin/rocknix-services
+        [ -x "$services" ] || fail unsupported
+        if [ "$#" -gt 1 ]; then
+            state_val=0; [ "$want" != on ] || state_val=1
+            "$services" set avahi.enabled "$state_val" </dev/null >/dev/null 2>&1 &
+            sleep 0.05
+        fi
+        state=$("$services" status avahi.enabled 2>/dev/null | sed 's/^[^=]*=//')
+        flag "$state"
+        ;;
+    showClock|animations|fontSize|themeColor)
+        conf="$ROOT/storage/.config/pocketjs/ui-settings.conf"
+        mkdir -p "${conf%/*}" 2>/dev/null || :
+        if [ "$#" -gt 1 ]; then
+            [ -f "$conf" ] || : > "$conf"
+            awk -v name="$key" -v value="$want" '
+                $0 ~ "^[[:space:]]*" name "[[:space:]]*=" { if (!done++) print name "=" value; next }
+                { print }
+                END { if (!done) print name "=" value }
+            ' "$conf" > "$conf.new" && mv "$conf.new" "$conf"
+        fi
+        val=$(awk -F= -v name="$key" '$1 == name { print $2 }' "$conf" 2>/dev/null | tr -d ' \r\n')
+        case "$key" in
+            showClock) [ -n "$val" ] && echo "$val" || echo "off" ;;
+            animations) [ -n "$val" ] && echo "$val" || echo "off" ;;
+            fontSize) [ -n "$val" ] && echo "$val" || echo "normal" ;;
+            themeColor) [ -n "$val" ] && echo "$val" || echo "purple" ;;
+            *) echo "${val:-unknown}" ;;
+        esac
+        ;;
     adb)
         services=${BASEOS_SETTINGS_SERVICES:-/storage/System/compat/bin/rocknix-services}
         [ -x "$services" ] || services=/usr/share/pocketshell/System/compat/bin/rocknix-services
