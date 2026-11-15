@@ -14,6 +14,7 @@ int rb_test_state(void);
 int rb_test_dialogue_page(void);
 int rb_test_glyphs(void);
 int rb_test_slot(void);
+int rb_test_hud_pos(void);
 const char* rb_test_toast(void);
 
 enum { RB_STATE_GAME = 0, RB_STATE_MENU = 1, RB_STATE_SUBTITLE = 2 };
@@ -230,6 +231,25 @@ int main(int argc, char** argv) {
     assert(rb_test_state() == RB_STATE_GAME);
     assert(strstr(rb_test_toast(), "LOADED SLOT 2") != NULL);
 
-    puts("host overlay test: pack gate, page tracking, chord pause, subtitle, 5 slots, save/load toasts OK");
+    /* Open menu, move down to POSITION (item 4), test cycling AUTO -> TOP -> BOTTOM */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb); y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_pos() == 0); /* AUTO */
+    for (int i = 0; i < 4; i++) {
+        keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    }
+    /* Press RIGHT (bit 4) -> TOP (1) */
+    keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_pos() == 1); /* TOP */
+    /* Press RIGHT (bit 4) -> BOTTOM (2) */
+    keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_pos() == 2); /* BOTTOM */
+    /* Press A (bit 0) -> AUTO (0) */
+    keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_pos() == 0); /* AUTO */
+    /* Close menu */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb); y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+
+    puts("host overlay test: pack gate, page tracking, chord pause, subtitle, 5 slots, position cycling, save/load toasts OK");
     return 0;
 }
