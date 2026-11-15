@@ -57,7 +57,7 @@
 #define RB_FB_W 240
 #define RB_FB_H 160
 #define RB_MAX_GLYPHS 8192
-#define RB_MAX_ENTRIES 4096
+#define RB_MAX_ENTRIES 16384
 #define RB_MAX_TEXT 512
 
 typedef enum { RB_GAME, RB_MENU, RB_SUBTITLE, RB_BINDINGS } RBState;
@@ -790,7 +790,7 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
 
             /* Auto-detect whether in-game dialogue box is at bottom or top */
             int at_bottom = 0;
-            if ((fb[135 * p + 120] & 0x7BEF) == 0 && (fb[25 * p + 120] & 0x7BEF) != 0) {
+            if ((fb[108 * p + 120] & 0x7BEF) == 0 && (fb[14 * p + 120] & 0x7BEF) != 0) {
                 at_bottom = 1;
             }
             int target_y = at_bottom ? (106 + (38 - total_h) / 2) : (14 + (38 - total_h) / 2);
