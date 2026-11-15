@@ -114,16 +114,20 @@ def split_dialogue_pages(text: str) -> list[str]:
         return []
     raw_blocks = [b.strip() for b in re.split(r"\n\s*\n+", t) if b.strip()]
     pages = []
-    terminators = ("+", "@", "!", "?", "。", "！", "？", "……", "······")
+    # In GBA TMC, a dialogue window comfortably holds up to 2 lines per page.
+    # Only explicit bytecode wait/pause markers (+ or @) force an early single-line page break.
+    explicit_page_waits = ("+", "@")
     for block in raw_blocks:
         lines = [l.strip() for l in block.split("\n") if l.strip()]
         current_page_lines = []
         for i, line in enumerate(lines):
             current_page_lines.append(line)
-            if line.endswith(terminators) and i < len(lines) - 1:
+            # If line explicitly ends with bytecode wait marker, it forces page advance
+            if any(line.endswith(w) for w in explicit_page_waits) and i < len(lines) - 1:
                 pages.append("\n".join(current_page_lines))
                 current_page_lines = []
             elif len(current_page_lines) >= 2 and i < len(lines) - 1:
+                # Dialogue window displays 2 lines at once; advance to next page after 2 lines
                 pages.append("\n".join(current_page_lines))
                 current_page_lines = []
         if current_page_lines:
@@ -133,12 +137,16 @@ def split_dialogue_pages(text: str) -> list[str]:
 
 def sanitize_text(text: str) -> str:
     import re
+    # Convert literal escaped '\n' to actual newline
+    t = text.replace("\\n", "\n")
     # Strip any bracketed control codes like [C...], [G...], [WAIT]
-    t = re.sub(r"\[[^\]]+\]", "", text)
+    t = re.sub(r"\[[^\]]+\]", "", t)
     # Standardize player name
     t = re.sub(r"\{player\}", "林克", t)
     # Replace bytecode end-of-sentence markers
     t = t.replace("+", "。").replace("@", "？").replace("······", "……")
+    # Clean known OCR typos in recovered glyph text
+    t = t.replace("很热倒呢", "很热闹呢")
     # Normalize newlines
     t = re.sub(r"\n+", "\n", t)
     return t.strip()
