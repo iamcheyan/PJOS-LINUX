@@ -813,6 +813,18 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     cur_count = 0;
                 } else {
                     cur_count++;
+                    /* Auto soft-wrap if single line reaches 15 glyphs */
+                    if (cur_count >= 15 && i + 1 < total_glyphs && sPack.indices[start + i + 1] != 0xFFFF) {
+                        if (line_n < 8) {
+                            line_starts[line_n] = cur_start;
+                            line_counts[line_n] = cur_count;
+                            int lw = cur_count * sPack.glyph_w;
+                            if (lw > max_w) max_w = lw;
+                            line_n++;
+                        }
+                        cur_start = i + 1;
+                        cur_count = 0;
+                    }
                 }
             }
             if (line_n < 8 && cur_count > 0) {
@@ -823,6 +835,9 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 line_n++;
             }
             if (line_n == 0) line_n = 1;
+            /* In HUD floating mode, cap at 3 lines to prevent screen occlusion */
+            if (line_n > 3) line_n = 3;
+            if (max_w > RB_FB_W - 16) max_w = RB_FB_W - 16;
 
             int line_h = sPack.glyph_h + 3;
             int total_h = line_n * line_h - 3;
@@ -890,6 +905,7 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             for (int l = 0; l < line_n; l++) {
                 int lw = line_counts[l] * sPack.glyph_w;
                 int lx = (RB_FB_W - lw) / 2;
+                if (lx < 8) lx = 8;
                 int ly = target_y + l * line_h;
                 for (int g = 0; g < line_counts[l]; g++) {
                     uint16_t idx = sPack.indices[start + line_starts[l] + g];

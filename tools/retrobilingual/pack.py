@@ -54,6 +54,38 @@ def approved_mappings(db_path: Path, source_hash: str):
     return [(sid, page) for sid, page, _ in rows]
 
 
+def all_mappings(db_path: Path, source_hash: str):
+    db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    rows = db.execute(
+        "SELECT source_text_id, page_index, source_rom_hash FROM translations"
+        " WHERE game_id='zelda_minish_cap' AND japanese_text != '[EMPTY]'"
+        "   AND source_rom_hash=? ORDER BY source_text_id, page_index",
+        (source_hash,),
+    ).fetchall()
+    db.close()
+    return [(sid, page) for sid, page, _ in rows]
+
+
+def wrap_line(line: str, max_chars: int = 15) -> list[str]:
+    if len(line) <= max_chars:
+        return [line]
+    for p in ("，", "、", ",", " ", "！", "？", "!", "?", "。"):
+        idx = line[:max_chars].rfind(p)
+        if idx >= 6:
+            head = line[:idx+1].strip()
+            tail = line[idx+1:].strip()
+            res = [head]
+            if tail:
+                res.extend(wrap_line(tail, max_chars))
+            return res
+    head = line[:max_chars].strip()
+    tail = line[max_chars:].strip()
+    res = [head]
+    if tail:
+        res.extend(wrap_line(tail, max_chars))
+    return res
+
+
 def build_atlas(chars: set[str], font_path: Path, size: int) -> tuple[list[tuple[int, bytes]], dict[int, int]]:
     font = ImageFont.truetype(str(font_path), size)
     bitmap_bytes = (size * size + 7) // 8
@@ -119,14 +151,18 @@ def split_dialogue_pages(text: str) -> list[str]:
     explicit_page_waits = ("+", "@")
     for block in raw_blocks:
         lines = [l.strip() for l in block.split("\n") if l.strip()]
+        wrapped_lines = []
+        for rl in lines:
+            wrapped_lines.extend(wrap_line(rl, 15))
+
         current_page_lines = []
-        for i, line in enumerate(lines):
+        for i, line in enumerate(wrapped_lines):
             current_page_lines.append(line)
             # If line explicitly ends with bytecode wait marker, it forces page advance
-            if any(line.endswith(w) for w in explicit_page_waits) and i < len(lines) - 1:
+            if any(line.endswith(w) for w in explicit_page_waits) and i < len(wrapped_lines) - 1:
                 pages.append("\n".join(current_page_lines))
                 current_page_lines = []
-            elif len(current_page_lines) >= 2 and i < len(lines) - 1:
+            elif len(current_page_lines) >= 2 and i < len(wrapped_lines) - 1:
                 # Dialogue window displays 2 lines at once; advance to next page after 2 lines
                 pages.append("\n".join(current_page_lines))
                 current_page_lines = []
@@ -159,6 +195,7 @@ def main() -> int:
     parser.add_argument("--source-rom-sha256", required=True)
     parser.add_argument("--font", default=str(Path.home() / "development/pocketshell/app/fonts/SarasaUiSC-Regular.ttf"))
     parser.add_argument("--font-size", type=int, default=12)
+    parser.add_argument("--include-all", action="store_true", help="Include all non-empty translations for 100% coverage")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -166,12 +203,15 @@ def main() -> int:
     if len(digest) != 32:
         raise SystemExit("source-rom-sha256 must be 32 bytes of hex")
     texts = load_texts(Path(args.texts))
-    approved = approved_mappings(Path(args.database), args.source_rom_sha256)
+    if args.include_all:
+        candidates = all_mappings(Path(args.database), args.source_rom_sha256)
+    else:
+        candidates = approved_mappings(Path(args.database), args.source_rom_sha256)
     selected = []
     seen = set()
-    for sid, page in approved:
+    for sid, page in candidates:
         text = texts.get((sid, page))
-        if not text:
+        if not text or text == "[EMPTY]":
             continue
         if page == 0 and (sid, 1) not in texts:
             subpages = split_dialogue_pages(text)
@@ -184,7 +224,9 @@ def main() -> int:
                 continue
         cleaned = sanitize_text(text)
         if cleaned and (sid, page) not in seen:
-            selected.append((sid, page, cleaned))
+            lines = [l.strip() for l in cleaned.split("\n") if l.strip()]
+            wrapped = "\n".join(w for l in lines for w in wrap_line(l, 15))
+            selected.append((sid, page, wrapped))
             seen.add((sid, page))
     if not selected:
         raise SystemExit("no approved mapping has Unicode text; refusing to build an empty pack")
