@@ -13,6 +13,8 @@ int rb_test_pack_loaded(void);
 int rb_test_state(void);
 int rb_test_dialogue_page(void);
 int rb_test_glyphs(void);
+int rb_test_slot(void);
+const char* rb_test_toast(void);
 
 enum { RB_STATE_GAME = 0, RB_STATE_MENU = 1, RB_STATE_SUBTITLE = 2 };
 
@@ -194,6 +196,40 @@ int main(int argc, char** argv) {
     assert(rb_test_state() == RB_STATE_GAME);
     x_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
 
-    puts("host overlay test: pack gate, page tracking, chord pause, subtitle and menu draw OK");
+    /* Test menu save, 5-slot selection, and toast notifications */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_MENU);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Move down to QUICK SAVE (item 1) */
+    keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_slot() == 0); /* Slot 1 */
+
+    /* Change slot to Slot 2 using RIGHT (bit 4) */
+    keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_slot() == 1); /* Slot 2 */
+
+    /* Move down to QUICK LOAD (item 2) and try loading empty slot 2 */
+    keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    assert(strstr(rb_test_toast(), "SLOT 2 IS EMPTY") != NULL);
+
+    /* Open menu again, move to QUICK SAVE (item 1) and press A to save to Slot 2 */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb); y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    assert(strstr(rb_test_toast(), "SAVED TO SLOT 2") != NULL);
+
+    /* Open menu again, move to QUICK LOAD (item 2) and load Slot 2 */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb); y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    assert(strstr(rb_test_toast(), "LOADED SLOT 2") != NULL);
+
+    puts("host overlay test: pack gate, page tracking, chord pause, subtitle, 5 slots, save/load toasts OK");
     return 0;
 }

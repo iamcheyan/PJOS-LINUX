@@ -97,14 +97,18 @@ static int sBindingCapture;
 static int sBindingPending[2];
 static int sBindingCount;
 
+#define RB_SLOT_COUNT 5
+
 typedef struct {
     int enabled;
     int x_action;              /* 0: SUBTITLE, 1: SAVE, 2: LOAD */
+    int slot;                  /* 0..4 (Slot 1..5) */
     int chord[ACT_COUNT][2];   /* RetroPad ids, -1 = unset */
 } RBConfig;
 static RBConfig sCfg = {
     .enabled = 1,
     .x_action = X_ACT_SUBTITLE,
+    .slot = 0,
     .chord = {
         { -1, -1 },            /* save */
         { -1, -1 },            /* load */
@@ -216,6 +220,9 @@ static void rb_config_load(void) {
         else if (sscanf(line, "x_action=%d", &v) == 1) {
             if (v >= 0 && v < X_ACT_COUNT) sCfg.x_action = v;
         }
+        else if (sscanf(line, "slot=%d", &v) == 1) {
+            if (v >= 0 && v < RB_SLOT_COUNT) sCfg.slot = v;
+        }
         else if (sscanf(line, "bind_save=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SAVE][0]=a; sCfg.chord[ACT_SAVE][1]=b; }
         else if (sscanf(line, "bind_load=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_LOAD][0]=a; sCfg.chord[ACT_LOAD][1]=b; }
         else if (sscanf(line, "bind_subtitle=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SUBTITLE][0]=a; sCfg.chord[ACT_SUBTITLE][1]=b; }
@@ -229,6 +236,7 @@ static void rb_config_save(void) {
     if (!f) return;
     fprintf(f, "subtitle_enabled=%d\n", sCfg.enabled ? 1 : 0);
     fprintf(f, "x_action=%d\n", sCfg.x_action);
+    fprintf(f, "slot=%d\n", sCfg.slot);
     for (int i = 0; i < ACT_COUNT; i++) {
         const char* key = i == ACT_SAVE ? "bind_save" : i == ACT_LOAD ? "bind_load" : "bind_subtitle";
         fprintf(f, "%s=%d,%d\n", key, sCfg.chord[i][0], sCfg.chord[i][1]);
@@ -465,18 +473,104 @@ static void ui_text(pixel_t* fb, unsigned p, int x, int y, const char* s, pixel_
 }
 
 /* ---------- persistence actions ---------------------------------------- */
-static void rb_quick_save(struct mCore* core) {
-    struct VFile* vf = VFileOpen(sStatePath, O_WRONLY | O_CREAT | O_TRUNC);
-    if (!vf) return;
-    mCoreSaveStateNamed(core, vf, 0);
-    vf->close(vf);
+static char sToastMsg[64];
+static int sToastTicks;
+
+static void set_toast(const char* msg) {
+    snprintf(sToastMsg, sizeof(sToastMsg), "%s", msg);
+    sToastTicks = 120;
 }
-static int rb_quick_load(struct mCore* core) {
-    struct VFile* vf = VFileOpen(sStatePath, O_RDONLY);
-    if (!vf) return 0;
-    int ok = mCoreLoadStateNamed(core, vf, 0);
-    vf->close(vf);
-    return ok;
+
+static void rb_state_path(int slot, char* out, size_t out_sz) {
+    const char* dir = getenv("RETROBILINGUAL_DIR");
+    if (!dir) dir = "/storage/.config/pocketjs";
+    snprintf(out, out_sz, "%s/retrobilingual-slot%d.state", dir, slot + 1);
+}
+
+static int rb_slot_save(struct mCore* core, int slot) {
+    if (!core || !core->stateSize || !core->saveState) return 0;
+    size_t size = core->stateSize(core);
+    if (!size) return 0;
+    void* buf = malloc(size);
+    if (!buf) return 0;
+    if (!core->saveState(core, buf)) {
+        free(buf);
+        return 0;
+    }
+    char path[512];
+    rb_state_path(slot, path, sizeof(path));
+    FILE* f = fopen(path, "wb");
+    if (!f) {
+        free(buf);
+        return 0;
+    }
+    size_t written = fwrite(buf, 1, size, f);
+    fclose(f);
+    free(buf);
+    return written == size;
+}
+
+static int rb_slot_load(struct mCore* core, int slot) {
+    if (!core || !core->stateSize || !core->loadState) return 0;
+    char path[512];
+    rb_state_path(slot, path, sizeof(path));
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        if (slot == 0) {
+            const char* dir = getenv("RETROBILINGUAL_DIR");
+            if (!dir) dir = "/storage/.config/pocketjs";
+            snprintf(path, sizeof(path), "%s/retrobilingual-quick.state", dir);
+            f = fopen(path, "rb");
+        }
+        if (!f) return -1;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    size_t expected = core->stateSize(core);
+    if (sz <= 0 || (size_t)sz != expected) {
+        fclose(f);
+        return 0;
+    }
+    void* buf = malloc(expected);
+    if (!buf) {
+        fclose(f);
+        return 0;
+    }
+    if (fread(buf, 1, expected, f) != expected) {
+        free(buf);
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+    int ok = core->loadState(core, buf);
+    if (ok) {
+        if (sStateSize != expected) {
+            free(sStateBuf);
+            sStateBuf = malloc(expected);
+            sStateSize = expected;
+        }
+        if (sStateBuf) memcpy(sStateBuf, buf, expected);
+    }
+    free(buf);
+    return ok ? 1 : 0;
+}
+
+static void do_save(struct mCore* core) {
+    int ok = rb_slot_save(core, sCfg.slot);
+    char buf[48];
+    if (ok) snprintf(buf, sizeof(buf), "SAVED TO SLOT %d", sCfg.slot + 1);
+    else snprintf(buf, sizeof(buf), "SAVE FAILED!");
+    set_toast(buf);
+}
+
+static void do_load(struct mCore* core) {
+    int res = rb_slot_load(core, sCfg.slot);
+    char buf[48];
+    if (res == 1) snprintf(buf, sizeof(buf), "LOADED SLOT %d", sCfg.slot + 1);
+    else if (res == -1) snprintf(buf, sizeof(buf), "SLOT %d IS EMPTY", sCfg.slot + 1);
+    else snprintf(buf, sizeof(buf), "LOAD FAILED!");
+    set_toast(buf);
 }
 
 static void rb_pause(struct mCore* core) {
@@ -567,7 +661,10 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     if (sState == RB_MENU) {
         if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 5;
         if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 4) % 5;
-        if (sMenuCursor == 3) {
+        if (sMenuCursor == 1 || sMenuCursor == 2) {
+            if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.slot = (sCfg.slot + 1) % RB_SLOT_COUNT; rb_config_save(); }
+            if (edge(now, prev, RB_KEY_LEFT)) { sCfg.slot = (sCfg.slot + RB_SLOT_COUNT - 1) % RB_SLOT_COUNT; rb_config_save(); }
+        } else if (sMenuCursor == 3) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.x_action = (sCfg.x_action + X_ACT_COUNT - 1) % X_ACT_COUNT; rb_config_save(); }
         } else if (sMenuCursor == 4) {
@@ -580,8 +677,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         } else if (edge(now, prev, RB_KEY_A)) {
             switch (sMenuCursor) {
             case 0: rb_resume(core); sState = RB_GAME; break;
-            case 1: rb_quick_save(core); rb_resume(core); sState = RB_GAME; break;
-            case 2: rb_quick_load(core); sState = RB_GAME; break;
+            case 1: do_save(core); rb_resume(core); sState = RB_GAME; break;
+            case 2: do_load(core); sState = RB_GAME; break;
             case 3: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
             case 4: sCfg.enabled = !sCfg.enabled; rb_config_save(); break;
             default: break;
@@ -613,16 +710,16 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
                 sState = RB_SUBTITLE;
             }
         } else if (sCfg.x_action == X_ACT_SAVE) {
-            rb_quick_save(core);
+            do_save(core);
         } else if (sCfg.x_action == X_ACT_LOAD) {
-            rb_quick_load(core);
+            do_load(core);
         }
     } else {
         for (int a = 0; a < ACT_COUNT; a++) {
             int c = chord_down((uint16_t)now, sCfg.chord[a]);
             if (c && !sPrevAction[a]) {
-                if (a == ACT_SAVE) rb_quick_save(core);
-                else if (a == ACT_LOAD) rb_quick_load(core);
+                if (a == ACT_SAVE) do_save(core);
+                else if (a == ACT_LOAD) do_load(core);
                 else if (a == ACT_SUBTITLE && sCfg.enabled) {
                     rb_dialogue_read(gba);
                     rb_pause(core);
@@ -717,7 +814,11 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 int iy = my + 8 + i * 16;
                 if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 12, 0x2965);
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
-                if (i == 3) {
+                if (i == 1 || i == 2) {
+                    char buf[24];
+                    snprintf(buf, sizeof(buf), "< SLOT %d >", sCfg.slot + 1);
+                    ui_text(fb, p, mx + mw - 62, iy, buf, 0xFFE0);
+                } else if (i == 3) {
                     ui_text(fb, p, mx + mw - 62, iy, x_names[sCfg.x_action], 0xFFE0);
                 } else if (i == 4) {
                     ui_text(fb, p, mx + mw - 28, iy, sCfg.enabled ? "ON" : "OFF", 0xFFE0);
@@ -735,7 +836,19 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 ui_text(fb, p, mx + 100, iy, buf, 0xAD55);
             }
         }
-        ui_text(fb, p, 4, RB_FB_H - 10, "Y/B:CLOSE  A:SELECT/CHANGE", 0xAD55);
+        ui_text(fb, p, 4, RB_FB_H - 10, "Y/B:CLOSE  A:OK  < >:SLOT/OPTION", 0xAD55);
+    }
+
+    if (sToastTicks > 0) {
+        int tw = (int)strlen(sToastMsg) * 6 + 12;
+        int tx = (RB_FB_W - tw) / 2;
+        int ty = 8;
+        rect(fb, p, tx - 1, ty - 1, tw + 2, 14, 0x7BEF);
+        for (int r = ty; r < ty + 12; r++)
+            for (int c = tx; c < tx + tw; c++)
+                fb[r * p + c] = 0x1084;
+        ui_text(fb, p, tx + 6, ty + 2, sToastMsg, 0xFFFF);
+        if (sState == RB_GAME) sToastTicks--;
     }
     (void)core;
 }
@@ -745,4 +858,6 @@ int rb_test_pack_loaded(void) { return sPack.loaded; }
 int rb_test_state(void) { return (int)sState; }
 int rb_test_dialogue_page(void) { return (int)sDlgPage; }
 int rb_test_glyphs(void) { return (int)sDlgGlyphCount; }
+int rb_test_slot(void) { return sCfg.slot; }
+const char* rb_test_toast(void) { return sToastTicks > 0 ? sToastMsg : ""; }
 #endif
