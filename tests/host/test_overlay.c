@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
     memset(fb, 0x11, sizeof(fb));
     retrobilingual_draw(&core, fb, 240, 160, 240 * 2);
     int ink = 0;
-    for (int y = 160 - 34; y < 160; y++)
+    for (int y = 0; y < 160; y++)
         for (int x = 0; x < 240; x++)
             if (fb[y * 240 + x] == 0xFFFF) ink++;
     assert(ink > 50);
@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
     memset(fb, 0x11, sizeof(fb));
     retrobilingual_draw(&core, fb, 240, 160, 240 * 2);
     ink = 0;
-    for (int y = 160 - 34; y < 160; y++)
+    for (int y = 0; y < 160; y++)
         for (int x = 0; x < 240; x++)
             if (fb[y * 240 + x] == 0xFFFF) ink++;
     assert(ink > 50);

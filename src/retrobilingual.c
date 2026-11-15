@@ -399,14 +399,24 @@ static void glyph(pixel_t* fb, unsigned p, int x, int y, uint16_t index) {
     }
 }
 
-static void draw_sequence(pixel_t* fb, unsigned p, int x, int y, int max_w,
+static void draw_sequence(pixel_t* fb, unsigned p, int x, int y, int max_w, int max_h,
                           uint32_t start, uint16_t count) {
     int cx = x, cy = y;
+    int line_h = sPack.glyph_h + 2;
     for (uint16_t i = 0; i < count; i++) {
         uint16_t idx = sPack.indices[start + i];
-        if (idx == 0xFFFF) { cx = x; cy += sPack.glyph_h; continue; }
-        if (cx + sPack.glyph_w > x + max_w) { cx = x; cy += sPack.glyph_h; }
-        if (cy + sPack.glyph_h > RB_FB_H) break;
+        if (idx == 0xFFFF) {
+            if (cx != x) {
+                cx = x;
+                cy += line_h;
+            }
+            continue;
+        }
+        if (cx + sPack.glyph_w > x + max_w) {
+            cx = x;
+            cy += line_h;
+        }
+        if (cy + sPack.glyph_h > y + max_h || cy + sPack.glyph_h > RB_FB_H) break;
         glyph(fb, p, cx, cy, idx);
         cx += sPack.glyph_w;
     }
@@ -645,23 +655,52 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
     unsigned p = PITCH_PIXELS(pitch);
 
     if (sState == RB_SUBTITLE) {
-        int by = RB_FB_H - 34, bh = 34;
-        for (int r = by; r < by + bh; r++)
+        /* Dim background */
+        for (int r = 0; r < RB_FB_H; r++)
             for (int c = 0; c < RB_FB_W; c++)
                 fb[r * p + c] = shade(fb[r * p + c]);
-        for (int c = 0; c < RB_FB_W; c++) fb[by * p + c] = 0x7BEF;
+
+        /* Centered floating modal window */
+        int pw = 216, ph = 116;
+        int px = (RB_FB_W - pw) / 2;
+        int py = (RB_FB_H - ph) / 2;
+
+        rect(fb, p, px - 2, py - 2, pw + 4, ph + 4, 0x7BEF);
+        for (int r = py; r < py + ph; r++)
+            for (int c = px; c < px + pw; c++)
+                fb[r * p + c] = 0x1084;
+        rect(fb, p, px, py, pw, ph, 0x2965);
+
+        /* Title bar */
+        for (int r = py; r < py + 16; r++)
+            for (int c = px; c < px + pw; c++)
+                fb[r * p + c] = 0x2128;
+        for (int c = px; c < px + pw; c++) fb[(py + 16) * p + c] = 0x4A69;
+
+        ui_text(fb, p, px + 8, py + 4, "TRANSLATION", 0xFFFF);
+        ui_text(fb, p, px + pw - 56, py + 4, "X/B:CLOSE", 0xCE79);
+
+        /* Content area */
+        int bx = px + 8, by = py + 22;
+        int bw = pw - 16, bh = ph - 40;
+
         if (sDlgGlyphCount) {
-            draw_sequence(fb, p, 4, by + 4, RB_FB_W - 8, sDlgGlyphStart, sDlgGlyphCount);
+            draw_sequence(fb, p, bx, by, bw, bh, sDlgGlyphStart, sDlgGlyphCount);
         } else {
             RBEntry* notice = NULL;
             if (rb_find_entry(0xFFFF, 0, &notice)) {
-                draw_sequence(fb, p, 8, by + 10, RB_FB_W - 64,
-                              notice->first_glyph, notice->glyph_count);
+                int nw = (int)notice->glyph_count * sPack.glyph_w;
+                int nx = px + (pw - nw) / 2;
+                int ny = py + (ph - sPack.glyph_h) / 2;
+                draw_sequence(fb, p, nx, ny, bw, bh, notice->first_glyph, notice->glyph_count);
             } else {
-                ui_text(fb, p, 8, by + 12, "NO TRANSLATION", 0xFFFF);
+                ui_text(fb, p, px + (pw - 14 * 6) / 2, py + (ph - 8) / 2, "NO TRANSLATION", 0xFFFF);
             }
         }
-        ui_text(fb, p, RB_FB_W - 54, by + 12, "X/B:BACK", 0xAD55);
+
+        /* Footer */
+        for (int c = px; c < px + pw; c++) fb[(py + ph - 16) * p + c] = 0x2965;
+        ui_text(fb, p, px + (pw - 22 * 6) / 2, py + ph - 11, "PRESS X OR B TO RESUME", 0xAD55);
     } else if (sState == RB_MENU || sState == RB_BINDINGS) {
         int mw = 180, mh = 5 * 16 + 16;
         int mx = (RB_FB_W - mw) / 2, my = 14;

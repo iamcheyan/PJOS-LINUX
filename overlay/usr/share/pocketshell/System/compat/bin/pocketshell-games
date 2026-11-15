@@ -125,7 +125,7 @@ scan_series_root() {
             if (vid != "" && vtitle != "" && vrom != "" && vrom !~ /^\// && vrom !~ /\.\./ && vrom ~ /\.(gba|gb|gbc)$/) {
                 p=dir "/" vrom
                 if (n++) variants=variants ","
-                variants=variants "{\\\"id\\\":\\\"" esc(vid) "\\\",\\\"title\\\":\\\"" esc(vtitle) "\\\",\\\"path\\\":\\\"" esc(p) "\\\",\\\"cover\\\":\\\"" esc((vcover != "" ? dir "/" vcover : "")) "\\\"}"
+                variants=variants "{\"id\":\"" esc(vid) "\",\"title\":\"" esc(vtitle) "\",\"path\":\"" esc(p) "\",\"cover\":\"" esc((vcover != "" ? dir "/" vcover : "")) "\"}"
             }
             vid=vtitle=vrom=vcover=""
         }
@@ -146,8 +146,10 @@ scan_series_root() {
             x=str("cover"); if (x != "") cover=x
         }
         END {
-            if (schema == "pjos.game-series/v1" && sid ~ /^[a-z0-9][a-z0-9-]*$/ && length(sid) <= 64 && title != "" && n > 0)
-                printf "1\\tgames\\tseries\\t%s\\t%s\\t0\\tseries\\t%s\\t[%s]\\n", sid, title, (cover != "" ? dir "/" cover : ""), variants
+            if (schema == "pjos.game-series/v1" && sid ~ /^[a-z0-9][a-z0-9-]*$/ && length(sid) <= 64 && title != "" && n > 0) {
+                OFS="\t"
+                print 1, "games", "series", sid, title, 0, "series", (cover != "" ? dir "/" cover : ""), "[" variants "]"
+            }
         }' "$manifest" >> "$ROWS"
     done
 }

@@ -45,8 +45,8 @@ def decode_text(raw_text: str, mapping: dict[str, str]) -> tuple[str, list[str]]
 
     # Standardize player name and control codes
     decoded = re.sub(r'\[C06:00\]|\[Player\]', '{player}', decoded)
-    decoded = re.sub(r'\[C02:[0-9A-Fa-f]{2}\]', '', decoded) # color changes
-    decoded = re.sub(r'\[C03:[0-9A-Fa-f]{4}\]', '', decoded) # sound effects
+    decoded = re.sub(r'\[C[0-9A-Fa-f:]+\]', '', decoded) # all control codes
+    decoded = re.sub(r'\[WAIT\]', '', decoded)
 
     return decoded, missing
 

@@ -54,6 +54,45 @@ class GameCoverScanTest(unittest.TestCase):
             output = subprocess.check_output(["sh", "-c", 'SD="$1"\n' + selection + 'printf "%s" "$scanner"', "sh", temp], text=True)
             self.assertEqual(output, str(card))
 
+    def test_scans_data_defined_series_as_valid_json(self):
+        script = Path(__file__).resolve().parents[1] / "overlay/usr/share/pocketshell/System/compat/bin/pocketshell-games"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "games"
+            series = root / "series" / "example-series"
+            rom = series / "gba" / "Example.gba"
+            cover = series / "cover.png"
+            rom.parent.mkdir(parents=True)
+            rom.write_bytes(b"rom")
+            cover.write_bytes(b"cover")
+            (series / "series.json").write_text("""{
+  "schema": "pjos.game-series/v1",
+  "id": "example-series",
+  "title": "Example series",
+  "cover": "cover.png",
+  "variants": [
+    {
+      "id": "en",
+      "title": "English",
+      "rom": "gba/Example.gba"
+    }
+  ]
+}
+""")
+            state = Path(temp) / "state"
+            env = {**os.environ, "POCKETSHELL_TEST_GAMES_ROOT": str(root), "POCKETSHELL_GAMES_STATE": str(state)}
+            subprocess.run(["sh", str(script), "scan"], env=env, check=True, capture_output=True)
+            library = json.loads((state / "library.json").read_text())
+            series_item = next(
+                item
+                for group in library["sections"]["games"]
+                for item in group["items"]
+                if item.get("kind") == "series"
+            )
+            self.assertEqual(series_item["id"], "example-series")
+            self.assertEqual(series_item["variants"], [{
+                "id": "en", "title": "English", "path": str(rom), "cover": ""
+            }])
+
 
 if __name__ == "__main__":
     unittest.main()

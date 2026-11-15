@@ -107,6 +107,19 @@ def build_pack(entries, atlas, index, glyph_size, rom_sha256: bytes) -> bytes:
     return bytes(out)
 
 
+def sanitize_text(text: str) -> str:
+    import re
+    # Strip any bracketed control codes like [C...], [G...], [WAIT]
+    t = re.sub(r"\[[^\]]+\]", "", text)
+    # Standardize player name
+    t = re.sub(r"\{player\}", "林克", t)
+    # Replace bytecode end-of-sentence markers
+    t = t.replace("+", "。").replace("@", "？").replace("······", "……")
+    # Normalize newlines
+    t = re.sub(r"\n+", "\n", t)
+    return t.strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build retrobilingual.pack")
     parser.add_argument("--database", required=True)
@@ -126,7 +139,9 @@ def main() -> int:
     for sid, page in approved:
         text = texts.get((sid, page))
         if text:
-            selected.append((sid, page, text))
+            cleaned = sanitize_text(text)
+            if cleaned:
+                selected.append((sid, page, cleaned))
     if not selected:
         raise SystemExit("no approved mapping has Unicode text; refusing to build an empty pack")
     notice = "暂无翻译"
