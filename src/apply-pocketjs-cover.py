@@ -25,17 +25,8 @@ fn launcher_cover(path: &str, variant: &str) -> String {
     if width == 0 || height == 0 { return String::new(); }
     let fitted = decoded.resize_to_fill(size.0, size.1, image::imageops::FilterType::Triangle);
     let result = if variant == "background" { fitted.blur(4.0).resize_exact(128, 128, image::imageops::FilterType::Triangle) } else { fitted };
-    let mut pixels = result.to_rgba8();
-    if variant == "cover" {
-        let radius: i32 = 20;
-        for y in 0..128_i32 {
-            for x in 0..128_i32 {
-                let dx = if x < radius { radius - 1 - x } else if x >= 128 - radius { x - (128 - radius) } else { 0 };
-                let dy = if y < radius { radius - 1 - y } else if y >= 128 - radius { y - (128 - radius) } else { 0 };
-                if dx * dx + dy * dy >= radius * radius { pixels.get_pixel_mut(x as u32, y as u32).0[3] = 0; }
-            }
-        }
-    }
+    // Covers keep their own artwork edges: no baked corner mask.
+    let pixels = result.to_rgba8();
     base64::engine::general_purpose::STANDARD.encode(pixels.as_raw())
 }
 

@@ -7,6 +7,9 @@ FOREGROUND=/run/baseos-foreground-app
 FOREGROUND_APP=
 rm -f "$FOREGROUND"
 SD=/mnt/sdcard
+SETTINGS_CONF=${BOOT_RESUME_CONF:-/storage/.config/pocketjs/ui-settings.conf}
+APP_DIR=${BOOT_RESUME_APPS:-$SD/apps}
+STORAGE_PREFIX=${BOOT_RESUME_STORAGE:-/storage}
 RUNTIME="$SD/System/pocketjs/bin/pocket-linux-kms"
 LAUNCHER_RUNTIME="$SD/System/pocketjs/bin/launcher/pocket-linux-kms"
 # frontend-session keeps the launcher path paired with the read-only SYSTEM
@@ -25,6 +28,47 @@ log() {
     timestamp=$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || printf unknown-time)
     printf '%s %s\n' "$timestamp" "$*" >> "$LOG" 2>/dev/null || :
 }
+
+# --- boot resume selection (tests/test-boot-resume.py) ---
+boot_resume_enabled() {
+    [ -r "$SETTINGS_CONF" ] || return 1
+    [ "$(sed -n 's/^bootResume=//p' "$SETTINGS_CONF" | tail -n 1 | tr -d ' \r')" = on ]
+}
+
+resume_target() {
+    [ -r "$RESUME" ] || return 1
+    rkind=$(sed -n 's/^kind=//p' "$RESUME" | head -n 1 | tr -d '\r')
+    rtarget=$(sed -n 's/^target=//p' "$RESUME" | head -n 1 | tr -d '\r')
+    case "$rkind" in
+        rom)
+            case "$rtarget" in
+                "$STORAGE_PREFIX"/*|/mnt/sdcard/*) ;;
+                *) return 1 ;;
+            esac
+            case "$rtarget" in
+                *"/../"*|*/..|*"/./"*|*/.) return 1 ;;
+            esac
+            case "$rtarget" in
+                *.[gG][bB][aA]|*.[gG][bB]|*.[gG][bB][cC]) ;;
+                *) return 1 ;;
+            esac
+            [ -f "$rtarget" ] || return 1
+            printf '%s\t%s\n' rom "$rtarget"
+            return 0
+            ;;
+        app)
+            case "$rtarget" in
+                ''|*[!a-zA-Z0-9._-]*) return 1 ;;
+            esac
+            [ "${#rtarget}" -le 64 ] || return 1
+            [ -f "$APP_DIR/$rtarget.pocket" ] || return 1
+            printf '%s\t%s\n' app "$rtarget"
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+# --- end boot resume selection ---
 
 read_failures() {
     failures=0
@@ -119,19 +163,21 @@ RESUME="$SD/System/pocketjs/../.config/pocketjs/resume.state"
 RESUME="/storage/.config/pocketjs/resume.state"
 CLEAR_ACTIVE=0
 ROM_PLAY=
-# One-shot resume after intentional auto power-off/save-state.
+# One-shot resume after intentional auto power-off/save-state, gated by bootResume.
 if [ ! -r "$ACTIVE" ] && [ -r "$RESUME" ]; then
-    rkind=$(sed -n 's/^kind=//p' "$RESUME" | head -1)
-    rtarget=$(sed -n 's/^target=//p' "$RESUME" | head -1)
-    if [ "$rkind" = "rom" ] && [ -n "$rtarget" ] && [ -f "$rtarget" ]; then
-        printf '%s
-' "$rtarget" > "$ACTIVE" 2>/dev/null && log "resume: ROM $rtarget"
-        rm -f "$RESUME" 2>/dev/null || :
-    elif [ "$rkind" = "app" ] && [ -n "$rtarget" ]; then
-        printf '%s
-' "$rtarget" > "$ACTIVE" 2>/dev/null && log "resume: app $rtarget"
-        rm -f "$RESUME" 2>/dev/null || :
+    if boot_resume_enabled; then
+        if resume_line=$(resume_target); then
+            rkind=$(printf '%s\n' "$resume_line" | cut -f1)
+            rtarget=$(printf '%s\n' "$resume_line" | cut -f2)
+            printf '%s\n' "$rtarget" > "$ACTIVE" 2>/dev/null \
+                && log "resume: $rkind $rtarget"
+            rm -f "$RESUME" 2>/dev/null || :
+        else
+            log "resume marker rejected"
+            rm -f "$RESUME" 2>/dev/null || :
+        fi
     else
+        log "bootResume off; staying in the launcher"
         rm -f "$RESUME" 2>/dev/null || :
     fi
 fi

@@ -125,9 +125,9 @@ scan_series_root() {
             if (vid != "" && vtitle != "" && vrom != "" && vrom !~ /^\// && vrom !~ /\.\./ && vrom ~ /\.(gba|gb|gbc)$/) {
                 p=dir "/" vrom
                 if (n++) variants=variants ","
-                variants=variants "{\"id\":\"" esc(vid) "\",\"title\":\"" esc(vtitle) "\",\"path\":\"" esc(p) "\",\"cover\":\"" esc((vcover != "" ? dir "/" vcover : "")) "\"}"
+                variants=variants "{\"id\":\"" esc(vid) "\",\"title\":\"" esc(vtitle) "\",\"path\":\"" esc(p) "\",\"cover\":\"" esc((vcover != "" ? dir "/" vcover : "")) "\"" (vdefault ? ",\"default\":true" : "") "}"
             }
-            vid=vtitle=vrom=vcover=""
+            vid=vtitle=vrom=vcover=""; vdefault=0
         }
         /"variants"[ \\t]*:/ { invars=1; next }
         invars && /\{/ { active=1; next }
@@ -136,6 +136,7 @@ scan_series_root() {
             x=str("title"); if (x != "") vtitle=x
             x=str("rom"); if (x != "") vrom=x
             x=str("cover"); if (x != "") vcover=x
+            if ($0 ~ /"default"[ \t]*:[ \t]*true/) vdefault=1
             if ($0 ~ /}/) { flush(); active=0 }
             next
         }

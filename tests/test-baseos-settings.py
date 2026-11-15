@@ -90,4 +90,17 @@ class Settings(unittest.TestCase):
         self.assertEqual(self.run_setting('animations').stdout.strip(), 'on')
         self.assertEqual(self.run_setting('fontSize').stdout.strip(), 'huge')
         self.assertEqual(self.run_setting('themeColor').stdout.strip(), 'pink')
+    def test_boot_resume_and_generic_series_variant_persist(self):
+        self.assertEqual(self.run_setting('bootResume').stdout.strip(), 'off')
+        self.assertEqual(self.run_setting('bootResume', 'on').stdout.strip(), 'on')
+        self.assertEqual(self.run_setting('bootResume').stdout.strip(), 'on')
+        key = 'series.example-series.lastVariant'
+        self.assertEqual(self.run_setting(key).stdout.strip(), '')
+        self.assertEqual(self.run_setting(key, 'ja').stdout.strip(), 'ja')
+        self.assertEqual(self.run_setting(key).stdout.strip(), 'ja')
+        self.assertIn('bootResume=on', (self.root/'storage/.config/pocketjs/ui-settings.conf').read_text())
+        self.assertIn(f'{key}=ja', (self.root/'storage/.config/pocketjs/ui-settings.conf').read_text())
+    def test_boot_resume_rejects_invalid_value_and_series_key(self):
+        self.assertNotEqual(self.run_setting('bootResume', 'maybe').returncode, 0)
+        self.assertNotEqual(self.run_setting('series.Bad-ID.lastVariant', 'ja').returncode, 0)
 if __name__ == '__main__': unittest.main()

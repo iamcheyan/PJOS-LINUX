@@ -73,7 +73,8 @@ class GameCoverScanTest(unittest.TestCase):
     {
       "id": "en",
       "title": "English",
-      "rom": "gba/Example.gba"
+      "rom": "gba/Example.gba",
+      "default": true
     }
   ]
 }
@@ -90,7 +91,7 @@ class GameCoverScanTest(unittest.TestCase):
             )
             self.assertEqual(series_item["id"], "example-series")
             self.assertEqual(series_item["variants"], [{
-                "id": "en", "title": "English", "path": str(rom), "cover": ""
+                "id": "en", "title": "English", "path": str(rom), "cover": "", "default": True
             }])
 
 
