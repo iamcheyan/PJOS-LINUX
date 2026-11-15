@@ -34,6 +34,28 @@
 - As of this redesign, QEMU has run 720 × 480 ticks with matching GNU and musl runtimes and the fractional pixel mapping test passed. Desktop simulation displayed the carousel, cover-derived background and a background change between two fixture covers; `Space` then `x` added a fixture game, and the favorites category and removal were verified against an isolated favorites file. Shoulder-key navigation also displayed the settings and system pages with the shared status bar and footer. Actual device deployment, full image build, 1.5× performance, all hardware input paths and full visual parity are still pending. Rebuild the launcher after source changes, and do not treat an old `dist` artifact or desktop screenshot as proof of the latest code.
 - The 2026-11-13 current musl runtime at `work/pocketjs-runtime/pocket-linux-kms` was built with native cross compilation, has SHA-256 `6065a8fa2e64ae5afe12ddf488baeb57f2c9ea65df9849f290d1704eb5435681`, includes both card-player path markers, and completed 30 720 × 480 QEMU ticks with package `bfd8cbde70a8bb80cdce829b2bc51ecaff9df474f6638b36442e9ce3a5d3a393`. An obsolete QEMU-container build `a84006743445` was stopped so it cannot overwrite this binary; preceding binaries are retained with `pre-player-fix` and `pre-frame-cache` suffixes. To rebuild the current artifact, use `build-pocketjs-runtime-local.sh` with `PJOS_RUST_TARGET=aarch64-unknown-linux-musl` and `PJOS_MUSL_SYSROOT=$PWD/work/musl-cross`; this build-only sysroot contains Debian's AArch64 musl headers/libraries with specs paths pointing into `work/musl-cross`. `tools/aarch64-musl-cross.sh` requires that environment variable. Hardware admission and behavior remain unverified.
 
+## RetroBilingual in-frame translation and quick HUD development
+
+- The canonical upstream source is the separate checkout `~/development/retrobilingual` (published on GitHub under the retrobilingual repository). This repository supplies the embedded BaseOS integration, ROM launch scripts and device deployment wrappers.
+- Working workflow across repositories:
+  - Primary code edits should happen in `~/development/retrobilingual` (`core/retrobilingual.c`, `core/retrobilingual.h`, `core/adapters/`, `tools/pack.py`).
+  - Local tests on host (no device needed): `cd ~/development/retrobilingual && make test` (or `python3 tests/test_host.py`).
+  - One-step build and deployment from upstream: `cd ~/development/retrobilingual && make deploy` automatically syncs code to `~/development/PJOS-LINUX`, builds the AArch64 libretro core in Docker, and deploys it to the connected RG34XX via ADB.
+  - In `PJOS-LINUX`, `tools/build-retrobilingual-mgba-h700.sh` automatically probes `PJOS_RETROBILINGUAL_DIR` (defaults to `$HOME/development/retrobilingual`); if found, it consumes `core/` as the single source of truth and updates tree copies automatically.
+- Generic architecture & Game Adapters:
+  - RetroBilingual is a generic emulator enhancement engine: the 5-slot save state manager, on-screen Toast alerts, floating HUD layout calculation, dynamic positioning (`AUTO`/`TOP`/`CENTER`/`BOTTOM`), and binary pack search are 100% game-agnostic.
+  - Game-specific RAM reading is decoupled into `core/adapters/` (e.g. `core/adapters/tmc.c` for *The Legend of Zelda: The Minish Cap*). Any new GBA game can be supported by discovering the message ID in EWRAM and adding an adapter matching `RBAdapter`.
+- Dialogue pagination and newline formatting:
+  - Standard GBA dialogue windows display up to 2 lines per page. A single newline `\n` is a line break within the same dialogue box; `+` (bytecode `[WAIT]`) or `\n\n` represents a page advance. `sanitize_text` in `tools/pack.py` converts literal `\\n` strings into actual `\n` characters before emitting `LINE_BREAK` (`0xFFFF`) tokens.
+  - Active runtime pack is deployed to `/storage/.config/pocketjs/retrobilingual.pack`.
+- Physical button mappings and DTS alignment on RG34XX:
+  - Electrical wiring: physical left button (printed **Y**) sends `evdev 306` (`BTN_WEST` $\to$ `js 2`); physical top button (printed **X**) sends `evdev 307` (`BTN_NORTH` $\to$ `js 3`).
+  - Vendor DTS nodes (`keyX`/`keyY`) used Xbox layout conventions (top=Y, left=X). Do NOT map based on DTS node names.
+  - `overlay/usr/share/pocketshell/System/compat/share/retroarch/driver.cfg` MUST keep `input_player1_y_btn = "2"` (Quick Menu) and `input_player1_x_btn = "3"` (Translate HUD). Physical Y opens the in-game menu; physical X triggers immediate translation.
+- Runtime settings and state files:
+  - Settings persist at `/storage/.config/pocketjs/retrobilingual.conf` (`x_action`, `slot`, `hud_pos`).
+  - 5-slot save states are saved to `/storage/.config/pocketjs/retrobilingual-slot[1-5].state`. Populated slots display in Green (`0x07E0`), empty slots display in Gray (`0x7BEF`).
+
 ## RG34XX test device
 
 - Device: BaseOS RG34XX, hostname `rg34xx`.
