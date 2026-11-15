@@ -40,8 +40,17 @@ def main(path):
     text = path.read_text()
     if 'fn baseos_setting(' in text:
         old_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb"]'
-        new_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor"]'
-        text = text.replace(old_keys + '.contains(key) => baseos_setting', new_keys + '.contains(key) => baseos_setting')
+        previous_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor"]'
+        new_keys = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor", "zeldaLastRom"]'
+        replaced = 0
+        for keys in (old_keys, previous_keys):
+            marker = keys + '.contains(key) => baseos_setting'
+            count = text.count(marker)
+            if count:
+                text = text.replace(marker, new_keys + '.contains(key) => baseos_setting')
+                replaced += count
+        if not replaced and text.count(new_keys + '.contains(key) => baseos_setting') < 2:
+            raise SystemExit('settings: existing dispatcher arms missing or changed')
         path.write_text(text)
         print('settings: already applied')
         return

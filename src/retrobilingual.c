@@ -62,6 +62,7 @@
 
 typedef enum { RB_GAME, RB_MENU, RB_SUBTITLE, RB_BINDINGS } RBState;
 typedef enum { ACT_SAVE, ACT_LOAD, ACT_SUBTITLE, ACT_COUNT } RBAction;
+typedef enum { X_ACT_SUBTITLE = 0, X_ACT_SAVE = 1, X_ACT_LOAD = 2, X_ACT_COUNT } XAction;
 
 typedef struct {
     uint32_t codepoint;
@@ -98,10 +99,12 @@ static int sBindingCount;
 
 typedef struct {
     int enabled;
+    int x_action;              /* 0: SUBTITLE, 1: SAVE, 2: LOAD */
     int chord[ACT_COUNT][2];   /* RetroPad ids, -1 = unset */
 } RBConfig;
 static RBConfig sCfg = {
     .enabled = 1,
+    .x_action = X_ACT_SUBTITLE,
     .chord = {
         { -1, -1 },            /* save */
         { -1, -1 },            /* load */
@@ -111,6 +114,7 @@ static RBConfig sCfg = {
 
 static uint32_t sPrevKeys;
 static int sPrevX;
+static int sPrevY;
 static int sPrevAction[ACT_COUNT];
 
 static struct mCore* sCore;
@@ -209,6 +213,9 @@ static void rb_config_load(void) {
     while (fgets(line, sizeof(line), f)) {
         int a = -1, b = -1, v = -1;
         if (sscanf(line, "subtitle_enabled=%d", &v) == 1) sCfg.enabled = v != 0;
+        else if (sscanf(line, "x_action=%d", &v) == 1) {
+            if (v >= 0 && v < X_ACT_COUNT) sCfg.x_action = v;
+        }
         else if (sscanf(line, "bind_save=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SAVE][0]=a; sCfg.chord[ACT_SAVE][1]=b; }
         else if (sscanf(line, "bind_load=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_LOAD][0]=a; sCfg.chord[ACT_LOAD][1]=b; }
         else if (sscanf(line, "bind_subtitle=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SUBTITLE][0]=a; sCfg.chord[ACT_SUBTITLE][1]=b; }
@@ -221,6 +228,7 @@ static void rb_config_save(void) {
     FILE* f = fopen(sConfigPath, "w");
     if (!f) return;
     fprintf(f, "subtitle_enabled=%d\n", sCfg.enabled ? 1 : 0);
+    fprintf(f, "x_action=%d\n", sCfg.x_action);
     for (int i = 0; i < ACT_COUNT; i++) {
         const char* key = i == ACT_SAVE ? "bind_save" : i == ACT_LOAD ? "bind_load" : "bind_subtitle";
         fprintf(f, "%s=%d,%d\n", key, sCfg.chord[i][0], sCfg.chord[i][1]);
@@ -501,6 +509,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         rb_pack_load();
     }
 
+    int y_pressed = input && input(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y);
+    int y_just = y_pressed && !sPrevY;
     int x_pressed = input && input(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X);
     int x_just = x_pressed && !sPrevX;
     uint16_t prev = (uint16_t)sPrevKeys;
@@ -514,7 +524,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_DOWN,
             RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_RIGHT,
         };
-        if (x_just) { sState = RB_MENU; *keys = 0; goto done; }
+        if (y_just || x_just || edge(now, prev, RB_KEY_B)) { sState = RB_MENU; *keys = 0; goto done; }
         if (!sBindingCapture) {
             if (edge(now, prev, RB_KEY_DOWN)) sBindingCursor = (sBindingCursor + 1) % ACT_COUNT;
             if (edge(now, prev, RB_KEY_UP)) sBindingCursor = (sBindingCursor + ACT_COUNT - 1) % ACT_COUNT;
@@ -545,7 +555,14 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     if (sState == RB_MENU) {
         if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 5;
         if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 4) % 5;
-        if (x_just || edge(now, prev, RB_KEY_B)) {
+        if (sMenuCursor == 3) {
+            if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); }
+            if (edge(now, prev, RB_KEY_LEFT)) { sCfg.x_action = (sCfg.x_action + X_ACT_COUNT - 1) % X_ACT_COUNT; rb_config_save(); }
+        } else if (sMenuCursor == 4) {
+            if (edge(now, prev, RB_KEY_RIGHT) || edge(now, prev, RB_KEY_LEFT)) { sCfg.enabled = !sCfg.enabled; rb_config_save(); }
+        }
+
+        if (y_just || edge(now, prev, RB_KEY_B)) {
             rb_resume(core);
             sState = RB_GAME;
         } else if (edge(now, prev, RB_KEY_A)) {
@@ -553,8 +570,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             case 0: rb_resume(core); sState = RB_GAME; break;
             case 1: rb_quick_save(core); rb_resume(core); sState = RB_GAME; break;
             case 2: rb_quick_load(core); sState = RB_GAME; break;
-            case 3: sCfg.enabled = !sCfg.enabled; rb_config_save(); break;
-            case 4: sState = RB_BINDINGS; sBindingCursor = 0; sBindingCapture = 0; break;
+            case 3: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
+            case 4: sCfg.enabled = !sCfg.enabled; rb_config_save(); break;
             default: break;
             }
         }
@@ -563,7 +580,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     }
 
     if (sState == RB_SUBTITLE) {
-        if (x_just || edge(now, prev, RB_KEY_B) || chord_down((uint16_t)now, sCfg.chord[ACT_SUBTITLE])) {
+        if (x_just || y_just || edge(now, prev, RB_KEY_B) || chord_down((uint16_t)now, sCfg.chord[ACT_SUBTITLE])) {
             rb_resume(core);
             sState = RB_GAME;
         }
@@ -572,10 +589,24 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     }
 
     /* RB_GAME */
-    if (x_just) {
+    if (y_just) {
         rb_pause(core);
         sState = RB_MENU;
         sMenuCursor = 0;
+    } else if (x_just) {
+        if (sCfg.x_action == X_ACT_SUBTITLE) {
+            if (sCfg.enabled) {
+                rb_dialogue_read(gba);
+                if (sDlgActive) {
+                    rb_pause(core);
+                    sState = RB_SUBTITLE;
+                }
+            }
+        } else if (sCfg.x_action == X_ACT_SAVE) {
+            rb_quick_save(core);
+        } else if (sCfg.x_action == X_ACT_LOAD) {
+            rb_quick_load(core);
+        }
     } else {
         for (int a = 0; a < ACT_COUNT; a++) {
             int c = chord_down((uint16_t)now, sCfg.chord[a]);
@@ -600,6 +631,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
 done:
     sPrevKeys = now;
     sPrevX = x_pressed;
+    sPrevY = y_pressed;
 }
 
 int retrobilingual_should_run_frame(struct mCore* core) {
@@ -631,7 +663,7 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 ui_text(fb, p, 8, by + 12, "NO TRANSLATION", 0xFFFF);
             }
         }
-        ui_text(fb, p, RB_FB_W - 50, by + 12, "X:CLOSE", 0xAD55);
+        ui_text(fb, p, RB_FB_W - 54, by + 12, "X/B:BACK", 0xAD55);
     } else if (sState == RB_MENU || sState == RB_BINDINGS) {
         int mw = 180, mh = 5 * 16 + 16;
         int mx = (RB_FB_W - mw) / 2, my = 14;
@@ -639,13 +671,20 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
         rect(fb, p, mx, my, mw, mh, 0x0000);
         if (sState == RB_MENU) {
             static const char* labels[5] = {
-                "RESUME", "QUICK SAVE", "QUICK LOAD", "SUBTITLES", "HOTKEYS"
+                "RESUME", "QUICK SAVE", "QUICK LOAD", "X BUTTON", "SUBTITLES"
+            };
+            static const char* x_names[X_ACT_COUNT] = {
+                "TRANSLATE", "SAVE", "LOAD"
             };
             for (int i = 0; i < 5; i++) {
                 int iy = my + 8 + i * 16;
                 if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 12, 0x2965);
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
-                if (i == 3) ui_text(fb, p, mx + mw - 28, iy, sCfg.enabled ? "ON" : "OFF", 0xFFE0);
+                if (i == 3) {
+                    ui_text(fb, p, mx + mw - 62, iy, x_names[sCfg.x_action], 0xFFE0);
+                } else if (i == 4) {
+                    ui_text(fb, p, mx + mw - 28, iy, sCfg.enabled ? "ON" : "OFF", 0xFFE0);
+                }
             }
         } else {
             ui_text(fb, p, mx + 8, my + 8, "BIND ACTION (A=CAPTURE)", 0xFFFF);
@@ -659,7 +698,7 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 ui_text(fb, p, mx + 100, iy, buf, 0xAD55);
             }
         }
-        ui_text(fb, p, 4, RB_FB_H - 10, "X:CLOSE  A:SELECT  B:BACK", 0xAD55);
+        ui_text(fb, p, 4, RB_FB_H - 10, "Y/B:CLOSE  A:SELECT/CHANGE", 0xAD55);
     }
     (void)core;
 }

@@ -17,9 +17,12 @@ int rb_test_glyphs(void);
 enum { RB_STATE_GAME = 0, RB_STATE_MENU = 1, RB_STATE_SUBTITLE = 2 };
 
 static int x_down;
+static int y_down;
 static int16_t input_cb(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)port; (void)device; (void)index;
-    return id == RETRO_DEVICE_ID_JOYPAD_X ? (int16_t)x_down : 0;
+    if (id == RETRO_DEVICE_ID_JOYPAD_X) return (int16_t)x_down;
+    if (id == RETRO_DEVICE_ID_JOYPAD_Y) return (int16_t)y_down;
+    return 0;
 }
 static size_t state_size(struct mCore* core) { (void)core; return 64; }
 static int state_save(struct mCore* core, void* buf) { (void)core; memset(buf, 0x5A, 64); return 1; }
@@ -101,8 +104,8 @@ int main(int argc, char** argv) {
     assert(rb_test_state() == RB_STATE_GAME);
     assert(retrobilingual_should_run_frame(&core) == 1);
 
-    /* X opens the menu and pauses; X closes it. */
-    x_down = 1; keys = 0;
+    /* Y opens the menu and pauses; Y closes it. */
+    y_down = 1; keys = 0;
     retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_state() == RB_STATE_MENU);
     assert(retrobilingual_should_run_frame(&core) == 0);
@@ -113,10 +116,83 @@ int main(int argc, char** argv) {
         for (int x = 0; x < 240; x++)
             if (fb[y * 240 + x] == 0xFFFF) ink++;
     assert(ink > 20);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    assert(retrobilingual_should_run_frame(&core) == 1);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* X button triggers subtitle overlay directly and pauses; X closes it. */
+    x_down = 1; keys = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_SUBTITLE);
+    assert(retrobilingual_should_run_frame(&core) == 0);
+    memset(fb, 0x11, sizeof(fb));
+    retrobilingual_draw(&core, fb, 240, 160, 240 * 2);
+    ink = 0;
+    for (int y = 160 - 34; y < 160; y++)
+        for (int x = 0; x < 240; x++)
+            if (fb[y * 240 + x] == 0xFFFF) ink++;
+    assert(ink > 50);
     x_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
     x_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_state() == RB_STATE_GAME);
     assert(retrobilingual_should_run_frame(&core) == 1);
+    x_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Open menu with Y, change X button setting, and verify behavior. */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_MENU);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Move down 3 times to 'X BUTTON' */
+    for (int i = 0; i < 3; i++) {
+        keys = (1u << 7); /* DOWN */
+        retrobilingual_process_input(&core, &keys, input_cb);
+        keys = 0;
+        retrobilingual_process_input(&core, &keys, input_cb);
+    }
+    /* Press A to cycle X button action to SAVE */
+    keys = (1u << 0); /* A */
+    retrobilingual_process_input(&core, &keys, input_cb);
+    keys = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Close menu with Y */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Press X now: should perform quick save (game remains RB_STATE_GAME, not SUBTITLE) */
+    x_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    x_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Open menu with Y again and cycle twice back to SUBTITLE */
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_MENU);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    for (int i = 0; i < 3; i++) {
+        keys = (1u << 7); /* DOWN */
+        retrobilingual_process_input(&core, &keys, input_cb);
+        keys = 0;
+        retrobilingual_process_input(&core, &keys, input_cb);
+    }
+    keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb);
+    keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb);
+    keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    y_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+
+    /* Press X now: back to SUBTITLE overlay */
+    x_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_SUBTITLE);
+    x_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    x_down = 1; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    x_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
 
     puts("host overlay test: pack gate, page tracking, chord pause, subtitle and menu draw OK");
     return 0;

@@ -10,24 +10,26 @@
 | 对话资源索引 | `rb_dialogue_read()` | 读取 EWRAM `0x02000050` 的 `gMessage`：`state & 0x7F` 为活动，偏移 `+8` 为 16 位 `textIndex`。 |
 | 分页跟踪 | `rb_dialogue_read()` | 同一 `textIndex` 下，渲染状态由 `WAIT(3)` 进入 `ROLL(4)` 时页号 +1；对话关闭或资源索引变化时复位。 |
 | 离线译文查询 | pack 文件 | 按 `text_id + page` 精确查找；pack 只由已审核（`review_status='approved'`）映射构建。无命中显示内置「暂无翻译」条目。 |
-| 快捷键拦截 | `retrobilingual_process_input()` | X 短按由 `inputCallback` 直接轮询（X 不在 mGBA 的 GBA 键映射里），打开菜单；字幕 chord 默认 L1+Select，与 driver.cfg 的 GBA 键位一一映射后检测，不用轮询整个手柄。 |
+| 快捷键拦截 | `retrobilingual_process_input()` | **Y 短按**（RetroPad ID 1）直接打开快捷菜单；**X 短按**（RetroPad ID 9）触发可配置动作（默认直接弹出对话双语翻译），也可按 B / 再次按 X 关闭；保留 L1+Select 备用组合键。 |
 | 菜单输入屏蔽 | 同上 | 菜单/字幕打开时 `*keys = 0`，游戏收不到任何按键；关闭时恢复。 |
 | 暂停/恢复 | `rb_pause()` / `rb_resume()` + `retrobilingual_should_run_frame()` | 打开菜单或显示字幕时快照 mCore 状态并跳过 `core->runFrame()`；关闭时 `core->loadState()` 恢复同一帧，避免字幕错位。 |
 | 同帧渲染 | `retrobilingual_draw()` | 在 mGBA `video_cb` 之前直接写入 GBA 240×160 RGB565 帧：字幕为底部半透明横幅；菜单为居中面板。无外部窗口、无 `/dev/fb0` 争用。 |
-| 快捷菜单 | `RB_MENU` | 短按 X 打开：resume / quick save / quick load / subtitles on-off / hotkeys。 |
+| 快捷菜单 | `RB_MENU` | 短按 Y 打开：RESUME / QUICK SAVE / QUICK LOAD / X BUTTON (TRANSLATE/SAVE/LOAD) / SUBTITLES ON-OFF。按 Y 或 B 恢复游戏。 |
 | 快捷存读档 | `rb_quick_save()` / `rb_quick_load()` | 使用 mCore 状态 API，写入 `/storage/.config/pocketjs/retrobilingual-quick.state`；不改 ROM，也不覆盖 RetroArch 的 `saves`/`states` 目录。 |
-| 快捷键重绑 | `RB_BINDINGS` | 菜单进入 hotkeys，选择动作后按 A 进入捕获，再按 1–2 个物理键保存到配置；显示当前 `id,id`。 |
-| 配置持久化 | `rb_config_load()` / `rb_config_save()` | `/storage/.config/pocketjs/retrobilingual.conf`，键：`subtitle_enabled`、`bind_save`、`bind_load`、`bind_subtitle`。 |
+| X 键功能设置 | `RB_MENU` 菜单项 | 菜单中可直接循环切换 X 键行为（`x_action`）：`TRANSLATE`（默认一键呼出翻译）、`SAVE`（快速存档）、`LOAD`（快速读档）。配置实时持久化。 |
+| 配置持久化 | `rb_config_load()` / `rb_config_save()` | `/storage/.config/pocketjs/retrobilingual.conf`，键：`subtitle_enabled`、`x_action`、`bind_save`、`bind_load`、`bind_subtitle`。 |
 | 字体图集 | `tools/retrobilingual/pack.py` | 构建期用 PocketShell 的 OFL `SarasaUiSC-Regular.ttf` 只栅格化已审核译文用到的字符（12×12、1bpp）；`FusionPixel-12px-monospaced-zh_hans.ttf` 是启动器的子集，缺少「你/好/无」等字，不能用于任意字幕。不打包 TTF，不提交 ROM 文本。 |
 
 ## 按键与冲突
 
 | 物理键 | RetroArch 绑定（本仓库 `driver.cfg`） | 说明 |
 |---|---|---|
-| X | 无（`input_save_state_btn="nul"`） | 保留给 core 的菜单键；不再触发 RetroArch quick-save。 |
-| Y | `input_load_state_btn="3"` | 保留 RetroArch 快速读档。 |
-| L1 | 无（移除 slow motion 绑定） | 作为默认字幕 chord 的一部分到达 core。 |
-| Select | `input_player1_select_btn="6"` | 与 L1 组成字幕 chord；单按时仍传给游戏。 |
+| Y | `input_load_state_btn="nul"` | **快捷菜单键**（进入 RB_MENU，掌机上方便拇指操作）；移除 RetroArch 原生读档抢占。 |
+| X | `input_save_state_btn="nul"` | **可配置快捷功能键**（默认直接一键呼出翻译浮层；也可配置为即时存/读档）。 |
+| B | `input_player1_b_btn="1"` | 游戏原按键；在菜单或字幕中按 B 快速返回/恢复游戏。 |
+| A | `input_player1_a_btn="0"` | 游戏原按键；在菜单中作为确认/切换选项键。 |
+| L1 | 无（移除 slow motion 绑定） | 保留作为备用字幕 chord 的一部分。 |
+| Select | `input_player1_select_btn="6"` | 单按传给游戏；与 L1 组成备用字幕 chord。 |
 | R1 | `input_toggle_fast_forward_btn="5"` | 保持快进。 |
 | Select+Start 长按 | `baseos-hotkeys` | core 不拦截；避免覆盖退出组合。 |
 | L2/R2 | 亮度 | core 不绑定。 |
