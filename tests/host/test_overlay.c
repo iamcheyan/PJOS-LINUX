@@ -14,6 +14,7 @@ int rb_test_state(void);
 int rb_test_dialogue_page(void);
 int rb_test_glyphs(void);
 int rb_test_slot(void);
+int rb_test_slot_has_data(int slot);
 int rb_test_hud_pos(void);
 const char* rb_test_toast(void);
 
@@ -209,6 +210,7 @@ int main(int argc, char** argv) {
     /* Change slot to Slot 2 using RIGHT (bit 4) */
     keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_slot() == 1); /* Slot 2 */
+    assert(rb_test_slot_has_data(1) == 0); /* Slot 2 empty initially */
 
     /* Move down to QUICK LOAD (item 2) and try loading empty slot 2 */
     keys = (1u << 7); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
@@ -222,6 +224,8 @@ int main(int argc, char** argv) {
     keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_state() == RB_STATE_GAME);
     assert(strstr(rb_test_toast(), "SAVED TO SLOT 2") != NULL);
+    assert(rb_test_slot_has_data(1) == 1); /* Slot 2 now has data! */
+    assert(rb_test_slot_has_data(2) == 0); /* Slot 3 still empty */
 
     /* Open menu again, move to QUICK LOAD (item 2) and load Slot 2 */
     y_down = 1; retrobilingual_process_input(&core, &keys, input_cb); y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);

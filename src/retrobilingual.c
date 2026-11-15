@@ -486,6 +486,19 @@ static void rb_state_path(int slot, char* out, size_t out_sz) {
     snprintf(out, out_sz, "%s/retrobilingual-slot%d.state", dir, slot + 1);
 }
 
+static int rb_slot_has_data(int slot) {
+    char path[512];
+    rb_state_path(slot, path, sizeof(path));
+    if (access(path, R_OK) == 0) return 1;
+    if (slot == 0) {
+        const char* dir = getenv("RETROBILINGUAL_DIR");
+        if (!dir) dir = "/storage/.config/pocketjs";
+        snprintf(path, sizeof(path), "%s/retrobilingual-quick.state", dir);
+        if (access(path, R_OK) == 0) return 1;
+    }
+    return 0;
+}
+
 static int rb_slot_save(struct mCore* core, int slot) {
     if (!core || !core->stateSize || !core->saveState) return 0;
     size_t size = core->stateSize(core);
@@ -893,8 +906,10 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
                 if (i == 1 || i == 2) {
                     char buf[24];
+                    int has_data = rb_slot_has_data(sCfg.slot);
+                    uint16_t slot_col = has_data ? 0x2FE5 : 0x7BEF; /* Green if has data, Gray if empty */
                     snprintf(buf, sizeof(buf), "< SLOT %d >", sCfg.slot + 1);
-                    ui_text(fb, p, mx + mw - 62, iy, buf, 0xFFE0);
+                    ui_text(fb, p, mx + mw - 62, iy, buf, slot_col);
                 } else if (i == 3) {
                     ui_text(fb, p, mx + mw - 62, iy, x_names[sCfg.x_action], 0xFFE0);
                 } else if (i == 4) {
@@ -938,6 +953,7 @@ int rb_test_state(void) { return (int)sState; }
 int rb_test_dialogue_page(void) { return (int)sDlgPage; }
 int rb_test_glyphs(void) { return (int)sDlgGlyphCount; }
 int rb_test_slot(void) { return sCfg.slot; }
+int rb_test_slot_has_data(int slot) { return rb_slot_has_data(slot); }
 int rb_test_hud_pos(void) { return sCfg.hud_pos; }
 const char* rb_test_toast(void) { return sToastTicks > 0 ? sToastMsg : ""; }
 #endif
