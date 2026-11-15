@@ -9,6 +9,10 @@ rm -f "$FOREGROUND"
 SD=/mnt/sdcard
 RUNTIME="$SD/System/pocketjs/bin/pocket-linux-kms"
 LAUNCHER_RUNTIME="$SD/System/pocketjs/bin/launcher/pocket-linux-kms"
+# frontend-session keeps the launcher path paired with the read-only SYSTEM
+# image and rewrites it on every restart.  A package/runtime update delivered
+# to the card therefore lives at its own path and must be tried first.
+DEPLOYED_RUNTIME="$SD/System/pocketjs/bin/pocketshell/pocket-linux-kms"
 PACKAGE="$SD/System/pocketjs/apps/boot.pocket"
 APPROVED="$SD/System/pocketjs/apps/boot.approved.pocket"
 LOG=/tmp/pocketjs-frontend.log
@@ -50,7 +54,7 @@ check_package() {
 }
 
 select_runtime() {
-    for candidate_runtime in "$LAUNCHER_RUNTIME" "$SD/System/pocketjs/bin/pocket-linux-kms"; do
+    for candidate_runtime in "$DEPLOYED_RUNTIME" "$LAUNCHER_RUNTIME" "$SD/System/pocketjs/bin/pocket-linux-kms"; do
         [ -x "$candidate_runtime" ] || continue
         RUNTIME=$candidate_runtime
         if check_package "$1"; then
@@ -67,7 +71,7 @@ else
     log "baseos.conf unavailable; SSH/ADB are enabled by BaseOS defaults"
 fi
 
-if [ ! -x "$RUNTIME" ] && [ ! -x "$LAUNCHER_RUNTIME" ]; then
+if [ ! -x "$DEPLOYED_RUNTIME" ] && [ ! -x "$RUNTIME" ] && [ ! -x "$LAUNCHER_RUNTIME" ]; then
     log "runtime missing or not executable: $RUNTIME"
     backoff
     exit 1

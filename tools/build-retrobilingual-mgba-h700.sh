@@ -8,7 +8,11 @@ OUT="$HERE/overlay/usr/share/pocketshell/System/compat/lib/libretro"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/pjos-retrobilingual-mgba-$VERSION.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-git clone --depth 1 --branch "$VERSION" https://github.com/mgba-emu/mgba.git "$TMP/source"
+if [ -d /tmp/retrobilingual-mgba-src ]; then
+    cp -r /tmp/retrobilingual-mgba-src "$TMP/source"
+else
+    git clone --depth 1 --branch "$VERSION" https://github.com/mgba-emu/mgba.git "$TMP/source"
+fi
 python3 "$HERE/src/apply-retrobilingual-mgba.py" "$TMP/source" "$HERE/src"
 mkdir -p "$OUT"
 

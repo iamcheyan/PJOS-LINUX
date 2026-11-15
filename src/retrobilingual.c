@@ -90,7 +90,7 @@ static struct {
 } sPack;
 
 static RBState sState;
-static int sRomMatched;
+static int sInitialized;
 static int sMenuCursor;
 static int sBindingCursor;
 static int sBindingCapture;
@@ -324,6 +324,12 @@ static int rb_find_entry(uint16_t text_id, uint8_t page, RBEntry** out) {
 
 /* ---------- dialogue state --------------------------------------------- */
 static void rb_dialogue_read(const struct GBA* gba) {
+    if (!sPack.loaded || !gba || !gba->memory.wram) {
+        if (sDlgActive) sDlgChanged = 1;
+        sDlgActive = 0;
+        sDlgGlyphCount = 0;
+        return;
+    }
     const uint8_t* ewram = (const uint8_t*)gba->memory.wram;
     uint8_t  state   = ewram[RB_EWRAM_MESSAGE];
     uint16_t textId  = rd16(ewram + RB_EWRAM_MESSAGE + 8);
@@ -495,13 +501,9 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
 {
     if (!core) return;
     const struct GBA* gba = core->board;
-    if (!gba || gba->memory.romSize != RB_JP_ROM_SIZE ||
-        gba->romCrc32 != RB_JP_ROM_CRC32) {
-        sRomMatched = 0;
-        return;
-    }
-    int first = !sRomMatched;
-    sRomMatched = 1;
+    if (!gba) return;
+    int first = !sInitialized;
+    sInitialized = 1;
     if (first) {
         sCore = core;
         rb_paths();
@@ -597,10 +599,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         if (sCfg.x_action == X_ACT_SUBTITLE) {
             if (sCfg.enabled) {
                 rb_dialogue_read(gba);
-                if (sDlgActive) {
-                    rb_pause(core);
-                    sState = RB_SUBTITLE;
-                }
+                rb_pause(core);
+                sState = RB_SUBTITLE;
             }
         } else if (sCfg.x_action == X_ACT_SAVE) {
             rb_quick_save(core);
@@ -615,10 +615,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
                 else if (a == ACT_LOAD) rb_quick_load(core);
                 else if (a == ACT_SUBTITLE && sCfg.enabled) {
                     rb_dialogue_read(gba);
-                    if (sDlgActive) {
-                        rb_pause(core);
-                        sState = RB_SUBTITLE;
-                    }
+                    rb_pause(core);
+                    sState = RB_SUBTITLE;
                 }
             }
             sPrevAction[a] = c;
@@ -642,7 +640,7 @@ int retrobilingual_should_run_frame(struct mCore* core) {
 void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                          unsigned height, unsigned pitch)
 {
-    if (!sRomMatched || width != RB_FB_W || height != RB_FB_H) return;
+    if (!sInitialized || width != RB_FB_W || height != RB_FB_H) return;
     pixel_t* fb = (pixel_t*)pixels;
     unsigned p = PITCH_PIXELS(pitch);
 

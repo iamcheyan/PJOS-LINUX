@@ -1,16 +1,17 @@
 # RetroBilingual 运行时集成（代码级）
 
-状态：实现与 AArch64 构建完成；按用户要求暂停真机验证。
+状态：通用 GBA 菜单与 X 键快捷翻译已实现，AArch64 核心已编译并部署至 RG34XX 掌机。
 
 ## 已实现
 
 | 功能 | 实现位置 | 行为 |
 |---|---|---|
-| 日版身份门控 | `src/retrobilingual.c` `rb_pack_load()` | 先比对 ROM 大小/CRC32 让钩子只在目标日版生效；载入 pack 时再计算 ROM SHA-256，必须等于 pack 记录的 `16ac…b38`。任一不符则不显示任何 UI。 |
+| 通用 GBA 快捷机制 | `src/retrobilingual.c` `retrobilingual_process_input()` | 无硬编码 ROM 白名单：所有 GBA 游戏均默认启用 Y 键呼出快捷菜单与 X 键快捷功能。 |
+| 日版译文包门控 | `src/retrobilingual.c` `rb_pack_load()` | 载入 pack 时比对 ROM SHA-256（`16ac…b38`）。匹配时启用剧情对话翻译；未匹配游戏在按下翻译键时显示通用「暂无翻译」提示，快捷存读档与菜单功能均不受影响。 |
 | 对话资源索引 | `rb_dialogue_read()` | 读取 EWRAM `0x02000050` 的 `gMessage`：`state & 0x7F` 为活动，偏移 `+8` 为 16 位 `textIndex`。 |
 | 分页跟踪 | `rb_dialogue_read()` | 同一 `textIndex` 下，渲染状态由 `WAIT(3)` 进入 `ROLL(4)` 时页号 +1；对话关闭或资源索引变化时复位。 |
-| 离线译文查询 | pack 文件 | 按 `text_id + page` 精确查找；pack 只由已审核（`review_status='approved'`）映射构建。无命中显示内置「暂无翻译」条目。 |
-| 快捷键拦截 | `retrobilingual_process_input()` | **Y 短按**（RetroPad ID 1）直接打开快捷菜单；**X 短按**（RetroPad ID 9）触发可配置动作（默认直接弹出对话双语翻译），也可按 B / 再次按 X 关闭；保留 L1+Select 备用组合键。 |
+| 离线译文查询 | pack 文件 | 按 `text_id + page` 精确查找；pack 仅由已审核（`review_status='approved'`）映射构建。无命中显示内置「暂无翻译」条目。 |
+| 快捷键拦截 | `retrobilingual_process_input()` | **Y 短按**（RetroPad ID 1）直接打开通用快捷菜单；**X 短按**（RetroPad ID 9）触发可配置动作（默认直接弹出对话双语翻译），也可按 B / 再次按 X 关闭；保留 L1+Select 备用组合键。 |
 | 菜单输入屏蔽 | 同上 | 菜单/字幕打开时 `*keys = 0`，游戏收不到任何按键；关闭时恢复。 |
 | 暂停/恢复 | `rb_pause()` / `rb_resume()` + `retrobilingual_should_run_frame()` | 打开菜单或显示字幕时快照 mCore 状态并跳过 `core->runFrame()`；关闭时 `core->loadState()` 恢复同一帧，避免字幕错位。 |
 | 同帧渲染 | `retrobilingual_draw()` | 在 mGBA `video_cb` 之前直接写入 GBA 240×160 RGB565 帧：字幕为底部半透明横幅；菜单为居中面板。无外部窗口、无 `/dev/fb0` 争用。 |
@@ -50,7 +51,7 @@ python3 tools/retrobilingual/pack.py \
   --output retrobilingual.pack
 ```
 
-`pocket-game-play` 现在会先计算 `.gba` 的 SHA-256，仅当哈希等于目标日版时才改用 `mgba-retrobilingual_libretro.so`；其他 ROM 继续使用原 `mgba_libretro.so`。部署可用 `tools/deploy-retrobilingual.sh`（默认只做 `--check`，实际安装会先备份到 `/storage/pjs/retrobilingual-backup-<时间>/`，并可选传 `--pack retrobilingual.pack`）：该脚本未在本轮执行，设备验证按用户要求暂停。
+`pocket-game-play` 对所有 GBA 游戏优先使用 `mgba-retrobilingual_libretro.so`，确保全局享有 Y 菜单与 X 键快捷功能；若核心不存在则回退至原版 `mgba_libretro.so`。当前已通过 ADB 部署至真机 `/storage/System/compat/lib/libretro/mgba-retrobilingual_libretro.so`，并将解绑 Y 键读档冲突的 `driver.cfg` 部署至 `/storage/System/compat/share/retroarch/driver.cfg`。
 
 ## 未完成的数据依赖
 
