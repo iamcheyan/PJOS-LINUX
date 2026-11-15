@@ -101,6 +101,57 @@ scan_games_root() {
     done
 }
 
+# Series manifests are deliberately data-only.  BusyBox has no JSON utility,
+# so v1 accepts the documented pretty JSON form: one string field per line and
+# one variant object per block.  Unsafe paths or incomplete variants are
+# ignored; a broken series never becomes a launchable card.
+scan_series_root() {
+    root=$1/series
+    [ -d "$root" ] || return 0
+    for directory in "$root"/*; do
+        [ -d "$directory" ] || continue
+        manifest=$directory/series.json
+        [ -r "$manifest" ] || continue
+        awk -v tab="$TAB" -v dir="$directory" '
+        function str(key, s) {
+            s=$0
+            if (s !~ "\\\"" key "\\\"") return ""
+            sub("^[^\\\"]*\\\"" key "\\\"[ \\t]*:[ \\t]*\\\"", "", s)
+            sub("\\\".*$", "", s)
+            return s
+        }
+        function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+        function flush( p) {
+            if (vid != "" && vtitle != "" && vrom != "" && vrom !~ /^\// && vrom !~ /\.\./ && vrom ~ /\.(gba|gb|gbc)$/) {
+                p=dir "/" vrom
+                if (n++) variants=variants ","
+                variants=variants "{\\\"id\\\":\\\"" esc(vid) "\\\",\\\"title\\\":\\\"" esc(vtitle) "\\\",\\\"path\\\":\\\"" esc(p) "\\\",\\\"cover\\\":\\\"" esc((vcover != "" ? dir "/" vcover : "")) "\\\"}"
+            }
+            vid=vtitle=vrom=vcover=""
+        }
+        /"variants"[ \\t]*:/ { invars=1; next }
+        invars && /\{/ { active=1; next }
+        active {
+            x=str("id"); if (x != "") vid=x
+            x=str("title"); if (x != "") vtitle=x
+            x=str("rom"); if (x != "") vrom=x
+            x=str("cover"); if (x != "") vcover=x
+            if ($0 ~ /}/) { flush(); active=0 }
+            next
+        }
+        !invars {
+            x=str("schema"); if (x != "") schema=x
+            x=str("id"); if (x != "") sid=x
+            x=str("title"); if (x != "") title=x
+            x=str("cover"); if (x != "") cover=x
+        }
+        END {
+            if (schema == "pjos.game-series/v1" && sid ~ /^[a-z0-9][a-z0-9-]*$/ && length(sid) <= 64 && title != "" && n > 0)
+                printf "1\\tgames\\tseries\\t%s\\t%s\\t0\\tseries\\t%s\\t[%s]\\n", sid, title, (cover != "" ? dir "/" cover : ""), variants
+        }' "$manifest" >> "$ROWS"
+    done
+}
+
 scan_plain() {
     section=$1
     rank=$2
@@ -119,8 +170,10 @@ scan() {
     : > "$ROWS"
     if [ -n "${POCKETSHELL_TEST_GAMES_ROOT:-}" ]; then
         scan_games_root "$POCKETSHELL_TEST_GAMES_ROOT"
+        scan_series_root "$POCKETSHELL_TEST_GAMES_ROOT"
     else
         scan_games_root /storage/content/games
+        scan_series_root /storage/content/games
         for root in /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
             scan_games_root "$root"
         done
@@ -160,7 +213,10 @@ scan() {
             }
             count[key]++
             cnt = count[key]
-            items[key SUBSEP cnt] = sprintf("{\"title\":\"%s\",\"path\":\"%s\",\"size\":%s,\"kind\":\"%s\",\"cover\":\"%s\"}", esc($4), esc($5), $6, $7, esc($8))
+            if ($7 == "series")
+                items[key SUBSEP cnt] = sprintf("{\"kind\":\"series\",\"id\":\"%s\",\"title\":\"%s\",\"cover\":\"%s\",\"variants\":%s}", esc($4), esc($5), esc($8), $9)
+            else
+                items[key SUBSEP cnt] = sprintf("{\"title\":\"%s\",\"path\":\"%s\",\"size\":%s,\"kind\":\"%s\",\"cover\":\"%s\"}", esc($4), esc($5), $6, $7, esc($8))
             total++
         }
         END {

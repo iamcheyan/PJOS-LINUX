@@ -25,8 +25,8 @@
 
 | 物理键 | RetroArch 绑定（本仓库 `driver.cfg`） | 说明 |
 |---|---|---|
-| Y | `input_load_state_btn="nul"` | **快捷菜单键**（进入 RB_MENU，掌机上方便拇指操作）；移除 RetroArch 原生读档抢占。 |
-| X | `input_save_state_btn="nul"` | **可配置快捷功能键**（默认直接一键呼出翻译浮层；也可配置为即时存/读档）。 |
+| Y（左键） | `input_player1_y_btn="2"`，`input_load_state_btn="nul"` | **快捷菜单键**（进入 RB_MENU，掌机物理左键 Y 方便拇指操作）；移除 RetroArch 原生读档抢占。 |
+| X（上键） | `input_player1_x_btn="3"`，`input_save_state_btn="nul"` | **游戏翻译键**（进入 RB_SUBTITLE，掌机物理上键 X 一键呼出翻译）；可在菜单中配置为即时存/读档。 |
 | B | `input_player1_b_btn="1"` | 游戏原按键；在菜单或字幕中按 B 快速返回/恢复游戏。 |
 | A | `input_player1_a_btn="0"` | 游戏原按键；在菜单中作为确认/切换选项键。 |
 | L1 | 无（移除 slow motion 绑定） | 保留作为备用字幕 chord 的一部分。 |

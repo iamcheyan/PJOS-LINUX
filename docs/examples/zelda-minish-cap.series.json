@@ -1,0 +1,44 @@
+{
+  "schema": "pjos.game-series/v1",
+  "id": "zelda-minish-cap",
+  "title": "塞尔达传说：缩小帽",
+  "cover": "cover.png",
+  "variants": [
+    {
+      "id": "zh-Hans",
+      "title": "简体中文",
+      "rom": "gba/塞尔达传说_缩小帽.gba",
+      "cover": "gba/塞尔达传说_缩小帽.png",
+      "sort": 10,
+      "default": true
+    },
+    {
+      "id": "zh-Hant",
+      "title": "繁体中文",
+      "rom": "gba/萨尔达传说-缩小帽.gba",
+      "cover": "gba/萨尔达传说-缩小帽.png",
+      "sort": 20
+    },
+    {
+      "id": "ja",
+      "title": "日版",
+      "rom": "gba/Zelda no Densetsu - Fushigi no Boushi (Japan).gba",
+      "cover": "gba/Zelda no Densetsu - Fushigi no Boushi (Japan).png",
+      "sort": 30
+    },
+    {
+      "id": "en-US",
+      "title": "美版",
+      "rom": "gba/Legend of Zelda, The - The Minish Cap (USA).gba",
+      "cover": "gba/Legend of Zelda, The - The Minish Cap (USA).png",
+      "sort": 40
+    },
+    {
+      "id": "en-EU",
+      "title": "欧版（En/Fr/De/Es/It）",
+      "rom": "gba/Legend of Zelda, The - The Minish Cap (Europe) (En,Fr,De,Es,It).gba",
+      "cover": "gba/Legend of Zelda, The - The Minish Cap (Europe) (En,Fr,De,Es,It).png",
+      "sort": 50
+    }
+  ]
+}

@@ -388,13 +388,13 @@ static void glyph(pixel_t* fb, unsigned p, int x, int y, uint16_t index) {
     int gw = sPack.glyph_w, gh = sPack.glyph_h;
     const uint8_t* bmp = sPack.bits + (size_t)index * sPack.glyph_bytes;
     for (int gy = 0; gy < gh; gy++) {
-        int dx = x, dy = y + gy;
+        int dy = y + gy;
         if (dy < 0 || dy >= RB_FB_H) continue;
         for (int gx = 0; gx < gw; gx++) {
             int bit = gy * gw + gx;
             if (!(bmp[bit >> 3] & (0x80 >> (bit & 7)))) continue;
+            int dx = x + gx;
             if (dx >= 0 && dx < RB_FB_W) fb[dy * p + dx] = 0xFFFF;
-            dx++;
         }
     }
 }
@@ -655,7 +655,7 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
         } else {
             RBEntry* notice = NULL;
             if (rb_find_entry(0xFFFF, 0, &notice)) {
-                draw_sequence(fb, p, 4, by + 4, RB_FB_W - 8,
+                draw_sequence(fb, p, 8, by + 10, RB_FB_W - 64,
                               notice->first_glyph, notice->glyph_count);
             } else {
                 ui_text(fb, p, 8, by + 12, "NO TRANSLATION", 0xFFFF);
