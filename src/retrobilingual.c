@@ -755,12 +755,27 @@ int retrobilingual_should_run_frame(struct mCore* core) {
     return sState == RB_GAME;
 }
 
+static pixel_t sCleanFrame[RB_FB_H * 256];
+static int sHasCleanFrame = 0;
+
 void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                          unsigned height, unsigned pitch)
 {
     if (!sInitialized || width != RB_FB_W || height != RB_FB_H) return;
     pixel_t* fb = (pixel_t*)pixels;
     unsigned p = PITCH_PIXELS(pitch);
+    size_t frame_bytes = height * pitch;
+
+    if (sState == RB_GAME || !sHasCleanFrame) {
+        if (frame_bytes <= sizeof(sCleanFrame)) {
+            memcpy(sCleanFrame, pixels, frame_bytes);
+            sHasCleanFrame = 1;
+        }
+    } else {
+        if (sHasCleanFrame && frame_bytes <= sizeof(sCleanFrame)) {
+            memcpy(pixels, sCleanFrame, frame_bytes);
+        }
+    }
 
     if (sState == RB_SUBTITLE) {
         /* Clean non-intrusive floating HUD: no full screen shading, no modal frame, no title/footer */
