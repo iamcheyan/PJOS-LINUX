@@ -61,9 +61,12 @@ def _glyph_string(raw: bytes, language: str = "ja") -> list[dict[str, Any]]:
         cursor += 1
         if code == 0:
             break
-        if code == 0x01:
-            controls.append("01")
-            display.append("[WAIT]")
+        if code == 0x0A:
+            # zeldaret/tmc: text.c:GetCharacter maps 0x0A to command 1;
+            # message.c:RunTextCommand changes to the second line first and
+            # enters RENDER_WAIT when the next 0x0A arrives on that line.
+            # The latter is the real player-A page boundary.
+            display.append("\\n")
             line_breaks += 1
             if line_breaks % 2 == 0:
                 finish_page(cursor)
@@ -75,8 +78,8 @@ def _glyph_string(raw: bytes, language: str = "ja") -> list[dict[str, Any]]:
         if code == 0x0A:
             display.append("\\n")
             continue
-        if code in (0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09):
-            needed = {0x02: 1, 0x03: 2, 0x04: 1, 0x05: 1, 0x06: 1, 0x07: 2, 0x08: 1, 0x09: 1}[code]
+        if code in (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09):
+            needed = {0x01: 1, 0x02: 1, 0x03: 2, 0x04: 1, 0x05: 1, 0x06: 1, 0x07: 2, 0x08: 1, 0x09: 1}[code]
             if code == 0x04 and cursor < len(raw) and raw[cursor] == 0x10:
                 needed = 2
             if code == 0x05 and cursor < len(raw) and raw[cursor] != 0xFF:
@@ -147,7 +150,7 @@ def _read_encoded_string(data: bytes, start: int, limit: int, language: str = "j
         if code == 0:
             return data[start:cursor - 1], cursor
         needed = {
-            0x01: 0, 0x02: 1, 0x03: 2, 0x04: 1, 0x05: 1,
+            0x01: 1, 0x02: 1, 0x03: 2, 0x04: 1, 0x05: 1,
             0x06: 1, 0x07: 2, 0x08: 1, 0x09: 1, 0x0A: 0,
             0x0B: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x0F: 1,
         }.get(code, 0)

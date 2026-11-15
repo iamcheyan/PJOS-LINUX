@@ -32,6 +32,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define RB_JP_ROM_CRC32 0x6CE771A5u
@@ -145,6 +147,10 @@ static int sDlgActive;
 static int sDlgChanged;
 static uint32_t sDlgGlyphStart;
 static uint16_t sDlgGlyphCount;
+static int sHudScroll;
+#ifdef RB_HOST_TEST
+static int sHudFirstVisibleLine;
+#endif
 
 /* ---------- SHA-256 ---------------------------------------------------- */
 typedef struct { uint32_t h[8]; uint64_t len; uint8_t buf[64]; size_t fill; } Sha256;
@@ -345,9 +351,21 @@ static int rb_find_entry(uint16_t text_id, uint8_t page, RBEntry** out) {
 
 static int rb_find_dialogue_entry(uint16_t text_id, uint8_t page, RBEntry** out) {
     if (rb_find_entry(text_id, page, out)) return 1;
-    for (int p = (int)page - 1; p >= 0; p--) {
-        if (rb_find_entry(text_id, (uint8_t)p, out)) return 1;
+
+    /* A long translation which only has page 0 is scrolled in the HUD, not
+     * split into invented pack pages.  It may therefore serve later game
+     * dialogue pages.  Once an id has any real non-zero pack page, however,
+     * a missing page is a genuine gap and must fall through to FFFF. */
+    int has_page_zero = 0;
+    int has_nonzero_page = 0;
+    for (uint32_t i = 0; i < sPack.entry_count; i++) {
+        RBEntry* entry = &sPack.entries[i];
+        if (entry->text_id != text_id) continue;
+        if (entry->page == 0) has_page_zero = 1;
+        else has_nonzero_page = 1;
     }
+    if (has_page_zero && !has_nonzero_page)
+        return rb_find_entry(text_id, 0, out);
     return 0;
 }
 
@@ -497,6 +515,78 @@ static int rb_slot_has_data(int slot) {
         if (access(path, R_OK) == 0) return 1;
     }
     return 0;
+}
+
+typedef struct {
+    int valid;
+    char time_str[16];
+    char area_name[24];
+    int hearts;
+    int rupees;
+} RBSlotInfo;
+
+static const char* const sLocationNames[] = {
+    "UNKNOWN",          "MT. CRENEL",       "CRENEL BASE",      "CASTOR WILDS",
+    "WIND RUINS",       "ROYAL VALLEY",     "TRILBY HIGHLANDS", "WESTERN WOOD",
+    "CASTLE GARDEN",    "NORTH HYRULE",     "HYRULE TOWN",      "SOUTH HYRULE",
+    "VEIL SPRINGS",     "VEIL FALLS",       "LON LON RANCH",    "EASTERN HILLS",
+    "CLOUD TOPS",       "LAKE HYLIA",       "MINISH WOODS",     "SANCTUARY",
+    "MINISH VILLAGE",   "MELARI MINES",     "HYRULE CASTLE",    "DEEPWOOD SHRINE",
+    "DEEPWOOD SHRINE",  "CAVE OF FLAMES",   "FORTRESS OF WINDS","DROPLET TEMPLE",
+    "PALACE OF WINDS",  "DARK CASTLE",      "ROYAL CRYPT",      "BIGGORON DUNGEON"
+};
+
+static void rb_get_slot_info(int slot, RBSlotInfo* info) {
+    if (!info) return;
+    memset(info, 0, sizeof(*info));
+
+    char path[512];
+    rb_state_path(slot, path, sizeof(path));
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        if (slot == 0) {
+            const char* dir = getenv("RETROBILINGUAL_DIR");
+            if (!dir) dir = "/storage/.config/pocketjs";
+            snprintf(path, sizeof(path), "%s/retrobilingual-quick.state", dir);
+            if (stat(path, &st) != 0) return;
+        } else {
+            return;
+        }
+    }
+
+    info->valid = 1;
+    struct tm* tm_info = localtime(&st.st_mtime);
+    if (tm_info) {
+        strftime(info->time_str, sizeof(info->time_str), "%m/%d %H:%M", tm_info);
+    }
+
+    /* If this is a real GBA serialized state (mGBA is 0x61000 bytes), read stats and area */
+    if (st.st_size >= 0x61000) {
+        FILE* f = fopen(path, "rb");
+        if (f) {
+            uint8_t max_hp = 0;
+            uint16_t rup = 0;
+            uint8_t loc = 0;
+            if (fseek(f, 0x23AEB, SEEK_SET) == 0 && fread(&max_hp, 1, 1, f) == 1) {
+                info->hearts = max_hp / 8;
+            }
+            if (fseek(f, 0x23B00, SEEK_SET) == 0) {
+                uint8_t b[2];
+                if (fread(b, 1, 2, f) == 2) {
+                    rup = (uint16_t)(b[0] | (b[1] << 8));
+                    info->rupees = (int)rup;
+                }
+            }
+            if (fseek(f, 0x54A91, SEEK_SET) == 0 && fread(&loc, 1, 1, f) == 1) {
+                if (loc < (sizeof(sLocationNames) / sizeof(sLocationNames[0]))) {
+                    snprintf(info->area_name, sizeof(info->area_name), "%s", sLocationNames[loc]);
+                } else {
+                    snprintf(info->area_name, sizeof(info->area_name), "AREA %d", loc);
+                }
+            }
+            fclose(f);
+        }
+    }
 }
 
 static int rb_slot_save(struct mCore* core, int slot) {
@@ -705,6 +795,10 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         if (x_just || y_just || edge(now, prev, RB_KEY_B) || chord_down((uint16_t)now, sCfg.chord[ACT_SUBTITLE])) {
             rb_resume(core);
             sState = RB_GAME;
+        } else if (edge(now, prev, RB_KEY_RIGHT)) {
+            sHudScroll += 2;
+        } else if (edge(now, prev, RB_KEY_LEFT) && sHudScroll >= 2) {
+            sHudScroll -= 2;
         }
         *keys = 0;
         goto done;
@@ -718,6 +812,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     } else if (x_just) {
         if (sCfg.x_action == X_ACT_SUBTITLE) {
             rb_dialogue_read(gba);
+            sHudScroll = 0;
             rb_pause(core);
             sState = RB_SUBTITLE;
         } else if (sCfg.x_action == X_ACT_SAVE) {
@@ -733,6 +828,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
                 else if (a == ACT_LOAD) do_load(core);
                 else if (a == ACT_SUBTITLE) {
                     rb_dialogue_read(gba);
+                    sHudScroll = 0;
                     rb_pause(core);
                     sState = RB_SUBTITLE;
                 }
@@ -792,21 +888,18 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
         }
 
         if (total_glyphs && sPack.loaded) {
-            int line_starts[8];
-            int line_counts[8];
+            int line_starts[RB_MAX_TEXT + 1];
+            int line_counts[RB_MAX_TEXT + 1];
             int line_n = 0;
-            int max_w = 0;
             int cur_start = 0;
             int cur_count = 0;
 
             for (uint16_t i = 0; i < total_glyphs; i++) {
                 uint16_t idx = sPack.indices[start + i];
                 if (idx == 0xFFFF) {
-                    if (line_n < 8) {
+                    if (line_n < RB_MAX_TEXT + 1) {
                         line_starts[line_n] = cur_start;
                         line_counts[line_n] = cur_count;
-                        int lw = cur_count * sPack.glyph_w;
-                        if (lw > max_w) max_w = lw;
                         line_n++;
                     }
                     cur_start = i + 1;
@@ -815,11 +908,9 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     cur_count++;
                     /* Auto soft-wrap if single line reaches 15 glyphs */
                     if (cur_count >= 15 && i + 1 < total_glyphs && sPack.indices[start + i + 1] != 0xFFFF) {
-                        if (line_n < 8) {
+                        if (line_n < RB_MAX_TEXT + 1) {
                             line_starts[line_n] = cur_start;
                             line_counts[line_n] = cur_count;
-                            int lw = cur_count * sPack.glyph_w;
-                            if (lw > max_w) max_w = lw;
                             line_n++;
                         }
                         cur_start = i + 1;
@@ -827,20 +918,29 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     }
                 }
             }
-            if (line_n < 8 && cur_count > 0) {
+            if (line_n < RB_MAX_TEXT + 1 && cur_count > 0) {
                 line_starts[line_n] = cur_start;
                 line_counts[line_n] = cur_count;
-                int lw = cur_count * sPack.glyph_w;
-                if (lw > max_w) max_w = lw;
                 line_n++;
             }
             if (line_n == 0) line_n = 1;
-            /* In HUD floating mode, cap at 3 lines to prevent screen occlusion */
-            if (line_n > 3) line_n = 3;
+            if (sHudScroll >= line_n) sHudScroll = line_n - 1;
+            if (sHudScroll < 0) sHudScroll = 0;
+            int visible_lines = line_n - sHudScroll;
+            if (visible_lines > 3) visible_lines = 3;
+            int max_w = 0;
+            for (int l = 0; l < visible_lines; l++) {
+                int lw = line_counts[sHudScroll + l] * sPack.glyph_w;
+                if (lw > max_w) max_w = lw;
+            }
+            int has_more_lines = sHudScroll + visible_lines < line_n;
+#ifdef RB_HOST_TEST
+            sHudFirstVisibleLine = sHudScroll;
+#endif
             if (max_w > RB_FB_W - 16) max_w = RB_FB_W - 16;
 
             int line_h = sPack.glyph_h + 3;
-            int total_h = line_n * line_h - 3;
+            int total_h = visible_lines * line_h - 3;
             if (total_h < 12) total_h = 12;
 
             /* Determine whether dialogue box is at bottom, top, or center */
@@ -902,18 +1002,21 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             }
 
             /* Draw centered lines with drop shadow and crisp text */
-            for (int l = 0; l < line_n; l++) {
-                int lw = line_counts[l] * sPack.glyph_w;
+            for (int l = 0; l < visible_lines; l++) {
+                int source_line = sHudScroll + l;
+                int lw = line_counts[source_line] * sPack.glyph_w;
                 int lx = (RB_FB_W - lw) / 2;
                 if (lx < 8) lx = 8;
                 int ly = target_y + l * line_h;
-                for (int g = 0; g < line_counts[l]; g++) {
-                    uint16_t idx = sPack.indices[start + line_starts[l] + g];
+                for (int g = 0; g < line_counts[source_line]; g++) {
+                    uint16_t idx = sPack.indices[start + line_starts[source_line] + g];
                     int gx = lx + g * sPack.glyph_w;
                     glyph_color(fb, p, gx + 1, ly + 1, idx, 0x0000);
                     glyph_color(fb, p, gx, ly, idx, is_notice ? 0xCE79 : 0xFFFF);
                 }
             }
+            if (has_more_lines)
+                rect(fb, p, pill_x + pill_w - 5, pill_y + pill_h - 5, 2, 2, 0xFFFF);
         } else {
             int nw = 14 * 6;
             int nx = (RB_FB_W - nw) / 2;
@@ -922,8 +1025,8 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             ui_text(fb, p, nx, ny, "NO TRANSLATION", 0xFFFF);
         }
     } else if (sState == RB_MENU || sState == RB_BINDINGS) {
-        int mw = 180, mh = 5 * 16 + 16;
-        int mx = (RB_FB_W - mw) / 2, my = 18;
+        int mw = 192, mh = 112;
+        int mx = (RB_FB_W - mw) / 2, my = 14;
         rect(fb, p, mx - 2, my - 2, mw + 4, mh + 4, 0x7BEF);
         rect(fb, p, mx, my, mw, mh, 0x0000);
         if (sState == RB_MENU) {
@@ -937,7 +1040,7 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 "AUTO", "TOP", "CENTER", "BOTTOM"
             };
             for (int i = 0; i < 5; i++) {
-                int iy = my + 8 + i * 16;
+                int iy = my + 8 + i * 15;
                 if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 12, 0x2965);
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
                 if (i == 1 || i == 2) {
@@ -952,6 +1055,33 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     ui_text(fb, p, mx + mw - 48, iy, pos_names[sCfg.hud_pos], 0xFFE0);
                 }
             }
+
+            /* Slot details card */
+            rect(fb, p, mx + 4, my + 84, mw - 8, 1, 0x2965);
+
+            RBSlotInfo info;
+            rb_get_slot_info(sCfg.slot, &info);
+
+            char l1[64];
+            char l2[64];
+            uint16_t col1 = info.valid ? 0x2FE5 : 0x7BEF;
+            uint16_t col2 = info.valid ? 0xFFFF : 0x7BEF;
+
+            if (info.valid) {
+                if (info.area_name[0]) {
+                    snprintf(l1, sizeof(l1), "SLOT %d: %s", sCfg.slot + 1, info.area_name);
+                    snprintf(l2, sizeof(l2), "%d HEARTS  %dR   %s", info.hearts, info.rupees, info.time_str);
+                } else {
+                    snprintf(l1, sizeof(l1), "SLOT %d: SAVED STATE", sCfg.slot + 1);
+                    snprintf(l2, sizeof(l2), "SAVED %s", info.time_str);
+                }
+            } else {
+                snprintf(l1, sizeof(l1), "SLOT %d: (EMPTY SLOT)", sCfg.slot + 1);
+                snprintf(l2, sizeof(l2), "NO SAVED STATE DATA");
+            }
+
+            ui_text(fb, p, mx + 8, my + 88, l1, col1);
+            ui_text(fb, p, mx + 8, my + 98, l2, col2);
         } else {
             ui_text(fb, p, mx + 8, my + 8, "BIND ACTION (A=CAPTURE)", 0xFFFF);
             for (int a = 0; a < ACT_COUNT; a++) {
@@ -989,5 +1119,16 @@ int rb_test_glyphs(void) { return (int)sDlgGlyphCount; }
 int rb_test_slot(void) { return sCfg.slot; }
 int rb_test_slot_has_data(int slot) { return rb_slot_has_data(slot); }
 int rb_test_hud_pos(void) { return sCfg.hud_pos; }
+int rb_test_hud_scroll(void) { return sHudScroll; }
+int rb_test_hud_first_visible_line(void) { return sHudFirstVisibleLine; }
 const char* rb_test_toast(void) { return sToastTicks > 0 ? sToastMsg : ""; }
+int rb_test_slot_info(int slot, char* area_out, size_t area_sz, int* hearts_out, int* rupees_out) {
+    RBSlotInfo info;
+    rb_get_slot_info(slot, &info);
+    if (!info.valid) return 0;
+    if (area_out && area_sz) snprintf(area_out, area_sz, "%s", info.area_name);
+    if (hearts_out) *hearts_out = info.hearts;
+    if (rupees_out) *rupees_out = info.rupees;
+    return 1;
+}
 #endif

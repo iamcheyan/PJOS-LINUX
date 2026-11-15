@@ -46,7 +46,15 @@ def main() -> int:
         db.commit()
         db.close()
 
-        selected = [("0201", 0, "你好世界"), ("0201", 1, "第二页"), ("FFFF", 0, "暂无翻译")]
+        selected = [
+            ("0201", 0, "一"),
+            ("0201", 1, "二三四"),
+            ("0202", 0, "甲乙丙"),
+            ("0203", 0, "丁戊"),
+            ("0203", 2, "己庚辛"),
+            ("0204", 0, "一\n二\n三\n四\n五\n六"),
+            ("FFFF", 0, "暂无翻译"),
+        ]
         chars = {c for _, _, text in selected for c in text}
         atlas, index = pack.build_atlas(chars, FONT, 12)
         blob = pack.build_pack(selected, atlas, index, 12, bytes.fromhex(digest))

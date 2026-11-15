@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,6 +39,17 @@ class RetroBilingualTests(unittest.TestCase):
             rom_path.write_bytes(b"too short")
             with self.assertRaisesRegex(ValueError, "shorter than a GBA header"):
                 retro.inspect_rom(rom_path)
+
+    def test_read_export_accepts_decoder_entry_list(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "decoded.json"
+            path.write_text(json.dumps([
+                {"source_id": "1002", "page_index": 0, "text": "中文"},
+            ], ensure_ascii=False), encoding="utf-8")
+            document = retro.read_export(path, "zh")
+        self.assertEqual(document["game"], "zelda_minish_cap")
+        self.assertEqual(document["language"], "zh")
+        self.assertEqual(document["rom_sha256"], "f51c6c2f90e18ee91203dd767307271e06901b5bff35c3a567d52f61a39d166d")
 
     def test_alignment_is_pending_and_repeatable(self):
         ja = export("ja", "1" * 64, [
@@ -78,18 +90,26 @@ class RetroBilingualTests(unittest.TestCase):
         self.assertEqual(report["ambiguous_japanese"], 2)
         self.assertEqual(mappings, 0)
 
-    def test_glyph_decoder_keeps_unknown_characters_as_codes(self):
-        raw = bytes((0x02, 0x00, ord("A"), 0x01, ord("B"), 0x01, ord("C")))
+    def test_glyph_decoder_uses_second_newline_as_tmc_page_boundary(self):
+        # TMC text.c:GetCharacter maps raw 0x0A to command 1.  message.c
+        # enters RENDER_WAIT only when command 1 arrives on line two.
+        raw = bytes((0x01, 0x00, ord("A"), 0x0A, ord("B"), 0x0A, ord("C")))
         pages = tmc_rom._glyph_string(raw)
         self.assertEqual([page["page_index"] for page in pages], [0, 1])
-        self.assertEqual(pages[0]["text"], "[C02:00]A[WAIT]B[WAIT]")
+        self.assertEqual(pages[0]["text"], "[C01:00]A\\nB\\n")
         self.assertEqual(pages[1]["text"], "C")
-        self.assertEqual(pages[0]["raw_hex"], "020041014201")
+        self.assertEqual(pages[0]["raw_hex"], "0100410a420a")
 
     def test_encoded_string_allows_zero_inside_control_parameters(self):
         rom = bytes((0x02, 0x00, ord("A"), 0x00))
         raw, end = tmc_rom._read_encoded_string(rom, 0, len(rom))
         self.assertEqual(raw, bytes((0x02, 0x00, ord("A"))))
+        self.assertEqual(end, len(rom))
+
+    def test_encoded_string_allows_zero_inside_01_control_parameter(self):
+        rom = bytes((0x01, 0x00, ord("A"), 0x00))
+        raw, end = tmc_rom._read_encoded_string(rom, 0, len(rom))
+        self.assertEqual(raw, bytes((0x01, 0x00, ord("A"))))
         self.assertEqual(end, len(rom))
 
     def test_review_updates_runtime_translation_status(self):

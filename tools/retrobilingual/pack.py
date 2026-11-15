@@ -175,16 +175,17 @@ def sanitize_text(text: str) -> str:
     import re
     # Convert literal escaped '\n' to actual newline
     t = text.replace("\\n", "\n")
-    # Strip any bracketed control codes like [C...], [G...], [WAIT]
+    if re.search(r"\[G\d+:[0-9A-Fa-f]{2}\]", t):
+        raise ValueError("unmapped glyph marker in approved pack input")
+    # Presentation controls are not glyphs.  Unmapped [G..] was rejected
+    # above, so this cleanup cannot silently turn a missing character into a
+    # hole in an otherwise approved translation.
     t = re.sub(r"\[[^\]]+\]", "", t)
     # Standardize player name
     t = re.sub(r"\{player\}", "林克", t)
-    # Replace bytecode end-of-sentence markers
-    t = t.replace("+", "。").replace("@", "？").replace("······", "……")
-    # Clean known OCR typos in recovered glyph text
-    t = t.replace("很热倒呢", "很热闹呢")
-    # Normalize newlines
-    t = re.sub(r"\n+", "\n", t)
+    t = t.replace("{1}", "1")
+    # +, @ and empty lines come from the ROM script.  Their visible meaning
+    # is not established here, and neither may create a new pack page.
     return t.strip()
 
 
@@ -213,20 +214,12 @@ def main() -> int:
         text = texts.get((sid, page))
         if not text or text == "[EMPTY]":
             continue
-        if page == 0 and (sid, 1) not in texts:
-            subpages = split_dialogue_pages(text)
-            if len(subpages) > 1:
-                for p_idx, sub in enumerate(subpages):
-                    cleaned = sanitize_text(sub)
-                    if cleaned and (sid, p_idx) not in seen:
-                        selected.append((sid, p_idx, cleaned))
-                        seen.add((sid, p_idx))
-                continue
         cleaned = sanitize_text(text)
         if cleaned and (sid, page) not in seen:
-            lines = [l.strip() for l in cleaned.split("\n") if l.strip()]
-            wrapped = "\n".join(w for l in lines for w in wrap_line(l, 15))
-            selected.append((sid, page, wrapped))
+            # A pack page is the game's dialogue page.  HUD line wrapping is
+            # intentionally deferred to the renderer and may not invent a
+            # new page_index here.
+            selected.append((sid, page, cleaned))
             seen.add((sid, page))
     if not selected:
         raise SystemExit("no approved mapping has Unicode text; refusing to build an empty pack")

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
-from tmc_rom import extract_tmc_rom
+from tmc_rom import PROFILES, extract_tmc_rom
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -129,6 +129,22 @@ def read_export(path: Path, language: str) -> dict[str, Any]:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read UTF-8 JSON export {path}: {exc}") from exc
+    if isinstance(document, list):
+        # decode_chinese_text.py intentionally emits the entry array so it can
+        # also feed review tools.  Its ROM identity is still unambiguous in
+        # the verified TMC profiles, so accept that native decoder format at
+        # the import boundary instead of making callers wrap or duplicate it.
+        hashes = [digest for digest, profile in PROFILES.items() if profile["language"] == language]
+        if len(hashes) != 1:
+            raise ValueError(f"cannot infer unique {language!r} ROM identity for entry-list export")
+        document = {
+            "game": "zelda_minish_cap",
+            "language": language,
+            "rom_sha256": hashes[0],
+            "entries": document,
+        }
+    if not isinstance(document, dict):
+        raise ValueError("export must be an object or a decoder entry array")
     if document.get("game") != "zelda_minish_cap":
         raise ValueError("export game must be 'zelda_minish_cap'")
     if document.get("language") != language:

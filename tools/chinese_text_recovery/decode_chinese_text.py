@@ -43,9 +43,12 @@ def decode_text(raw_text: str, mapping: dict[str, str]) -> tuple[str, list[str]]
     # Replace [G{bank}:{code}] tokens
     decoded = re.sub(r'\[G(\d+):([0-9A-Fa-f]{2})\]', replace_token, raw_text)
 
-    # Standardize player name and control codes
+    # Keep only the controls whose meaning is known at this stage.  C06:01 is
+    # the save-file number in 0x0003; dropping it was the source of the lost
+    # `{1}` placeholder.  C02/C03 are presentation-only color/sound controls.
     decoded = re.sub(r'\[C06:00\]|\[Player\]', '{player}', decoded)
-    decoded = re.sub(r'\[C[0-9A-Fa-f:]+\]', '', decoded) # all control codes
+    decoded = re.sub(r'\[C06:01\]', '{1}', decoded)
+    decoded = re.sub(r'\[C0[23](?::[0-9A-Fa-f]+)+\]', '', decoded)
     decoded = re.sub(r'\[WAIT\]', '', decoded)
 
     return decoded, missing

@@ -46,7 +46,8 @@
   - RetroBilingual is a generic emulator enhancement engine: the 5-slot save state manager, on-screen Toast alerts, floating HUD layout calculation, dynamic positioning (`AUTO`/`TOP`/`CENTER`/`BOTTOM`), and binary pack search are 100% game-agnostic.
   - Game-specific RAM reading is decoupled into `core/adapters/` (e.g. `core/adapters/tmc.c` for *The Legend of Zelda: The Minish Cap*). Any new GBA game can be supported by discovering the message ID in EWRAM and adding an adapter matching `RBAdapter`.
 - Dialogue pagination and newline formatting:
-  - Standard GBA dialogue windows display up to 2 lines per page. A single newline `\n` is a line break within the same dialogue box; `+` (bytecode `[WAIT]`) or `\n\n` represents a page advance. `sanitize_text` in `tools/pack.py` converts literal `\\n` strings into actual `\n` characters before emitting `LINE_BREAK` (`0xFFFF`) tokens.
+  - The HUD is 15 fullwidth glyphs wide. That width limit is not a new `page_index`. The packer must never make pages from visual wrapping; TMC's actual player-A boundary is every second raw `0x0A` newline (`text.c:GetCharacter`, `message.c:RunTextCommand` / `TextDispWait`). Long single pages scroll in the HUD with left/right, without changing `sDlgPage`.
+  - Repair procedure, measured counts, and the runtime lookup rules are in `docs/33-retrobilingual-translation-repair.md`. Follow that document instead of adding more page splits.
   - Active runtime pack is deployed to `/storage/.config/pocketjs/retrobilingual.pack`.
 - Physical button mappings and DTS alignment on RG34XX:
   - Electrical wiring: physical left button (printed **Y**) sends `evdev 306` (`BTN_WEST` $\to$ `js 2`); physical top button (printed **X**) sends `evdev 307` (`BTN_NORTH` $\to$ `js 3`).
@@ -54,7 +55,10 @@
   - `overlay/usr/share/pocketshell/System/compat/share/retroarch/driver.cfg` MUST keep `input_player1_y_btn = "2"` (Quick Menu) and `input_player1_x_btn = "3"` (Translate HUD). Physical Y opens the in-game menu; physical X triggers immediate translation.
 - Runtime settings and state files:
   - Settings persist at `/storage/.config/pocketjs/retrobilingual.conf` (`x_action`, `slot`, `hud_pos`).
-  - 5-slot save states are saved to `/storage/.config/pocketjs/retrobilingual-slot[1-5].state`. Populated slots display in Green (`0x07E0`), empty slots display in Gray (`0x7BEF`).
+  - 5-slot save states are saved to `/storage/.config/pocketjs/retrobilingual-slot[1-5].state`. Populated slots display in Green (`0x2FE5`), empty slots display in Gray (`0x7BEF`). The Quick Menu displays a live slot info card below the menu items:
+    - If populated: Line 1 shows `SLOT N: <LOCATION/AREA>` (e.g. `NORTH HYRULE`, `LON LON RANCH`), Line 2 shows `<HEARTS> HEARTS  <RUPEES>R   <MM/DD HH:MM>` file timestamp.
+    - If empty: Line 1 shows `SLOT N: (EMPTY SLOT)`, Line 2 shows `NO SAVED STATE DATA`.
+    - Memory extraction reads EWRAM offsets within GBA savestate: `gSave.stats.maxHealth` (+0x0AB), `gSave.stats.rupees` (+0x0C0), and `gArea.locationIndex` (+0x01) mapped through TMC's 32-entry location table.
 
 ## RG34XX test device
 

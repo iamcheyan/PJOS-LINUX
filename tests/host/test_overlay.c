@@ -16,6 +16,8 @@ int rb_test_glyphs(void);
 int rb_test_slot(void);
 int rb_test_slot_has_data(int slot);
 int rb_test_hud_pos(void);
+int rb_test_hud_scroll(void);
+int rb_test_hud_first_visible_line(void);
 const char* rb_test_toast(void);
 
 enum { RB_STATE_GAME = 0, RB_STATE_MENU = 1, RB_STATE_SUBTITLE = 2 };
@@ -83,7 +85,40 @@ int main(int argc, char** argv) {
     render[0x89] = 4;
     retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_dialogue_page() == 1);
-    assert(rb_test_glyphs() > 0);
+    assert(rb_test_glyphs() == 3); /* Exact (0201, 1), never page 0. */
+
+    /* A single pack page serves a later game page of the same dialogue. */
+    msg[8] = 0x02;
+    msg[9] = 0x02; /* text id 0x0202 */
+    render[0x89] = 3;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_dialogue_page() == 0);
+    assert(rb_test_glyphs() == 3);
+    render[0x89] = 4;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_dialogue_page() == 1);
+    assert(rb_test_glyphs() == 3); /* Page 0 is the only page. */
+
+    /* A multi-page dialogue with a missing middle page must not fall back. */
+    msg[8] = 0x03;
+    msg[9] = 0x02; /* text id 0x0203: pages 0 and 2 only */
+    render[0x89] = 3;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_dialogue_page() == 0);
+    assert(rb_test_glyphs() == 2);
+    render[0x89] = 4;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_dialogue_page() == 1);
+    assert(rb_test_glyphs() == 0); /* Render the FFFF missing-page notice. */
+
+    /* Return to the exact page-1 fixture for the existing overlay checks. */
+    msg[8] = 0x01;
+    msg[9] = 0x02;
+    render[0x89] = 3;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    render[0x89] = 4;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_glyphs() == 3);
 
     /* Default chord: L (bit 9) + Select (bit 2). */
     keys = (1u << 9) | (1u << 2);
@@ -107,6 +142,41 @@ int main(int argc, char** argv) {
     retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_state() == RB_STATE_GAME);
     assert(retrobilingual_should_run_frame(&core) == 1);
+
+    /* A long single pack page scrolls in the HUD without changing sDlgPage. */
+    msg[8] = 0x04;
+    msg[9] = 0x02; /* text id 0x0204 */
+    render[0x89] = 3;
+    keys = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    x_down = 1;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_SUBTITLE);
+    x_down = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    memset(fb, 0x11, sizeof(fb));
+    retrobilingual_draw(&core, fb, 240, 160, 240 * 2);
+    assert(rb_test_hud_scroll() == 0);
+    assert(rb_test_hud_first_visible_line() == 0);
+    keys = (1u << 4); /* RIGHT */
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_scroll() == 2);
+    keys = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    keys = (1u << 4); /* RIGHT */
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_scroll() == 4);
+    assert(rb_test_dialogue_page() == 0);
+    memset(fb, 0x11, sizeof(fb));
+    retrobilingual_draw(&core, fb, 240, 160, 240 * 2);
+    assert(rb_test_hud_first_visible_line() == 4); /* Fifth and sixth lines. */
+    keys = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    x_down = 1;
+    retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_state() == RB_STATE_GAME);
+    x_down = 0;
+    retrobilingual_process_input(&core, &keys, input_cb);
 
     /* Y opens the menu and pauses; Y closes it. */
     y_down = 1; keys = 0;

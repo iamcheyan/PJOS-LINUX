@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import importlib.util
+import hashlib
 import json
+import sqlite3
 import struct
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +53,44 @@ def parse(pack_bytes):
 
 @unittest.skipUnless(FONT.exists(), "Sarasa font not available")
 class PackTests(unittest.TestCase):
+    def test_visual_lines_keep_their_source_page(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            source_hash = hashlib.sha256(b"page-identity").hexdigest()
+            database = directory / "translations.db"
+            db = sqlite3.connect(database)
+            db.execute(
+                "CREATE TABLE translations (game_id TEXT, source_rom_hash TEXT,"
+                " source_text_id TEXT, page_index INTEGER, japanese_text TEXT, review_status TEXT)"
+            )
+            db.execute(
+                "INSERT INTO translations VALUES (?, ?, ?, ?, ?, ?)",
+                ("zelda_minish_cap", source_hash, "0309", 0, "raw", "approved"),
+            )
+            db.commit()
+            db.close()
+            texts = directory / "texts.json"
+            texts.write_text(json.dumps({"entries": [{
+                "source_id": "0309", "page_index": 0,
+                "text": "第一行\\n第二行\\n第三行\\n第四行\\n第五行\\n第六行",
+            }]}, ensure_ascii=False), encoding="utf-8")
+            output = directory / "retrobilingual.pack"
+            subprocess.run([
+                "python3", str(ROOT / "tools/retrobilingual/pack.py"),
+                "--database", str(database), "--texts", str(texts),
+                "--source-rom-sha256", source_hash, "--font", str(FONT),
+                "--output", str(output),
+            ], check=True)
+            self.assertEqual(
+                [(entry[0], entry[1]) for entry in parse(output.read_bytes())["entries"]],
+                [(0x0309, 0), (0xFFFF, 0)],
+            )
+
+    def test_sanitizer_rejects_glyph_holes_and_keeps_script_markers(self):
+        with self.assertRaisesRegex(ValueError, "unmapped glyph"):
+            pack.sanitize_text("[G9:E4]")
+        self.assertEqual(pack.sanitize_text("甲+\n\n乙@ {player} {1}"), "甲+\n\n乙@ 林克 1")
+
     def build_db(self, directory):
         db = retro.connect(Path(directory) / "translations.db")
         ja = export("ja", JA_HASH, [
