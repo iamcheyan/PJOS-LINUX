@@ -235,7 +235,7 @@ int main(int argc, char** argv) {
     assert(rb_test_state() == RB_STATE_GAME);
     assert(strstr(rb_test_toast(), "LOADED SLOT 2") != NULL);
 
-    /* Open menu, move down to POSITION (item 4), test cycling AUTO -> TOP -> BOTTOM */
+    /* Open menu, move down to POSITION (item 4), test cycling AUTO -> TOP -> CENTER -> BOTTOM -> AUTO */
     y_down = 1; retrobilingual_process_input(&core, &keys, input_cb); y_down = 0; retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_hud_pos() == 0); /* AUTO */
     for (int i = 0; i < 4; i++) {
@@ -244,9 +244,12 @@ int main(int argc, char** argv) {
     /* Press RIGHT (bit 4) -> TOP (1) */
     keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_hud_pos() == 1); /* TOP */
-    /* Press RIGHT (bit 4) -> BOTTOM (2) */
+    /* Press RIGHT (bit 4) -> CENTER (2) */
     keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
-    assert(rb_test_hud_pos() == 2); /* BOTTOM */
+    assert(rb_test_hud_pos() == 2); /* CENTER */
+    /* Press RIGHT (bit 4) -> BOTTOM (3) */
+    keys = (1u << 4); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
+    assert(rb_test_hud_pos() == 3); /* BOTTOM */
     /* Press A (bit 0) -> AUTO (0) */
     keys = (1u << 0); retrobilingual_process_input(&core, &keys, input_cb); keys = 0; retrobilingual_process_input(&core, &keys, input_cb);
     assert(rb_test_hud_pos() == 0); /* AUTO */

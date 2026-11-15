@@ -102,15 +102,16 @@ static int sBindingCount;
 typedef enum {
     RB_POS_AUTO = 0,
     RB_POS_TOP = 1,
-    RB_POS_BOTTOM = 2,
-    RB_POS_COUNT = 3
+    RB_POS_CENTER = 2,
+    RB_POS_BOTTOM = 3,
+    RB_POS_COUNT = 4
 } RBHudPos;
 
 typedef struct {
     int enabled;
     int x_action;              /* 0: SUBTITLE, 1: SAVE, 2: LOAD */
     int slot;                  /* 0..4 (Slot 1..5) */
-    int hud_pos;               /* 0: AUTO, 1: TOP, 2: BOTTOM */
+    int hud_pos;               /* 0: AUTO, 1: TOP, 2: CENTER, 3: BOTTOM */
     int chord[ACT_COUNT][2];   /* RetroPad ids, -1 = unset */
 } RBConfig;
 static RBConfig sCfg = {
@@ -225,8 +226,7 @@ static void rb_config_load(void) {
     char line[256];
     while (fgets(line, sizeof(line), f)) {
         int a = -1, b = -1, v = -1;
-        if (sscanf(line, "subtitle_enabled=%d", &v) == 1) sCfg.enabled = v != 0;
-        else if (sscanf(line, "x_action=%d", &v) == 1) {
+        if (sscanf(line, "x_action=%d", &v) == 1) {
             if (v >= 0 && v < X_ACT_COUNT) sCfg.x_action = v;
         }
         else if (sscanf(line, "slot=%d", &v) == 1) {
@@ -671,8 +671,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     }
 
     if (sState == RB_MENU) {
-        if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 6;
-        if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 5) % 6;
+        if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 5;
+        if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 4) % 5;
         if (sMenuCursor == 1 || sMenuCursor == 2) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.slot = (sCfg.slot + 1) % RB_SLOT_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.slot = (sCfg.slot + RB_SLOT_COUNT - 1) % RB_SLOT_COUNT; rb_config_save(); }
@@ -682,8 +682,6 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         } else if (sMenuCursor == 4) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.hud_pos = (sCfg.hud_pos + RB_POS_COUNT - 1) % RB_POS_COUNT; rb_config_save(); }
-        } else if (sMenuCursor == 5) {
-            if (edge(now, prev, RB_KEY_RIGHT) || edge(now, prev, RB_KEY_LEFT)) { sCfg.enabled = !sCfg.enabled; rb_config_save(); }
         }
 
         if (y_just || edge(now, prev, RB_KEY_B)) {
@@ -696,7 +694,6 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             case 2: do_load(core); sState = RB_GAME; break;
             case 3: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
             case 4: sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); break;
-            case 5: sCfg.enabled = !sCfg.enabled; rb_config_save(); break;
             default: break;
             }
         }
@@ -720,11 +717,9 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         sMenuCursor = 0;
     } else if (x_just) {
         if (sCfg.x_action == X_ACT_SUBTITLE) {
-            if (sCfg.enabled) {
-                rb_dialogue_read(gba);
-                rb_pause(core);
-                sState = RB_SUBTITLE;
-            }
+            rb_dialogue_read(gba);
+            rb_pause(core);
+            sState = RB_SUBTITLE;
         } else if (sCfg.x_action == X_ACT_SAVE) {
             do_save(core);
         } else if (sCfg.x_action == X_ACT_LOAD) {
@@ -736,7 +731,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             if (c && !sPrevAction[a]) {
                 if (a == ACT_SAVE) do_save(core);
                 else if (a == ACT_LOAD) do_load(core);
-                else if (a == ACT_SUBTITLE && sCfg.enabled) {
+                else if (a == ACT_SUBTITLE) {
                     rb_dialogue_read(gba);
                     rb_pause(core);
                     sState = RB_SUBTITLE;
@@ -818,19 +813,22 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             int total_h = line_n * line_h - 3;
             if (total_h < 12) total_h = 12;
 
-            /* Determine whether dialogue box is at bottom or top */
-            int at_bottom = 0;
+            /* Determine whether dialogue box is at bottom, top, or center */
+            int target_y;
             if (sCfg.hud_pos == RB_POS_BOTTOM) {
-                at_bottom = 1;
+                target_y = 106 + (38 - total_h) / 2;
             } else if (sCfg.hud_pos == RB_POS_TOP) {
-                at_bottom = 0;
+                target_y = 14 + (38 - total_h) / 2;
+            } else if (sCfg.hud_pos == RB_POS_CENTER) {
+                target_y = (RB_FB_H - total_h) / 2;
             } else {
                 /* RB_POS_AUTO: Auto-detect whether in-game dialogue box is at bottom or top */
+                int at_bottom = 0;
                 if ((fb[108 * p + 120] & 0x7BEF) == 0 && (fb[14 * p + 120] & 0x7BEF) != 0) {
                     at_bottom = 1;
                 }
+                target_y = at_bottom ? (106 + (38 - total_h) / 2) : (14 + (38 - total_h) / 2);
             }
-            int target_y = at_bottom ? (106 + (38 - total_h) / 2) : (14 + (38 - total_h) / 2);
             if (target_y < 8) target_y = 8;
             if (target_y + total_h > RB_FB_H - 8) target_y = RB_FB_H - 8 - total_h;
 
@@ -886,21 +884,21 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             ui_text(fb, p, nx, ny, "NO TRANSLATION", 0xFFFF);
         }
     } else if (sState == RB_MENU || sState == RB_BINDINGS) {
-        int mw = 180, mh = 6 * 16 + 16;
-        int mx = (RB_FB_W - mw) / 2, my = 10;
+        int mw = 180, mh = 5 * 16 + 16;
+        int mx = (RB_FB_W - mw) / 2, my = 18;
         rect(fb, p, mx - 2, my - 2, mw + 4, mh + 4, 0x7BEF);
         rect(fb, p, mx, my, mw, mh, 0x0000);
         if (sState == RB_MENU) {
-            static const char* labels[6] = {
-                "RESUME", "QUICK SAVE", "QUICK LOAD", "X BUTTON", "POSITION", "SUBTITLES"
+            static const char* labels[5] = {
+                "RESUME", "QUICK SAVE", "QUICK LOAD", "X BUTTON", "POSITION"
             };
             static const char* x_names[X_ACT_COUNT] = {
                 "TRANSLATE", "SAVE", "LOAD"
             };
             static const char* pos_names[RB_POS_COUNT] = {
-                "AUTO", "TOP", "BOTTOM"
+                "AUTO", "TOP", "CENTER", "BOTTOM"
             };
-            for (int i = 0; i < 6; i++) {
+            for (int i = 0; i < 5; i++) {
                 int iy = my + 8 + i * 16;
                 if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 12, 0x2965);
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
@@ -914,8 +912,6 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     ui_text(fb, p, mx + mw - 62, iy, x_names[sCfg.x_action], 0xFFE0);
                 } else if (i == 4) {
                     ui_text(fb, p, mx + mw - 48, iy, pos_names[sCfg.hud_pos], 0xFFE0);
-                } else if (i == 5) {
-                    ui_text(fb, p, mx + mw - 28, iy, sCfg.enabled ? "ON" : "OFF", 0xFFE0);
                 }
             }
         } else {
