@@ -13,7 +13,19 @@ if [ -d /tmp/retrobilingual-mgba-src ]; then
 else
     git clone --depth 1 --branch "$VERSION" https://github.com/mgba-emu/mgba.git "$TMP/source"
 fi
-python3 "$HERE/src/apply-retrobilingual-mgba.py" "$TMP/source" "$HERE/src"
+
+RB_DIR=${PJOS_RETROBILINGUAL_DIR:-"$HOME/development/retrobilingual"}
+if [ -d "$RB_DIR/core" ]; then
+    echo "using upstream retrobilingual source: $RB_DIR/core"
+    python3 "$HERE/src/apply-retrobilingual-mgba.py" "$TMP/source" "$RB_DIR/core"
+    cp "$RB_DIR/core/retrobilingual.c" "$HERE/src/retrobilingual.c" 2>/dev/null || :
+    cp "$RB_DIR/core/retrobilingual.h" "$HERE/src/retrobilingual.h" 2>/dev/null || :
+    if [ -f "$RB_DIR/tools/pack.py" ]; then
+        cp "$RB_DIR/tools/pack.py" "$HERE/tools/retrobilingual/pack.py" 2>/dev/null || :
+    fi
+else
+    python3 "$HERE/src/apply-retrobilingual-mgba.py" "$TMP/source" "$HERE/src"
+fi
 mkdir -p "$OUT"
 
 cat > "$TMP/build.sh" <<'BUILD'
