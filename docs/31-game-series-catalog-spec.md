@@ -9,7 +9,7 @@
 
 《塞尔达传说：缩小帽》的五个版本保留现有的“一个系列卡片 → 五个版本”的交互和视觉效果，但成为该通用规则的第一个数据样例。
 
-## 当前实现与问题
+## 迁移前的旧实现与问题（已移除）
 
 当前 `pocketshell/app/launcher-catalog.ts`：
 
@@ -163,6 +163,26 @@ UI 不得包含游戏名正则、单一系列 ID、某个 ROM 的固定标题或
 4. 选择版本后启动的绝对路径与 `series.json` 对应。
 5. 重启启动器后，该系列将最近选择的版本置顶；其他系列互不影响。
 6. 删除或增加一个版本只需改目录及 `series.json`，不修改 TypeScript、Rust 或 shell 代码。
+
+## 已安装应用目录约定
+
+非内置 PocketJS 应用不写入启动器代码或资源包；启动器通过运行时的 `APPS\tlist` 通用协议发现它们。固定目录为：
+
+```text
+/storage/apps/
+├── kanade.pocket       # 应用包；文件名（不含 .pocket）就是稳定应用 ID
+└── kanade.png          # 可选同名封面；缺失时使用通用封面
+```
+
+规则：
+
+1. 将任意符合当前 runtime profile 的 `<id>.pocket` 放入 `/storage/apps/`，即可成为首页卡片；`id` 使用 `[A-Za-z0-9_-]{1,64}`。
+2. 若存在同目录 `<id>.png`，卡片和背景直接使用它；文件名不匹配或缺失时只回退到通用封面，不影响启动。
+3. 显示名称由 ID 自动转换（例如 `kanade` → `Kanade`、`my-player` → `My Player`），不维护应用 ID→名称/图标/封面的前端映射表。
+4. 确认卡片时启动器发送 `LAUNCH\t<id>`；运行时再次验证 ID 与 `/storage/apps/<id>.pocket`，然后交给既有 supervisor 启动。因此发现规则与启动规则使用同一个目录和 ID。
+5. 删除这两个文件会在下次启动器重启后移除该卡片；不需修改前端、扫描器或 runtime。
+
+2026-11-15 已按此约定安装 Kanade：`kanade.pocket` 与 `kanade.png`。它是离线视频与音频查看器的第一个验证样例，不含 Kanade 专用启动器代码。
 
 ## 实施边界
 

@@ -107,6 +107,30 @@ def build_pack(entries, atlas, index, glyph_size, rom_sha256: bytes) -> bytes:
     return bytes(out)
 
 
+def split_dialogue_pages(text: str) -> list[str]:
+    import re
+    t = text.replace("\\n", "\n").strip()
+    if not t or t == "[EMPTY]":
+        return []
+    raw_blocks = [b.strip() for b in re.split(r"\n\s*\n+", t) if b.strip()]
+    pages = []
+    terminators = ("+", "@", "!", "?", "。", "！", "？", "……", "······")
+    for block in raw_blocks:
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        current_page_lines = []
+        for i, line in enumerate(lines):
+            current_page_lines.append(line)
+            if line.endswith(terminators) and i < len(lines) - 1:
+                pages.append("\n".join(current_page_lines))
+                current_page_lines = []
+            elif len(current_page_lines) >= 2 and i < len(lines) - 1:
+                pages.append("\n".join(current_page_lines))
+                current_page_lines = []
+        if current_page_lines:
+            pages.append("\n".join(current_page_lines))
+    return pages
+
+
 def sanitize_text(text: str) -> str:
     import re
     # Strip any bracketed control codes like [C...], [G...], [WAIT]
@@ -136,16 +160,29 @@ def main() -> int:
     texts = load_texts(Path(args.texts))
     approved = approved_mappings(Path(args.database), args.source_rom_sha256)
     selected = []
+    seen = set()
     for sid, page in approved:
         text = texts.get((sid, page))
-        if text:
-            cleaned = sanitize_text(text)
-            if cleaned:
-                selected.append((sid, page, cleaned))
+        if not text:
+            continue
+        if page == 0 and (sid, 1) not in texts:
+            subpages = split_dialogue_pages(text)
+            if len(subpages) > 1:
+                for p_idx, sub in enumerate(subpages):
+                    cleaned = sanitize_text(sub)
+                    if cleaned and (sid, p_idx) not in seen:
+                        selected.append((sid, p_idx, cleaned))
+                        seen.add((sid, p_idx))
+                continue
+        cleaned = sanitize_text(text)
+        if cleaned and (sid, page) not in seen:
+            selected.append((sid, page, cleaned))
+            seen.add((sid, page))
     if not selected:
         raise SystemExit("no approved mapping has Unicode text; refusing to build an empty pack")
     notice = "暂无翻译"
     selected.append(("FFFF", 0, notice))
+    selected.sort(key=lambda x: (int(x[0], 16), x[1]))
     chars = {c for _, _, text in selected for c in text if c not in "\n"}
     atlas, index = build_atlas(chars, Path(args.font), args.font_size)
     pack = build_pack(selected, atlas, index, args.font_size, digest)
