@@ -822,12 +822,19 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             } else if (sCfg.hud_pos == RB_POS_CENTER) {
                 target_y = (RB_FB_H - total_h) / 2;
             } else {
-                /* RB_POS_AUTO: Auto-detect whether in-game dialogue box is at bottom or top */
-                int at_bottom = 0;
-                if ((fb[108 * p + 120] & 0x7BEF) == 0 && (fb[14 * p + 120] & 0x7BEF) != 0) {
-                    at_bottom = 1;
+                /* RB_POS_AUTO: Auto-dodge in-game dialogue box:
+                 * If in-game dialogue is at BOTTOM -> translation HUD appears at TOP.
+                 * If in-game dialogue is at TOP    -> translation HUD appears at BOTTOM.
+                 */
+                int top_dark = 0, bottom_dark = 0;
+                static const int xs[] = { 60, 120, 180 };
+                for (int i = 0; i < 3; i++) {
+                    int x = xs[i];
+                    if ((fb[20 * p + x] & 0x7BEF) <= 0x0842) top_dark++;
+                    if ((fb[120 * p + x] & 0x7BEF) <= 0x0842) bottom_dark++;
                 }
-                target_y = at_bottom ? (106 + (38 - total_h) / 2) : (14 + (38 - total_h) / 2);
+                int in_game_box_at_bottom = (bottom_dark > top_dark);
+                target_y = in_game_box_at_bottom ? (14 + (38 - total_h) / 2) : (106 + (38 - total_h) / 2);
             }
             if (target_y < 8) target_y = 8;
             if (target_y + total_h > RB_FB_H - 8) target_y = RB_FB_H - 8 - total_h;
