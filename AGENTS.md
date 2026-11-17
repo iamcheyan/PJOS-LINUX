@@ -48,6 +48,7 @@
 - Dialogue pagination and newline formatting:
   - The HUD is 15 fullwidth glyphs wide. That width limit is not a new `page_index`. The packer must never make pages from visual wrapping; TMC's actual player-A boundary is every second raw `0x0A` newline (`text.c:GetCharacter`, `message.c:RunTextCommand` / `TextDispWait`). Long single pages scroll in the HUD with left/right, without changing `sDlgPage`.
   - Repair procedure, measured counts, and the runtime lookup rules are in `docs/33-retrobilingual-translation-repair.md`. Follow that document instead of adding more page splits.
+  - Golden Sun: The Opened Seal (`AGSJ01`) uses `core/adapters/golden_sun.c`. The production gate is the clean JP rev0 dump (8,388,608 bytes, SHA-256 `088bedae4bad8b67e87ff10035a898d3639f3182d486fe5a5d113bab223e0a26`); a second profile gates the 2024 CN public beta for local verification. Page breaks are standalone `0x01` controls; `0x11` consumes its operand. Build/verify instructions and the full coverage report are in `~/development/retrobilingual/docs/GOLDEN_SUN.md`. The four local Golden Sun ROMs in `resouces/` are all Chinese translations; the clean JP dump is not present.
   - Active runtime pack is deployed to `/storage/.config/pocketjs/retrobilingual.pack`.
 - Physical button mappings and DTS alignment on RG34XX:
   - Electrical wiring: physical left button (printed **Y**) sends `evdev 306` (`BTN_WEST` $\to$ `js 2`); physical top button (printed **X**) sends `evdev 307` (`BTN_NORTH` $\to$ `js 3`).

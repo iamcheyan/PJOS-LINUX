@@ -118,7 +118,7 @@ class PackTests(unittest.TestCase):
                 {"source_id": "0001", "page_index": 0, "text": "你好"},
                 {"source_id": "0002", "page_index": 0, "text": "未审核"},
             ]}, ensure_ascii=False), encoding="utf-8")
-            approved = pack.approved_mappings(Path(temporary) / "translations.db", JA_HASH)
+            approved = pack.approved_mappings(Path(temporary) / "translations.db", JA_HASH, "zelda_minish_cap")
             self.assertEqual(approved, [("0001", 0)])
             mapping = dict(approved)
             selected = [("0001", 0, "你好")]
@@ -138,7 +138,7 @@ class PackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             db = self.build_db(temporary)
             texts = {"0002": "未审核"}
-            approved = pack.approved_mappings(Path(temporary) / "translations.db", JA_HASH)
+            approved = pack.approved_mappings(Path(temporary) / "translations.db", JA_HASH, "zelda_minish_cap")
             selected = [(sid, page, texts[sid]) for sid, page in approved if sid in texts]
             self.assertEqual(selected, [])
 

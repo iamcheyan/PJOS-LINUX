@@ -66,6 +66,7 @@ def main() -> int:
                 "gcc", "-std=c11", "-O1", "-Wall", "-DRB_HOST_TEST",
                 "-I", str(ROOT / "tests/host"), "-I", str(ROOT / "src"),
                 str(ROOT / "src/retrobilingual.c"),
+                str(ROOT / "tests/host/test_adapter.c"),
                 str(ROOT / "tests/host/test_overlay.c"),
                 "-o", str(binary),
             ],

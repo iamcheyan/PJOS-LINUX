@@ -29,6 +29,10 @@ struct GBA {
         uint32_t* wram;
         size_t romSize;
     } memory;
+    struct {
+        uint16_t* vram;
+    } video;
+    size_t pristineRomSize;
     uint32_t romCrc32;
 };
 

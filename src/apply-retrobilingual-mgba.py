@@ -13,6 +13,13 @@ libretro = source / "src/platform/libretro/libretro.c"
 text = libretro.read_text(encoding="utf-8")
 
 shutil.copy(src / "retrobilingual.c", source / "src/platform/libretro/retrobilingual.c")
+for adapter in (src / "adapters").glob("*.c"):
+    if adapter.name == "template.c":
+        continue
+    shutil.copy(adapter, source / "src/platform/libretro" / adapter.name)
+adapters = source / "src/platform/libretro/adapters"
+adapters.mkdir(exist_ok=True)
+shutil.copy(src / "adapters/adapter.h", adapters / "adapter.h")
 shutil.copy(src / "retrobilingual.h", source / "src/platform/libretro/retrobilingual.h")
 
 

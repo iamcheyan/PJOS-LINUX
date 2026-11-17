@@ -42,28 +42,28 @@ def load_texts(path: Path) -> dict[tuple[str, int], str]:
     return texts
 
 
-def approved_mappings(db_path: Path, source_hash: str):
+def approved_mappings(db_path: Path, source_hash: str, game_id: str):
     db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     rows = db.execute(
-        "SELECT source_text_id, page_index, source_rom_hash FROM translations"
-        " WHERE game_id='zelda_minish_cap' AND review_status='approved'"
+        "SELECT source_text_id, page_index FROM translations"
+        " WHERE game_id=? AND review_status='approved'"
         "   AND source_rom_hash=? ORDER BY source_text_id, page_index",
-        (source_hash,),
+        (game_id, source_hash),
     ).fetchall()
     db.close()
-    return [(sid, page) for sid, page, _ in rows]
+    return [(sid, page) for sid, page in rows]
 
 
-def all_mappings(db_path: Path, source_hash: str):
+def all_mappings(db_path: Path, source_hash: str, game_id: str):
     db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     rows = db.execute(
-        "SELECT source_text_id, page_index, source_rom_hash FROM translations"
-        " WHERE game_id='zelda_minish_cap' AND japanese_text != '[EMPTY]'"
+        "SELECT source_text_id, page_index FROM translations"
+        " WHERE game_id=? AND japanese_text != '[EMPTY]'"
         "   AND source_rom_hash=? ORDER BY source_text_id, page_index",
-        (source_hash,),
+        (game_id, source_hash),
     ).fetchall()
     db.close()
-    return [(sid, page) for sid, page, _ in rows]
+    return [(sid, page) for sid, page in rows]
 
 
 def wrap_line(line: str, max_chars: int = 15) -> list[str]:
@@ -195,8 +195,10 @@ def main() -> int:
     parser.add_argument("--texts", required=True, help="JSON list of {source_id,page_index,text} (UTF-8 Chinese)")
     parser.add_argument("--source-rom-sha256", required=True)
     parser.add_argument("--font", default=str(Path.home() / "development/pocketshell/app/fonts/SarasaUiSC-Regular.ttf"))
+    parser.add_argument("--game-id", default="zelda_minish_cap", help="game ID used by the translation database")
     parser.add_argument("--font-size", type=int, default=12)
-    parser.add_argument("--include-all", action="store_true", help="Include all non-empty translations for 100% coverage")
+    parser.add_argument("--include-all", action="store_true", help="Include all non-empty translations for 100%% coverage")
+    parser.add_argument("--no-notice", action="store_true", help="Do not append the FFFF no-translation fallback entry")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -205,9 +207,9 @@ def main() -> int:
         raise SystemExit("source-rom-sha256 must be 32 bytes of hex")
     texts = load_texts(Path(args.texts))
     if args.include_all:
-        candidates = all_mappings(Path(args.database), args.source_rom_sha256)
+        candidates = all_mappings(Path(args.database), args.source_rom_sha256, args.game_id)
     else:
-        candidates = approved_mappings(Path(args.database), args.source_rom_sha256)
+        candidates = approved_mappings(Path(args.database), args.source_rom_sha256, args.game_id)
     selected = []
     seen = set()
     for sid, page in candidates:
@@ -223,8 +225,9 @@ def main() -> int:
             seen.add((sid, page))
     if not selected:
         raise SystemExit("no approved mapping has Unicode text; refusing to build an empty pack")
-    notice = "暂无翻译"
-    selected.append(("FFFF", 0, notice))
+    if not args.no_notice:
+        notice = "暂无翻译"
+        selected.append(("FFFF", 0, notice))
     selected.sort(key=lambda x: (int(x[0], 16), x[1]))
     chars = {c for _, _, text in selected for c in text if c not in "\n"}
     atlas, index = build_atlas(chars, Path(args.font), args.font_size)

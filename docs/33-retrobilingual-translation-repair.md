@@ -17,6 +17,7 @@
 - 禁止为了凑覆盖率删掉未映射标记后再当审核通过。缺字必须留在报告里。
 - 禁止把视觉折行写成新的 `page_index`。这是当前错页的直接原因。
 - 禁止在查找失败时退回上一页。缺页必须显示缺页，不能显示另一句。
+  - 例外：Golden Sun 适配器的 `page_slack=1`，因为 A 翻页会短暂超前于已建页；核心只对该适配器回退到最近的已建页。TMC 的 `page_slack=0`，本规则仍原样适用。
 - 禁止把 ROM、整段剧情文本、设备密码写进 git。`data/tmc_*.json`、`data/chinese_utf8.json`、`data/glyphs/` 已被 `.gitignore` 忽略，保持这样。`data/glyph_mapping.json` 可以提交。
 - 禁止为了修译文去改 HUD 配色、菜单位置、按键映射或存档槽。
 

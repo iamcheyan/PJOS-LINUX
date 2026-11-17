@@ -36,14 +36,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define RB_JP_ROM_CRC32 0x6CE771A5u
-#define RB_JP_ROM_SIZE  0x01000000u
-#define RB_JP_ROM_SHA256 \
-    "16ac2572ba17e9cb2a70093d41f97ef8cff66c56417e45ea98adacdc51bb4b38"
-
-#define RB_EWRAM_MESSAGE      0x50u
-#define RB_EWRAM_TEXT_RENDER  0x22780u
-#define RB_MSG_STATE_ACTIVE   0x7Fu
+#include "adapters/adapter.h"
 
 #define RB_KEY_A      (1u << 0)
 #define RB_KEY_B      (1u << 1)
@@ -139,10 +132,12 @@ static size_t sStateSize;
 static char sConfigPath[512];
 static char sPackPath[512];
 static char sStatePath[512];
+static const RBAdapter* sAdapter;
+static uint8_t sRomSha256[32];
+static int sRomIdentityReady;
 
 static uint16_t sDlgTextId;
 static uint8_t sDlgPage;
-static uint8_t sDlgRender;
 static int sDlgActive;
 static int sDlgChanged;
 static uint32_t sDlgGlyphStart;
@@ -214,6 +209,24 @@ static void sha_final(Sha256* s, uint8_t out[32]) {
         out[i*4] = (uint8_t)(s->h[i]>>24); out[i*4+1] = (uint8_t)(s->h[i]>>16);
         out[i*4+2] = (uint8_t)(s->h[i]>>8); out[i*4+3] = (uint8_t)s->h[i];
     }
+}
+
+static int rb_rom_identity(const struct GBA* gba) {
+    if (!gba || !gba->memory.rom || !gba->memory.romSize) return 0;
+    if (sRomIdentityReady) return sAdapter != NULL;
+    /* mGBA pads memory.romSize up to the cartridge address-space mask; the
+     * real file length is pristineRomSize. Hash and gate on the file length,
+     * otherwise non-power-of-two ROMs (Golden Sun is 0x8D4000/0xB0E9B0)
+     * can never match a pack. */
+    size_t rom_size = gba->pristineRomSize ? gba->pristineRomSize : gba->memory.romSize;
+    Sha256 sha;
+    sha_init(&sha);
+    sha_update(&sha, gba->memory.rom, rom_size);
+    sha_final(&sha, sRomSha256);
+    sAdapter = rb_adapter_match((uint32_t)rom_size, sRomSha256);
+    sRomIdentityReady = 1;
+    if (sAdapter && sAdapter->reset) sAdapter->reset();
+    return sAdapter != NULL;
 }
 
 /* ---------- config and pack paths -------------------------------------- */
@@ -293,12 +306,9 @@ static int rb_pack_load(void) {
         size_t off = 18;
         if (off + 32 > (size_t)size) break;
         /* ROM hash gate */
-        Sha256 sha; sha_init(&sha);
         const struct GBA* gba = sCore ? sCore->board : NULL;
-        if (!gba || gba->memory.romSize != RB_JP_ROM_SIZE) break;
-        sha_update(&sha, gba->memory.rom, gba->memory.romSize);
-        uint8_t digest[32]; sha_final(&sha, digest);
-        if (memcmp(digest, data + off, 32) != 0) break;
+        if (!rb_rom_identity(gba) || memcmp(sRomSha256, data + off, 32) != 0) break;
+
         off += 32;
 
         sPack.glyph_bytes = ((size_t)sPack.glyph_w * sPack.glyph_h + 7) / 8;
@@ -352,6 +362,15 @@ static int rb_find_entry(uint16_t text_id, uint8_t page, RBEntry** out) {
 static int rb_find_dialogue_entry(uint16_t text_id, uint8_t page, RBEntry** out) {
     if (rb_find_entry(text_id, page, out)) return 1;
 
+    /* Adapters that advance page on an A press can briefly overshoot the
+     * built pages while the next message loads.  Only those games clamp down
+     * to the closest earlier page; otherwise a missing page is a genuine gap
+     * and must fall through to the no-translation path. */
+    if (sAdapter && sAdapter->page_slack) {
+        for (int earlier = (int)page - 1; earlier >= 0; earlier--)
+            if (rb_find_entry(text_id, (uint8_t)earlier, out)) return 1;
+    }
+
     /* A long translation which only has page 0 is scrolled in the HUD, not
      * split into invented pack pages.  It may therefore serve later game
      * dialogue pages.  Once an id has any real non-zero pack page, however,
@@ -368,39 +387,31 @@ static int rb_find_dialogue_entry(uint16_t text_id, uint8_t page, RBEntry** out)
         return rb_find_entry(text_id, 0, out);
     return 0;
 }
-
-/* ---------- dialogue state --------------------------------------------- */
-static void rb_dialogue_read(const struct GBA* gba) {
-    if (!sPack.loaded || !gba || !gba->memory.wram) {
+static void rb_dialogue_read(struct mCore* core, uint16_t keys) {
+    if (!sPack.loaded || !core || !sAdapter) {
         if (sDlgActive) sDlgChanged = 1;
         sDlgActive = 0;
         sDlgGlyphCount = 0;
         return;
     }
-    const uint8_t* ewram = (const uint8_t*)gba->memory.wram;
-    uint8_t  state   = ewram[RB_EWRAM_MESSAGE];
-    uint16_t textId  = rd16(ewram + RB_EWRAM_MESSAGE + 8);
-    uint8_t  render  = ewram[RB_EWRAM_TEXT_RENDER + 0x89];
-    int active = (state & RB_MSG_STATE_ACTIVE) != 0;
-
-    if (!active) {
+    uint16_t textId;
+    uint8_t page;
+    if (!sAdapter->read_dialogue(core, keys, &textId, &page)) {
         if (sDlgActive) sDlgChanged = 1;
         sDlgActive = 0;
+        sDlgGlyphCount = 0;
         return;
     }
-    if (!sDlgActive || textId != sDlgTextId) {
+    if (!sDlgActive || textId != sDlgTextId || page != sDlgPage) {
         sDlgTextId = textId;
-        sDlgPage = 0;
+        sDlgPage = page;
         sDlgChanged = 1;
-    } else if (sDlgRender == 3 && render == 4) {
-        if (sDlgPage < 0xFF) sDlgPage++;
-        sDlgChanged = 1;
+        sHudScroll = 0;
     }
-    sDlgRender = render;
     sDlgActive = 1;
 
     RBEntry* e = NULL;
-    if (sPack.loaded && rb_find_dialogue_entry(sDlgTextId, sDlgPage, &e)) {
+    if (rb_find_dialogue_entry(sDlgTextId, sDlgPage, &e)) {
         sDlgGlyphStart = e->first_glyph;
         sDlgGlyphCount = e->glyph_count;
     } else {
@@ -408,6 +419,7 @@ static void rb_dialogue_read(const struct GBA* gba) {
         sDlgGlyphCount = 0;
     }
 }
+
 
 /* ---------- drawing ---------------------------------------------------- */
 #ifdef COLOR_16_BIT
@@ -714,6 +726,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         sCore = core;
         rb_paths();
         rb_config_load();
+        rb_rom_identity(gba);
         rb_pack_load();
     }
 
@@ -811,7 +824,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         sMenuCursor = 0;
     } else if (x_just) {
         if (sCfg.x_action == X_ACT_SUBTITLE) {
-            rb_dialogue_read(gba);
+            rb_dialogue_read(core, 0);
             sHudScroll = 0;
             rb_pause(core);
             sState = RB_SUBTITLE;
@@ -827,7 +840,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
                 if (a == ACT_SAVE) do_save(core);
                 else if (a == ACT_LOAD) do_load(core);
                 else if (a == ACT_SUBTITLE) {
-                    rb_dialogue_read(gba);
+                    rb_dialogue_read(core, 0);
                     sHudScroll = 0;
                     rb_pause(core);
                     sState = RB_SUBTITLE;
@@ -838,7 +851,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     }
 
     if (sState != RB_GAME) *keys = 0;
-    else rb_dialogue_read(gba);
+    else rb_dialogue_read(core, (uint16_t)now);
 
 done:
     sPrevKeys = now;
