@@ -29,3 +29,4 @@ data/chinese_utf8.json
 data/tmc_*.json
 data/alignment_report.json
 data/review.html
+data/approved-zh.json
