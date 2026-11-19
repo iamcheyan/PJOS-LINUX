@@ -121,19 +121,26 @@ scan_series_root() {
             return s
         }
         function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
-        function flush( p) {
+        function flush( p, loc_titles) {
             if (vid != "" && vtitle != "" && vrom != "" && vrom !~ /^\// && vrom !~ /\.\./ && vrom ~ /\.(gba|gb|gbc)$/) {
                 p=dir "/" vrom
                 if (n++) variants=variants ","
-                variants=variants "{\"id\":\"" esc(vid) "\",\"title\":\"" esc(vtitle) "\",\"path\":\"" esc(p) "\",\"cover\":\"" esc((vcover != "" ? dir "/" vcover : "")) "\"" (vdefault ? ",\"default\":true" : "") "}"
+                loc_titles=""
+                if (vtitle_en != "") loc_titles=loc_titles ",\"title_en\":\"" esc(vtitle_en) "\""
+                if (vtitle_ja != "") loc_titles=loc_titles ",\"title_ja\":\"" esc(vtitle_ja) "\""
+                if (vtitle_zh != "") loc_titles=loc_titles ",\"title_zh\":\"" esc(vtitle_zh) "\""
+                variants=variants "{\"id\":\"" esc(vid) "\",\"title\":\"" esc(vtitle) "\"" loc_titles ",\"path\":\"" esc(p) "\",\"cover\":\"" esc((vcover != "" ? dir "/" vcover : "")) "\"" (vdefault ? ",\"default\":true" : "") "}"
             }
-            vid=vtitle=vrom=vcover=""; vdefault=0
+            vid=vtitle=vtitle_en=vtitle_ja=vtitle_zh=vrom=vcover=""; vdefault=0
         }
         /"variants"[ \\t]*:/ { invars=1; next }
         invars && /\{/ { active=1; next }
         active {
             x=str("id"); if (x != "") vid=x
             x=str("title"); if (x != "") vtitle=x
+            x=str("title_en"); if (x != "") vtitle_en=x
+            x=str("title_ja"); if (x != "") vtitle_ja=x
+            x=str("title_zh"); if (x != "") vtitle_zh=x
             x=str("rom"); if (x != "") vrom=x
             x=str("cover"); if (x != "") vcover=x
             if ($0 ~ /"default"[ \t]*:[ \t]*true/) vdefault=1
@@ -144,12 +151,15 @@ scan_series_root() {
             x=str("schema"); if (x != "") schema=x
             x=str("id"); if (x != "") sid=x
             x=str("title"); if (x != "") title=x
+            x=str("title_en"); if (x != "") title_en=x
+            x=str("title_ja"); if (x != "") title_ja=x
+            x=str("title_zh"); if (x != "") title_zh=x
             x=str("cover"); if (x != "") cover=x
         }
         END {
             if (schema == "pjos.game-series/v1" && sid ~ /^[a-z0-9][a-z0-9-]*$/ && length(sid) <= 64 && title != "" && n > 0) {
                 OFS="\t"
-                print 1, "games", "series", sid, title, 0, "series", (cover != "" ? dir "/" cover : ""), "[" variants "]"
+                print 1, "games", "series", sid, title, 0, "series", (cover != "" ? dir "/" cover : ""), "[" variants "]", title_en, title_ja, title_zh
             }
         }' "$manifest" >> "$ROWS"
     done
@@ -216,8 +226,13 @@ scan() {
             }
             count[key]++
             cnt = count[key]
-            if ($7 == "series")
-                items[key SUBSEP cnt] = sprintf("{\"kind\":\"series\",\"id\":\"%s\",\"title\":\"%s\",\"cover\":\"%s\",\"variants\":%s}", esc($4), esc($5), esc($8), $9)
+            if ($7 == "series") {
+                loc_titles=""
+                if ($10 != "") loc_titles=loc_titles sprintf(",\"title_en\":\"%s\"", esc($10))
+                if ($11 != "") loc_titles=loc_titles sprintf(",\"title_ja\":\"%s\"", esc($11))
+                if ($12 != "") loc_titles=loc_titles sprintf(",\"title_zh\":\"%s\"", esc($12))
+                items[key SUBSEP cnt] = sprintf("{\"kind\":\"series\",\"id\":\"%s\",\"title\":\"%s\"%s,\"cover\":\"%s\",\"variants\":%s}", esc($4), esc($5), loc_titles, esc($8), $9)
+            }
             else
                 items[key SUBSEP cnt] = sprintf("{\"title\":\"%s\",\"path\":\"%s\",\"size\":%s,\"kind\":\"%s\",\"cover\":\"%s\"}", esc($4), esc($5), $6, $7, esc($8))
             total++

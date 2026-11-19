@@ -108,6 +108,8 @@ docker run --rm --platform linux/arm64 \
   -v "$HERE/src/apply-pocketjs-player-path.py:/in/apply-player-path.py:ro" \
   -v "$HERE/src/apply-pocketjs-restore.py:/in/apply-restore.py:ro" \
   -v "$HERE/src/apply-pocketjs-kanade.py:/in/apply-kanade.py:ro" \
+  -v "$HERE/src/apply-pocketjs-fs.py:/in/apply-fs.py:ro" \
+  -v "$HERE/src/apply-pocketjs-saves.py:/in/apply-saves.py:ro" \
   -v "$HERE/work/bridge-scripts:/in/rocknix-scripts:ro" \
   -v "$CARGO_CACHE:/cargo-cache" \
   -v "$HERE/work/pocketjs-runtime:/out" \
@@ -161,6 +163,8 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-player-path.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-restore.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-kanade.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-fs.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
+    python3 /in/apply-saves.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     grep -q "fn apps_list" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
       || { echo "FATAL: installed app listing arm missing" >&2; exit 1; }
     grep -q "fn kanade_call" /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs \
