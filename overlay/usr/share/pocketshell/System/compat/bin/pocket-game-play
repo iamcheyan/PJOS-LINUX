@@ -98,7 +98,12 @@ printf '%s\n' "$rom" > /tmp/pocketjs-current-rom 2>/dev/null || :
 # place for explicit resume logic if needed.
 if [ "$is_trimui" -eq 1 ]; then
     cd "$ra_dir"
-    exec "$frontend" -v --config "$config" -L "$core" "$rom"
+    trimui_cfg=$compat/share/retroarch/driver-trimui.cfg
+    if [ -f "$trimui_cfg" ]; then
+        exec "$frontend" -v --config "$config" --appendconfig "$trimui_cfg" -L "$core" "$rom"
+    else
+        exec "$frontend" -v --config "$config" -L "$core" "$rom"
+    fi
 else
     exec "$frontend" -v --config "$config" --appendconfig "/storage/System/compat/share/retroarch/driver.cfg" -L "$core" "$rom"
 fi
