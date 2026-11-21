@@ -30,6 +30,11 @@ if [ "$#" -gt 1 ]; then
         bluetooth|wifi|btAudio|headphoneFix|ntp|adb|ssh|mdns|showClock|animations|bootResume) case "$want" in on|off) ;; *) fail invalid ;; esac ;;
         fontSize) case "$want" in normal|large|huge) ;; *) fail invalid ;; esac ;;
         themeColor) case "$want" in purple|blue|green|pink|amber|teal|coral|ice|mono) ;; *) fail invalid ;; esac ;;
+        games.lastPlayed)
+            case "$want" in /storage/*|%2Fstorage*|/mnt/sdcard/*) ;; *) fail invalid ;; esac
+            case "$want" in *[!A-Za-z0-9%._~/\(\)\ -]*) fail invalid ;; esac
+            [ "${#want}" -le 12288 ] || fail invalid
+            ;;
         series.*.lastVariant)
             sid=${key#series.}
             sid=${sid%.lastVariant}
@@ -87,18 +92,18 @@ case "$key" in
             *) echo "${val:-unknown}" ;;
         esac
         ;;
-    series.*.lastVariant)
+    games.lastPlayed|series.*.lastVariant)
         conf="$ROOT/storage/.config/pocketjs/ui-settings.conf"
         mkdir -p "${conf%/*}" 2>/dev/null || :
         if [ "$#" -gt 1 ]; then
             [ -f "$conf" ] || : > "$conf"
-            awk -F= -v name="$key" -v value="$want" '
-                $1 == name { if (!done++) print name "=" value; next }
+            awk -v name="$key" -v value="$want" '
+                $0 ~ "^" name "=" { if (!done++) print name "=" value; next }
                 { print }
                 END { if (!done) print name "=" value }
             ' "$conf" > "$conf.new" && mv "$conf.new" "$conf"
         fi
-        val=$(awk -F= -v name="$key" '$1 == name { print $2 }' "$conf" 2>/dev/null | tr -d ' \r\n')
+        val=$(awk -v name="$key" '$0 ~ "^" name "=" { print substr($0, length(name) + 2); exit }' "$conf" 2>/dev/null | tr -d '\r\n')
         echo "$val"
         ;;
     adb)

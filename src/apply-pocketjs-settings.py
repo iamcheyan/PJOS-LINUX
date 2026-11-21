@@ -34,7 +34,10 @@ fn baseos_volume_state() -> String {
 '''
 
 KEYS = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor", "bootResume"]'
-GENERIC = r'''        ["SETTING", key] if key.starts_with("series.") && key.ends_with(".lastVariant") => baseos_setting(key, None),
+LAST_PLAYED = '        ["SETTING", "games.lastPlayed"] => baseos_setting("games.lastPlayed", None),\n        ["SETTING", "games.lastPlayed", value] => baseos_setting("games.lastPlayed", Some(value)),\n'
+GENERIC = r'''        ["SETTING", "games.lastPlayed"] => baseos_setting("games.lastPlayed", None),
+        ["SETTING", "games.lastPlayed", value] => baseos_setting("games.lastPlayed", Some(value)),
+        ["SETTING", key] if key.starts_with("series.") && key.ends_with(".lastVariant") => baseos_setting(key, None),
         ["SETTING", key, value] if key.starts_with("series.") && key.ends_with(".lastVariant") => baseos_setting(key, Some(value)),
         ["STATE", "bootResume"] => baseos_setting("bootResume", None),
         ["STATE", key] if key.starts_with("series.") && key.ends_with(".lastVariant") => baseos_setting(key, None),
@@ -74,8 +77,8 @@ def main(path):
         if reads < 1 or writes < 1 or text.count('"fontSize"') < 2:
             raise SystemExit('settings: existing dispatcher arms missing or changed')
         volume_arm = '        ["SETTING", "volume"] | ["STATE", "volume"] | ["LEVEL", "volume"] => baseos_volume_state(),\n'
-        if 'key.ends_with(".lastVariant")' not in text and volume_arm in text:
-            text = text.replace(volume_arm, GENERIC + volume_arm, 1)
+        if '"SETTING", "games.lastPlayed"' not in text and volume_arm in text:
+            text = text.replace(volume_arm, LAST_PLAYED + volume_arm, 1)
         path.write_text(text)
         print('settings: already applied')
         return

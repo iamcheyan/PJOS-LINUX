@@ -1,0 +1,32 @@
+{
+  "schema": "pjos.game-series/v1",
+  "id": "fe-blazing-blade",
+  "title": "火焰之纹章：烈火之剑",
+  "title_zh": "火焰之纹章：烈火之剑",
+  "title_en": "Fire Emblem: The Blazing Blade",
+  "title_ja": "ファイアーエムブレム 烈火の剣",
+  "cover": "cover.png",
+  "variants": [
+    {
+      "id": "zh-Hans",
+      "title": "简体中文（火花狼组汉化版）",
+      "title_zh": "简体中文（火花狼组汉化版）",
+      "title_en": "Simplified Chinese (Spark Wolf)",
+      "title_ja": "簡体字中国語（火花狼組版）",
+      "rom": "gba/Fire_Emblem_Rekka_no_Ken_CN.gba",
+      "cover": "gba/Fire_Emblem_Rekka_no_Ken_CN.png",
+      "sort": 10,
+      "default": true
+    },
+    {
+      "id": "ja",
+      "title": "日版",
+      "title_zh": "日版",
+      "title_en": "Japanese",
+      "title_ja": "日本語版",
+      "rom": "gba/Fire_Emblem_Rekka_no_Ken_JA.gba",
+      "cover": "gba/Fire_Emblem_Rekka_no_Ken_JA.png",
+      "sort": 20
+    }
+  ]
+}

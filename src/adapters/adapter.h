@@ -26,6 +26,7 @@ typedef struct {
 /* Built-in game adapters */
 extern const RBAdapter g_rb_adapter_tmc;
 extern const RBAdapter g_rb_adapter_golden_sun;
+extern const RBAdapter g_rb_adapter_golden_sun_rg34xx;
 extern const RBAdapter g_rb_adapter_golden_sun_cn2024;
 const RBAdapter* rb_adapter_match(uint32_t rom_size, const uint8_t sha256[32]);
 

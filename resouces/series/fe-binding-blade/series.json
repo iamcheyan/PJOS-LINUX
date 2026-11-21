@@ -1,0 +1,32 @@
+{
+  "schema": "pjos.game-series/v1",
+  "id": "fe-binding-blade",
+  "title": "火焰之纹章：封印之剑",
+  "title_zh": "火焰之纹章：封印之剑",
+  "title_en": "Fire Emblem: The Binding Blade",
+  "title_ja": "ファイアーエムブレム 封印の剣",
+  "cover": "cover.png",
+  "variants": [
+    {
+      "id": "zh-Hans",
+      "title": "简体中文（CGP汉化版）",
+      "title_zh": "简体中文（CGP汉化版）",
+      "title_en": "Simplified Chinese (CGP)",
+      "title_ja": "簡体字中国語（CGP版）",
+      "rom": "gba/Fire_Emblem_Fuuin_no_Tsurugi_CN.gba",
+      "cover": "gba/Fire_Emblem_Fuuin_no_Tsurugi_CN.png",
+      "sort": 10,
+      "default": true
+    },
+    {
+      "id": "ja",
+      "title": "日版",
+      "title_zh": "日版",
+      "title_en": "Japanese",
+      "title_ja": "日本語版",
+      "rom": "gba/Fire_Emblem_Fuuin_no_Tsurugi_JA.gba",
+      "cover": "gba/Fire_Emblem_Fuuin_no_Tsurugi_JA.png",
+      "sort": 20
+    }
+  ]
+}

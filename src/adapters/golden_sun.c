@@ -4,13 +4,15 @@
 
 /* Camelot: Golden Sun: The Opened Seal.
  *
- * The primary target is the clean Japanese AGSJ01 rev0 ROM. The 2024 public
- * Chinese beta is a byte-compatible derivative with the same message IDs and
- * the same EWRAM text cursor; it is registered as a verification profile so
- * the adapter can be exercised on a ROM that is actually available locally.
+ * The clean Japanese AGSJ01 rev0 ROM remains the production profile. The
+ * RG34XX also contains an AGSJ-labelled patched dump whose dialogue is
+ * already Chinese; it retains the Japanese message IDs and EWRAM cursor.
  */
 #define GOLDEN_SUN_JP_ROM_SIZE 0x00800000u
 #define GOLDEN_SUN_JP_SHA256 "088bedae4bad8b67e87ff10035a898d3639f3182d486fe5a5d113bab223e0a26"
+
+#define GOLDEN_SUN_RG34XX_ROM_SIZE 0x008D4000u
+#define GOLDEN_SUN_RG34XX_SHA256 "f4e431616b920ecb572349f06dcdefd34c15789d2032216e27fe9f7ee36703b5"
 
 #define GOLDEN_SUN_CN2024_ROM_SIZE 0x00B0E9B0u
 #define GOLDEN_SUN_CN2024_SHA256 "f566de927b4ccf95e55686553db3089c26b842158d49a2a91472a8b6ba1419bc"
@@ -99,6 +101,16 @@ const RBAdapter g_rb_adapter_golden_sun = {
     .title = "Golden Sun: The Opened Seal (Japan, AGSJ01 rev0)",
     .rom_size = GOLDEN_SUN_JP_ROM_SIZE,
     .sha256_hex = GOLDEN_SUN_JP_SHA256,
+    .reset = golden_sun_reset,
+    .read_dialogue = golden_sun_read,
+    .page_slack = 1,
+};
+
+const RBAdapter g_rb_adapter_golden_sun_rg34xx = {
+    .game_id = "golden_sun_rg34xx_f4",
+    .title = "Golden Sun: The Opened Seal (RG34XX patched AGSJ dump; Chinese text)",
+    .rom_size = GOLDEN_SUN_RG34XX_ROM_SIZE,
+    .sha256_hex = GOLDEN_SUN_RG34XX_SHA256,
     .reset = golden_sun_reset,
     .read_dialogue = golden_sun_read,
     .page_slack = 1,

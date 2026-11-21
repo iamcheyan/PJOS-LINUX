@@ -1,0 +1,15 @@
+{
+  "game": "zelda_minish_cap",
+  "source_rom_sha256": "16ac2572ba17e9cb2a70093d41f97ef8cff66c56417e45ea98adacdc51bb4b38",
+  "target_rom_sha256": "f51c6c2f90e18ee91203dd767307271e06901b5bff35c3a567d52f61a39d166d",
+  "japanese_entries": 3749,
+  "chinese_entries": 3828,
+  "suggested_matches": 3749,
+  "approved_matches": 0,
+  "unmatched_japanese": 0,
+  "ambiguous_japanese": 0,
+  "match_methods": {
+    "shared_source_id_context_page": 3749
+  },
+  "review_required": true
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "pjos.game-series/v1",
+  "id": "fe-sacred-stones",
+  "title": "火焰之纹章：圣魔之光石",
+  "title_zh": "火焰之纹章：圣魔之光石",
+  "title_en": "Fire Emblem: The Sacred Stones",
+  "title_ja": "ファイアーエムブレム 聖魔の光石",
+  "cover": "cover.png",
+  "variants": [
+    {
+      "id": "zh-Hans",
+      "title": "简体中文（狼组汉化版）",
+      "title_zh": "简体中文（狼组汉化版）",
+      "title_en": "Simplified Chinese (Wolf Team)",
+      "title_ja": "簡体字中国語（狼組版）",
+      "rom": "gba/Fire_Emblem_Seima_no_Kouseki_CN.gba",
+      "cover": "gba/Fire_Emblem_Seima_no_Kouseki_CN.png",
+      "sort": 10,
+      "default": true
+    },
+    {
+      "id": "ja",
+      "title": "日版",
+      "title_zh": "日版",
+      "title_en": "Japanese",
+      "title_ja": "日本語版",
+      "rom": "gba/Fire_Emblem_Seima_no_Kouseki_JA.gba",
+      "cover": "gba/Fire_Emblem_Seima_no_Kouseki_JA.png",
+      "sort": 20
+    }
+  ]
+}

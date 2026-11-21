@@ -230,12 +230,76 @@ static int rb_rom_identity(const struct GBA* gba) {
 }
 
 /* ---------- config and pack paths -------------------------------------- */
+static char sRomPath[1024] = {0};
+
+void retrobilingual_set_rom_path(const char* path) {
+    if (path && path[0]) {
+        strncpy(sRomPath, path, sizeof(sRomPath) - 1);
+        sRomPath[sizeof(sRomPath) - 1] = '\0';
+    } else {
+        sRomPath[0] = '\0';
+    }
+}
+
+static int file_exists(const char* path) {
+    if (!path || !path[0]) return 0;
+    FILE* f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+        return 1;
+    }
+    return 0;
+}
+
 static void rb_paths(void) {
     const char* dir = getenv("RETROBILINGUAL_DIR");
     if (!dir) dir = "/storage/.config/pocketjs";
     snprintf(sConfigPath, sizeof(sConfigPath), "%s/retrobilingual.conf", dir);
-    snprintf(sPackPath, sizeof(sPackPath), "%s/retrobilingual.pack", dir);
     snprintf(sStatePath, sizeof(sStatePath), "%s/retrobilingual-quick.state", dir);
+
+    sPackPath[0] = '\0';
+
+    /* 1. First priority: Check for companion pack next to the loaded ROM */
+    if (sRomPath[0]) {
+        char stem[1024];
+        strncpy(stem, sRomPath, sizeof(stem) - 1);
+        stem[sizeof(stem) - 1] = '\0';
+        char* dot = strrchr(stem, '.');
+        if (dot && dot > strrchr(stem, '/')) *dot = '\0';
+
+        char cand[1280];
+        /* Candidate 1a: <rom_stem>.ja-zh.pack */
+        snprintf(cand, sizeof(cand), "%s.ja-zh.pack", stem);
+        if (file_exists(cand)) {
+            strncpy(sPackPath, cand, sizeof(sPackPath) - 1);
+        }
+        /* Candidate 1b: <rom_stem>.pack */
+        if (!sPackPath[0]) {
+            snprintf(cand, sizeof(cand), "%s.pack", stem);
+            if (file_exists(cand)) {
+                strncpy(sPackPath, cand, sizeof(sPackPath) - 1);
+            }
+        }
+        /* Candidate 1c: <rom_dir>/retrobilingual.pack */
+        if (!sPackPath[0]) {
+            char dir_buf[1024];
+            strncpy(dir_buf, sRomPath, sizeof(dir_buf) - 1);
+            dir_buf[sizeof(dir_buf) - 1] = '\0';
+            char* slash = strrchr(dir_buf, '/');
+            if (slash) {
+                *slash = '\0';
+                snprintf(cand, sizeof(cand), "%s/retrobilingual.pack", dir_buf);
+                if (file_exists(cand)) {
+                    strncpy(sPackPath, cand, sizeof(sPackPath) - 1);
+                }
+            }
+        }
+    }
+
+    /* 2. Global fallback to RETROBILINGUAL_DIR or /storage/.config/pocketjs/retrobilingual.pack */
+    if (!sPackPath[0]) {
+        snprintf(sPackPath, sizeof(sPackPath), "%s/retrobilingual.pack", dir);
+    }
 }
 
 static void rb_config_load(void) {
@@ -504,6 +568,66 @@ static void ui_text(pixel_t* fb, unsigned p, int x, int y, const char* s, pixel_
 /* ---------- persistence actions ---------------------------------------- */
 static char sToastMsg[64];
 static int sToastTicks;
+static int sVolumeKnown;
+static int sVolumeLevel;
+static int sVolumeSequenceKnown;
+static unsigned long sVolumeSequence;
+static int sVolumePollFrames;
+static int sVolumeTicks;
+
+static void poll_volume_level(void) {
+    if (sVolumePollFrames > 0) {
+        sVolumePollFrames--;
+        return;
+    }
+    sVolumePollFrames = 5;
+
+    const char* event_path = getenv("BASEOS_VOLUME_EVENT");
+    if (!event_path || !*event_path) event_path = "/run/baseos-volume.sequence";
+    unsigned long sequence = 0;
+    FILE* event_file = fopen(event_path, "r");
+    if (event_file) {
+        char event_line[24];
+        if (fgets(event_line, sizeof(event_line), event_file)) {
+            char* event_end = NULL;
+            unsigned long parsed = strtoul(event_line, &event_end, 10);
+            if (event_end != event_line) sequence = parsed;
+        }
+        fclose(event_file);
+    }
+    int event_changed = 0;
+    if (!sVolumeSequenceKnown) {
+        sVolumeSequenceKnown = 1;
+        sVolumeSequence = sequence;
+    } else if (sVolumeSequence != sequence) {
+        sVolumeSequence = sequence;
+        event_changed = 1;
+    }
+
+    const char* path = getenv("BASEOS_VOLUME_STATE");
+    if (!path || !*path) path = "/run/baseos-volume.percent";
+    FILE* f = fopen(path, "r");
+    if (!f) return;
+    char line[16];
+    if (!fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return;
+    }
+    fclose(f);
+
+    char* end = NULL;
+    long value = strtol(line, &end, 10);
+    if (end == line || value < 0 || value > 100) return;
+    if (!sVolumeKnown) {
+        sVolumeKnown = 1;
+        sVolumeLevel = (int)value;
+        if (event_changed) sVolumeTicks = 90;
+        return;
+    }
+    int level_changed = sVolumeLevel != (int)value;
+    if (level_changed) sVolumeLevel = (int)value;
+    if (event_changed || level_changed) sVolumeTicks = 90;
+}
 
 static void set_toast(const char* msg) {
     snprintf(sToastMsg, sizeof(sToastMsg), "%s", msg);
@@ -729,6 +853,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         rb_rom_identity(gba);
         rb_pack_load();
     }
+    poll_volume_level();
 
     int y_pressed = input && input(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y);
     int y_just = y_pressed && !sPrevY;
@@ -1108,6 +1233,23 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             }
         }
         ui_text(fb, p, 4, RB_FB_H - 10, "Y/B:CLOSE  A:OK  < >:SLOT/OPTION", 0xAD55);
+    }
+
+    if (sVolumeTicks > 0) {
+        const int box_x = RB_FB_W - 98;
+        const int box_y = 5;
+        const int bar_x = box_x + 26;
+        const int bar_w = 38;
+        char value[8];
+        snprintf(value, sizeof(value), "%d%%", sVolumeLevel);
+        rect(fb, p, box_x, box_y, 94, 17, 0x7BEF);
+        rect(fb, p, box_x + 1, box_y + 1, 92, 15, 0x0842);
+        ui_text(fb, p, box_x + 4, box_y + 5, "VOL", 0xFFFF);
+        rect(fb, p, bar_x, box_y + 5, bar_w, 7, 0x39E7);
+        int fill = bar_w * sVolumeLevel / 100;
+        if (fill > 0) rect(fb, p, bar_x, box_y + 5, fill, 7, 0x07E0);
+        ui_text(fb, p, box_x + 68, box_y + 5, value, 0xFFE0);
+        if (sState == RB_GAME) sVolumeTicks--;
     }
 
     if (sToastTicks > 0) {

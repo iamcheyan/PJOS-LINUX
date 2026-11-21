@@ -65,7 +65,7 @@ docker run --rm --platform linux/amd64 \
 
 core="$OUT/mgba-retrobilingual_libretro.so"
 [ -s "$core" ] || { echo "missing overlay core: $core" >&2; exit 1; }
-readelf -h "$core" | rg -q 'Machine:.*AArch64' \
+LC_ALL=C readelf -h "$core" | rg -q 'Machine:.*AArch64' \
     || { echo "overlay core is not AArch64" >&2; exit 1; }
 nm -D "$core" | rg -q 'retrobilingual_process_input' \
     || { echo "pack format marker is missing" >&2; exit 1; }

@@ -1,0 +1,12 @@
+b71a15ebfd0bbaff94dd975777241fe6db2fb96ac1dada3324ccd41044758145  series/fe-binding-blade/gba/Fire_Emblem_Fuuin_no_Tsurugi_CN.gba
+e62288883544705b18f1a0753896fdd865a628fb4589135813b16a972a4c1557  series/fe-binding-blade/gba/Fire_Emblem_Fuuin_no_Tsurugi_JA.gba
+3bf0c9b9535589f9ad60cb2187546266db2b06591bc9b88e12652074fa13572c  series/fe-blazing-blade/gba/Fire_Emblem_Rekka_no_Ken_CN.gba
+7ec691a7411864ab51765028156c5b8a3c23a317d23c95fbf07ac201212e25c0  series/fe-blazing-blade/gba/Fire_Emblem_Rekka_no_Ken_JA.gba
+167ed57921c24f841108f46eabc33cb10e10f141b09d0fa6e75b5c5add3e4df0  series/fe-sacred-stones/gba/Fire_Emblem_Seima_no_Kouseki_CN.gba
+44fd343625ab9e6b90f63a80758c15066d526e6873fae91474006314a5ead464  series/fe-sacred-stones/gba/Fire_Emblem_Seima_no_Kouseki_JA.gba
+ce68f01bcc410d6c8b4603833030e01060bbe6eed06bf97ac68666cb5b05d1db  series/golden-sun-the-lost-age/gba/golden-sun-the-lost-age-cn.gba
+19dd48b74726f323cd829e226b60aa1b373c51fb2e840804efe2d2dc2891a890  series/golden-sun-the-lost-age/gba/golden-sun-the-lost-age-ja.gba
+088bedae4bad8b67e87ff10035a898d3639f3182d486fe5a5d113bab223e0a26  series/golden-sun/gba/golden-sun-ja.gba
+f566de927b4ccf95e55686553db3089c26b842158d49a2a91472a8b6ba1419bc  series/golden-sun/gba/黄金太阳1_开启的封印_2024新汉化.gba
+16ac2572ba17e9cb2a70093d41f97ef8cff66c56417e45ea98adacdc51bb4b38  series/zelda-minish-cap/gba/Zelda no Densetsu - Fushigi no Boushi (Japan).gba
+f51c6c2f90e18ee91203dd767307271e06901b5bff35c3a567d52f61a39d166d  series/zelda-minish-cap/gba/塞尔达传说_缩小帽.gba

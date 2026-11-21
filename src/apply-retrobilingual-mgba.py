@@ -37,6 +37,16 @@ replace_once(
     "libretro helper include",
 )
 replace_once(
+    "bool retro_load_game(const struct retro_game_info* game) {",
+    "bool retro_load_game(const struct retro_game_info* game) {\n\tretrobilingual_set_rom_path(game ? game->path : NULL);",
+    "load game hook",
+)
+replace_once(
+    "void retro_unload_game(void) {",
+    "void retro_unload_game(void) {\n\tretrobilingual_set_rom_path(NULL);",
+    "unload game hook",
+)
+replace_once(
     "\tcore->setKeys(core, keys);",
     "\tretrobilingual_process_input(core, &keys, inputCallback);\n\tcore->setKeys(core, keys);",
     "input filter hook",

@@ -9,6 +9,9 @@
 struct mCore;
 typedef int16_t (*retro_input_state_t)(unsigned port, unsigned device, unsigned index, unsigned id);
 
+/* Set the loaded ROM path to allow companion translation pack discovery. */
+void retrobilingual_set_rom_path(const char* path);
+
 /* Filter game input, detect the X menu key and the subtitle chord. */
 void retrobilingual_process_input(struct mCore* core, uint16_t* keys, retro_input_state_t input);
 

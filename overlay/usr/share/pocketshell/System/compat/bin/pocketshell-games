@@ -129,9 +129,10 @@ scan_series_root() {
                 if (vtitle_en != "") loc_titles=loc_titles ",\"title_en\":\"" esc(vtitle_en) "\""
                 if (vtitle_ja != "") loc_titles=loc_titles ",\"title_ja\":\"" esc(vtitle_ja) "\""
                 if (vtitle_zh != "") loc_titles=loc_titles ",\"title_zh\":\"" esc(vtitle_zh) "\""
+                if (vtrans != "") loc_titles=loc_titles ",\"translation\":\"" esc(vtrans) "\""
                 variants=variants "{\"id\":\"" esc(vid) "\",\"title\":\"" esc(vtitle) "\"" loc_titles ",\"path\":\"" esc(p) "\",\"cover\":\"" esc((vcover != "" ? dir "/" vcover : "")) "\"" (vdefault ? ",\"default\":true" : "") "}"
             }
-            vid=vtitle=vtitle_en=vtitle_ja=vtitle_zh=vrom=vcover=""; vdefault=0
+            vid=vtitle=vtitle_en=vtitle_ja=vtitle_zh=vtrans=vrom=vcover=""; vdefault=0
         }
         /"variants"[ \\t]*:/ { invars=1; next }
         invars && /\{/ { active=1; next }
@@ -141,6 +142,7 @@ scan_series_root() {
             x=str("title_en"); if (x != "") vtitle_en=x
             x=str("title_ja"); if (x != "") vtitle_ja=x
             x=str("title_zh"); if (x != "") vtitle_zh=x
+            x=str("translation"); if (x != "") vtrans=x
             x=str("rom"); if (x != "") vrom=x
             x=str("cover"); if (x != "") vcover=x
             if ($0 ~ /"default"[ \t]*:[ \t]*true/) vdefault=1

@@ -20,6 +20,8 @@ const RBAdapter* rb_adapter_match(uint32_t rom_size, const uint8_t sha256[32]) {
     if (rom_matches(rom_size, sha256, &g_rb_adapter_tmc)) return &g_rb_adapter_tmc;
     if (rom_matches(rom_size, sha256, &g_rb_adapter_golden_sun))
         return &g_rb_adapter_golden_sun;
+    if (rom_matches(rom_size, sha256, &g_rb_adapter_golden_sun_rg34xx))
+        return &g_rb_adapter_golden_sun_rg34xx;
     if (rom_matches(rom_size, sha256, &g_rb_adapter_golden_sun_cn2024))
         return &g_rb_adapter_golden_sun_cn2024;
     return 0;

@@ -21,7 +21,21 @@ work/
 /overlay/usr/share/pocketshell/System/pocketjs/apps/*.gba
 /overlay/usr/share/pocketshell/System/pocketjs/apps/kanade.pocket
 /overlay/usr/share/pocketshell/System/pocketjs/bin/launcher/
-resouces/
+# Game ROM binaries & commercial archives (copyrighted material)
+*.gba
+*.gbc
+*.gb
+*.sfc
+*.smc
+*.nes
+*.nds
+*.z64
+*.n64
+*.zip
+*.7z
+*.rar
+*.db
+**/glyphs/
 
 # RetroBilingual / TMC extracted commercial text & intermediate artifacts
 references/

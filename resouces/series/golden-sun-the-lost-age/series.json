@@ -1,0 +1,32 @@
+{
+  "schema": "pjos.game-series/v1",
+  "id": "golden-sun-the-lost-age",
+  "title": "黄金太阳：失落的时代",
+  "title_zh": "黄金太阳：失落的时代",
+  "title_en": "Golden Sun: The Lost Age",
+  "title_ja": "黄金の太陽 失われし時代",
+  "cover": "cover.png",
+  "variants": [
+    {
+      "id": "zh-Hans",
+      "title": "简体中文版",
+      "title_zh": "简体中文版",
+      "title_en": "Simplified Chinese",
+      "title_ja": "簡体字中国語版",
+      "rom": "gba/golden-sun-the-lost-age-cn.gba",
+      "cover": "gba/golden-sun-the-lost-age-cn.png",
+      "sort": 10,
+      "default": true
+    },
+    {
+      "id": "ja",
+      "title": "日版",
+      "title_zh": "日版",
+      "title_en": "Japanese",
+      "title_ja": "日本語版",
+      "rom": "gba/golden-sun-the-lost-age-ja.gba",
+      "cover": "gba/golden-sun-the-lost-age-ja.png",
+      "sort": 20
+    }
+  ]
+}
