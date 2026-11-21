@@ -29,6 +29,11 @@ def main() -> None:
     if old_renderer in text:
         text = text.replace(old_renderer, new_renderer, 1)
 
+    old_evdev_err = 'return Err(error("at most 16 evdev sources are supported").into());'
+    new_evdev_err = 'eprintln!("warning: {} evdev sources found, truncating to 16", inputs.len()); inputs.truncate(16);'
+    if old_evdev_err in text:
+        text = text.replace(old_evdev_err, new_evdev_err)
+
     path.write_text(text)
 
     guest_lib = path.parent.parent.parent.parent / "engine/guest-rquickjs/src/lib.rs"

@@ -32,7 +32,7 @@ def patch_fbdev(tree_dir: Path):
 
     # 2. Patch native.rs
     content = native_rs.read_text(encoding="utf-8")
-    if "0x4606" not in content:
+    if "variable.activate = 128" not in content:
         old_mapping = """pub struct Mapping {
     pointer: *mut libc::c_void,
     length: usize,
