@@ -28,6 +28,9 @@ extern const RBAdapter g_rb_adapter_tmc;
 extern const RBAdapter g_rb_adapter_golden_sun;
 extern const RBAdapter g_rb_adapter_golden_sun_rg34xx;
 extern const RBAdapter g_rb_adapter_golden_sun_cn2024;
+extern const RBAdapter g_rb_adapter_fe6;
+extern const RBAdapter g_rb_adapter_fe7;
+extern const RBAdapter g_rb_adapter_fe8;
 const RBAdapter* rb_adapter_match(uint32_t rom_size, const uint8_t sha256[32]);
 
 #endif /* RB_ADAPTER_H */

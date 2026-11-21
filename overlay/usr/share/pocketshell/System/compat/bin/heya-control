@@ -4,9 +4,15 @@
 # Bluetooth is reported unsupported when bluetoothctl cannot talk to D-Bus.
 set -u
 volume_state=${BASEOS_VOLUME_STATE:-/run/baseos-volume.percent}
+persistent_state=${BASEOS_VOLUME_PERSISTENT:-/storage/.config/baseos/volume.percent}
 case "${1-}" in
     volume-state)
         value=$(cat "$volume_state" 2>/dev/null || :)
+        case "$value" in
+            ''|*[!0-9]*)
+                value=$(cat "$persistent_state" 2>/dev/null || :)
+                ;;
+        esac
         case "$value" in
             ''|*[!0-9]*) ;;
             *) if [ "$value" -le 100 ] 2>/dev/null; then echo "$value"; exit 0; fi ;;
@@ -33,10 +39,10 @@ case "${1-}" in
         # UI polling and the wheel must use volume-state, not that ramp register.
         digital=$(( (value * 63 + 50) / 100 ))
         lineout=$(( (value * 31 + 50) / 100 ))
-        "$mixer" -q -c 0 cset numid=2 "$digital" >/dev/null 2>&1 \
-            || "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 || exit 1
         "$mixer" -q -c 0 cset numid=3 "$lineout" >/dev/null 2>&1 \
             || "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || :
+        "$mixer" -q -c 0 cset numid=2 "$digital" >/dev/null 2>&1 \
+            || "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 || :
         # Zero really means silent: the amp stays enabled at 0% on this codec, so
         # close the speaker switch as well and reopen it on the next step.
         if [ "$value" -eq 0 ]; then
@@ -50,6 +56,9 @@ case "${1-}" in
                 rm -f "$volume_state.$$"
                 exit 1
             }
+        mkdir -p "${persistent_state%/*}" 2>/dev/null || :
+        printf '%s\n' "$value" > "$persistent_state.$$" &&
+            mv -f "$persistent_state.$$" "$persistent_state" 2>/dev/null || rm -f "$persistent_state.$$"
         event_state=${BASEOS_VOLUME_EVENT:-/run/baseos-volume.sequence}
         sequence=$(cat "$event_state" 2>/dev/null || :)
         case "$sequence" in ''|*[!0-9]*) sequence=0 ;; esac
@@ -57,15 +66,24 @@ case "${1-}" in
         if printf '%s\n' "$sequence" > "$event_state.$$"; then
             mv -f "$event_state.$$" "$event_state" 2>/dev/null || rm -f "$event_state.$$"
         fi
-        # One short tick per step, played at the level just set: the user hears
-        # the volume land without looking at the panel.
-        for beep in /storage/System/compat/share/audio/beep.wav \
-                    /usr/share/pocketshell/System/compat/share/audio/beep.wav; do
-            [ -f "$beep" ] || continue
-            command -v aplay >/dev/null 2>&1 && aplay -q "$beep" >/dev/null 2>&1
-            break
-        done
+        # Play feedback tick unless suppressed (e.g. boot restoration)
+        if [ "${3-}" != "--no-beep" ] && [ "${3-}" != "-q" ]; then
+            for beep in /storage/System/compat/share/audio/beep.wav \
+                        /usr/share/pocketshell/System/compat/share/audio/beep.wav; do
+                [ -f "$beep" ] || continue
+                command -v aplay >/dev/null 2>&1 && aplay -q "$beep" >/dev/null 2>&1
+                break
+            done
+        fi
         exit 0
+        ;;
+    restore)
+        value=$(cat "$persistent_state" 2>/dev/null || :)
+        case "$value" in
+            ''|*[!0-9]*) exit 0 ;;
+        esac
+        [ "$value" -le 100 ] || exit 0
+        exec "$0" volume "$value" --no-beep
         ;;
     brightness)
         value=${2-}

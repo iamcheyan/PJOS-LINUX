@@ -27,6 +27,7 @@ struct GBA {
     struct {
         uint8_t* rom;
         uint32_t* wram;
+        uint32_t* iwram;
         size_t romSize;
     } memory;
     struct {

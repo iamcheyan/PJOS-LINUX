@@ -39,6 +39,8 @@ work/
 
 # RetroBilingual / TMC extracted commercial text & intermediate artifacts
 references/
+**/source-archives/
+**/translation-work/work/
 data/glyphs/
 data/*.db
 data/chinese_utf8.json

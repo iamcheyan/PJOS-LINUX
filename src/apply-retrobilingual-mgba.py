@@ -57,8 +57,27 @@ replace_once(
     "frame gate hook",
 )
 replace_once(
+    "\tinfo->geometry.base_width = width;\n\tinfo->geometry.base_height = height;",
+    "\tinfo->geometry.base_width = 720;\n\tinfo->geometry.base_height = 480;",
+    "av_info base dimensions",
+)
+replace_once(
+    "\t{\n\t\tinfo->geometry.max_width = width;\n\t\tinfo->geometry.max_height = height;\n\t}",
+    "\t{\n\t\tinfo->geometry.max_width = 720;\n\t\tinfo->geometry.max_height = 480;\n\t}",
+    "av_info max dimensions",
+)
+replace_once(
+    "\tinfo->geometry.aspect_ratio = width / (double) height;",
+    "\tinfo->geometry.aspect_ratio = 720.0 / 480.0;",
+    "av_info aspect ratio",
+)
+replace_once(
     "\tvideoCallback(outputBuffer, width, height, BYTES_PER_PIXEL * 256);",
-    "\tretrobilingual_draw(core, outputBuffer, width, height, BYTES_PER_PIXEL * 256);\n\tvideoCallback(outputBuffer, width, height, BYTES_PER_PIXEL * 256);",
+    "\tretrobilingual_draw(core, outputBuffer, width, height, BYTES_PER_PIXEL * 256);\n"
+    "\tvoid* out_buf = outputBuffer;\n"
+    "\tunsigned out_w = width, out_h = height, out_pitch = BYTES_PER_PIXEL * 256;\n"
+    "\tretrobilingual_present(outputBuffer, width, height, BYTES_PER_PIXEL * 256, &out_buf, &out_w, &out_h, &out_pitch);\n"
+    "\tvideoCallback(out_buf, out_w, out_h, out_pitch);",
     "overlay draw hook",
 )
 libretro.write_text(text, encoding="utf-8")

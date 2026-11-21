@@ -24,17 +24,35 @@ static int tmc_read(struct mCore* core, uint16_t keys, uint16_t* out_text_id, ui
     if (!gba || !gba->memory.wram) return 0;
 
     /*
-     * EWRAM layout for TMC dialogue engine:
-     * 0x02001404: 16-bit textIndex (dialogue ID)
-     * 0x02001489: 8-bit text rendering state machine:
-     *             3 = WAIT (typewriter text finished, waiting for player A button)
-     *             4 = ROLL/NEXT (player pressed A to flip to next page)
+     * EWRAM layout for TMC dialogue engine (zeldaret/tmc linker.ld):
+     * 0x02000050: Message gMessage
+     *   0x02000050: u8 state (MESSAGE_ACTIVE = 0x7F mask)
+     *   0x02000058: u16 textIndex
+     * 0x02022780: TextRender gTextRender
+     *   0x02022788: u16 textIndex (in gTextRender.message)
+     *   0x020227A8: u16 textIndex (in gTextRender.curToken)
+     *   0x02022809: u8 renderStatus (0x02022780 + 0x89)
+     *               3 = RENDER_WAIT (typewriter finished, waiting for player A button)
+     *               4 = RENDER_ROLL (player pressed A to flip to next page)
      */
     const uint8_t* wram = (const uint8_t*)gba->memory.wram;
-    uint16_t textId = *(const uint16_t*)(wram + 0x1404);
     uint8_t state = wram[0x50];
-    if (!(state & 0x7F)) return 0;
-    uint8_t render = wram[0x1489];
+    if (!(state & 0x7F)) {
+        return 0;
+    }
+
+    uint16_t textId = *(const uint16_t*)(wram + 0x58);
+    if (textId == 0 || textId == 0xFFFF) {
+        textId = *(const uint16_t*)(wram + 0x22788);
+    }
+    if (textId == 0 || textId == 0xFFFF) {
+        textId = *(const uint16_t*)(wram + 0x227A8);
+    }
+    if (textId == 0 || textId == 0xFFFF) {
+        return 0;
+    }
+
+    uint8_t render = wram[0x22809];
 
     if (textId == 0 || textId == 0xFFFF) {
         return 0;

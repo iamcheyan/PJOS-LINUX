@@ -373,6 +373,14 @@ else
     log "/storage bind skipped (mount point missing or already mounted)"
 fi
 
+# Restore saved volume level on boot
+for hc in "$SD/System/compat/bin/heya-control" /storage/System/compat/bin/heya-control /usr/share/pocketshell/System/compat/bin/heya-control /usr/bin/heya-control; do
+    if [ -x "$hc" ]; then
+        "$hc" restore >/dev/null 2>&1 || :
+        break
+    fi
+done
+
 if ! select_runtime "$PACKAGE"; then
     if [ "$PACKAGE" != "$APPROVED" ] && [ -f "$APPROVED" ] && select_runtime "$APPROVED"; then
         log "primary package rejected; using approved fallback $APPROVED"

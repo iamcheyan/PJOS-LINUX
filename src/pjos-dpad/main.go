@@ -84,16 +84,24 @@ type padState struct {
 	live [4]bool
 }
 
+type volumeMsg struct {
+	mute bool
+	step int
+}
+
 var (
-	ui          *os.File
-	state       padState
-	dirNames    = [4]uint16{keyUp, keyDown, keyLeft, keyRight}
-	volumeSteps = make(chan int, 8)
+	ui           *os.File
+	state        padState
+	dirNames     = [4]uint16{keyUp, keyDown, keyLeft, keyRight}
+	volumeQueue  = make(chan volumeMsg, 8)
 	// One detent can surface on both nodes and the encoder bounces; without a
 	// gate one flick jumped the whole range. Steps closer than this are merged.
 	volumeGate   = 140 * time.Millisecond
 	lastVolumeAt time.Time
 	volumeMu     sync.Mutex
+	volDownTimer *time.Timer
+	volDownHeld  bool
+	volUpStop    chan struct{}
 )
 
 func ioctlErr(fd uintptr, req uintptr, arg uintptr) error {
@@ -173,13 +181,7 @@ func readDevices(path string, hat bool) {
 		ev := *(*inputEvent)(unsafe.Pointer(&buf[0]))
 		switch {
 		case hat && ev.Type == evKey && (ev.Code == keyVolumeUp || ev.Code == keyVolumeDown):
-			if ev.Value == 1 {
-				step := 5
-				if ev.Code == keyVolumeDown {
-					step = -5
-				}
-				requestVolumeStep(step)
-			}
+			handleVolumeKey(ev.Code, ev.Value)
 		case hat && ev.Type == evAbs && (ev.Code == absHat0X || ev.Code == absHat0Y):
 			if ev.Code == absHat0Y {
 				state.hat[0] = ev.Value < 0
@@ -191,15 +193,8 @@ func readDevices(path string, hat bool) {
 			publish()
 		case !hat && ev.Type == evKey:
 			switch ev.Code {
-			case keyVolumeUp:
-				if ev.Value == 1 {
-					requestVolumeStep(5)
-				}
-				continue
-			case keyVolumeDown:
-				if ev.Value == 1 {
-					requestVolumeStep(-5)
-				}
+			case keyVolumeUp, keyVolumeDown:
+				handleVolumeKey(ev.Code, ev.Value)
 				continue
 			case keyUp:
 				state.keys[0] = ev.Value != 0
@@ -282,8 +277,82 @@ func requestVolumeStep(step int) {
 	lastVolumeAt = now
 	volumeMu.Unlock()
 	select {
-	case volumeSteps <- step:
+	case volumeQueue <- volumeMsg{step: step}:
 	default:
+	}
+}
+
+func requestVolumeMute() {
+	select {
+	case volumeQueue <- volumeMsg{mute: true}:
+	default:
+	}
+}
+
+func handleVolumeKey(code uint16, value int32) {
+	switch code {
+	case keyVolumeDown:
+		volumeMu.Lock()
+		if value == 1 {
+			volDownHeld = true
+			if volDownTimer != nil {
+				volDownTimer.Stop()
+			}
+			volDownTimer = time.AfterFunc(400*time.Millisecond, func() {
+				volumeMu.Lock()
+				defer volumeMu.Unlock()
+				if volDownHeld {
+					requestVolumeMute()
+				}
+			})
+			volumeMu.Unlock()
+			requestVolumeStep(-5)
+		} else if value == 0 {
+			volDownHeld = false
+			if volDownTimer != nil {
+				volDownTimer.Stop()
+				volDownTimer = nil
+			}
+			volumeMu.Unlock()
+		} else {
+			volumeMu.Unlock()
+		}
+	case keyVolumeUp:
+		volumeMu.Lock()
+		if value == 1 {
+			if volUpStop != nil {
+				close(volUpStop)
+			}
+			stop := make(chan struct{})
+			volUpStop = stop
+			go func() {
+				select {
+				case <-time.After(400 * time.Millisecond):
+				case <-stop:
+					return
+				}
+				ticker := time.NewTicker(150 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						requestVolumeStep(5)
+					case <-stop:
+						return
+					}
+				}
+			}()
+			volumeMu.Unlock()
+			requestVolumeStep(5)
+		} else if value == 0 {
+			if volUpStop != nil {
+				close(volUpStop)
+				volUpStop = nil
+			}
+			volumeMu.Unlock()
+		} else {
+			volumeMu.Unlock()
+		}
 	}
 }
 
@@ -293,19 +362,23 @@ func volumeWorker() {
 		fmt.Fprintln(os.Stderr, "pjos-dpad: heya-control not found; volume keys ignored")
 		return
 	}
-	for step := range volumeSteps {
-		// Collapse everything queued behind this step: one flick of the wheel
-		// must not walk the whole range while the previous tick still plays.
+	for msg := range volumeQueue {
+		// Collapse queued messages
 		for {
 			select {
-			case queued := <-volumeSteps:
-				step = queued
+			case queued := <-volumeQueue:
+				msg = queued
 			default:
 				goto apply
 			}
 		}
 	apply:
-		next := currentVolume() + step
+		var next int
+		if msg.mute {
+			next = 0
+		} else {
+			next = currentVolume() + msg.step
+		}
 		if next < 0 {
 			next = 0
 		}

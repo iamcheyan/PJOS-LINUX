@@ -33,7 +33,7 @@ fn baseos_volume_state() -> String {
 }
 '''
 
-KEYS = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor", "bootResume"]'
+KEYS = '["wifi", "bluetooth", "btAudio", "headphoneFix", "hostname", "ntp", "adb", "ssh", "mdns", "showClock", "animations", "fontSize", "themeColor", "bootResume", "pixelateCovers"]'
 LAST_PLAYED = '        ["SETTING", "games.lastPlayed"] => baseos_setting("games.lastPlayed", None),\n        ["SETTING", "games.lastPlayed", value] => baseos_setting("games.lastPlayed", Some(value)),\n'
 GENERIC = r'''        ["SETTING", "games.lastPlayed"] => baseos_setting("games.lastPlayed", None),
         ["SETTING", "games.lastPlayed", value] => baseos_setting("games.lastPlayed", Some(value)),

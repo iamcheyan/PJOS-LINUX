@@ -14,11 +14,12 @@
  *   options: quick save/load and subtitle chord are configurable.
  * Select+Start long press and L2/R2 are left to baseos-hotkeys.
  */
+#include "retrobilingual.h"
+
 #ifdef RB_HOST_TEST
 #include "host_stubs.h"
 #define COLOR_16_BIT 1
 #else
-#include "retrobilingual.h"
 #include "libretro.h"
 
 #include <mgba/core/core.h>
@@ -28,6 +29,7 @@
 #endif
 
 #include <fcntl.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,6 +109,7 @@ typedef struct {
     int x_action;              /* 0: SUBTITLE, 1: SAVE, 2: LOAD */
     int slot;                  /* 0..4 (Slot 1..5) */
     int hud_pos;               /* 0: AUTO, 1: TOP, 2: CENTER, 3: BOTTOM */
+    int visual_filter;         /* RBVisualFilter (0..7) */
     int chord[ACT_COUNT][2];   /* RetroPad ids, -1 = unset */
 } RBConfig;
 static RBConfig sCfg = {
@@ -114,12 +117,101 @@ static RBConfig sCfg = {
     .x_action = X_ACT_SUBTITLE,
     .slot = 0,
     .hud_pos = RB_POS_AUTO,
+    .visual_filter = RB_FILTER_LCD_COLOR,
     .chord = {
         { -1, -1 },            /* save */
         { -1, -1 },            /* load */
         { RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_SELECT },
     },
 };
+
+static const char* sFilterNames[RB_FILTER_COUNT] = {
+    "OFF (RAW 3X)", "LCD GRID", "GBA COLOR", "LCD+COLOR", "CRT SCAN", "RGB STRIPE", "GB DMG", "GB POCKET"
+};
+
+#define RB_OUT_W 720
+#define RB_OUT_H 480
+static uint16_t sScaleFrame[RB_OUT_W * RB_OUT_H];
+static uint16_t sGbaColorLut[65536];
+static uint16_t sGbDmgLut[65536];
+static uint16_t sGbPocketLut[65536];
+static int sFilterLutsInitialized = 0;
+
+static const float sGamma32[32] = {
+    0.000000f, 0.000524f, 0.002406f, 0.005870f, 0.011054f, 0.018061f, 0.026973f, 0.037863f, 0.050793f, 0.065817f, 0.082986f, 0.102345f, 0.123938f, 0.147802f, 0.173975f, 0.202491f,
+    0.233382f, 0.266681f, 0.302415f, 0.340614f, 0.381303f, 0.424509f, 0.470256f, 0.518568f, 0.569468f, 0.622977f, 0.679119f, 0.737912f, 0.799378f, 0.863535f, 0.930403f, 1.000000f
+};
+static const float sGamma64[64] = {
+    0.000000f, 0.000110f, 0.000505f, 0.001233f, 0.002323f, 0.003795f, 0.005667f, 0.007955f, 0.010672f, 0.013829f, 0.017436f, 0.021504f, 0.026041f, 0.031055f, 0.036554f, 0.042545f,
+    0.049036f, 0.056032f, 0.063540f, 0.071566f, 0.080116f, 0.089194f, 0.098805f, 0.108956f, 0.119651f, 0.130894f, 0.142690f, 0.155043f, 0.167957f, 0.181437f, 0.195487f, 0.210110f,
+    0.225310f, 0.241091f, 0.257457f, 0.274410f, 0.291955f, 0.310095f, 0.328832f, 0.348171f, 0.368114f, 0.388665f, 0.409826f, 0.431600f, 0.453990f, 0.477000f, 0.500631f, 0.524887f,
+    0.549771f, 0.575284f, 0.601430f, 0.628210f, 0.655629f, 0.683688f, 0.712389f, 0.741735f, 0.771728f, 0.802371f, 0.833667f, 0.865616f, 0.898222f, 0.931486f, 0.965412f, 1.000000f,
+};
+static const float sInvGamma256[256] = {
+    0.000000f, 0.080560f, 0.110395f, 0.132737f, 0.151280f, 0.167429f, 0.181896f, 0.195098f, 0.207307f, 0.218708f, 0.229437f, 0.239595f, 0.249261f, 0.258497f, 0.267353f, 0.275870f,
+    0.284083f, 0.292020f, 0.299707f, 0.307164f, 0.314409f, 0.321460f, 0.328330f, 0.335031f, 0.341576f, 0.347973f, 0.354232f, 0.360361f, 0.366368f, 0.372258f, 0.378039f, 0.383716f,
+    0.389294f, 0.394777f, 0.400170f, 0.405478f, 0.410703f, 0.415850f, 0.420922f, 0.425921f, 0.430851f, 0.435714f, 0.440513f, 0.445250f, 0.449927f, 0.454547f, 0.459110f, 0.463620f,
+    0.468078f, 0.472486f, 0.476845f, 0.481157f, 0.485422f, 0.489643f, 0.493821f, 0.497957f, 0.502052f, 0.506108f, 0.510125f, 0.514104f, 0.518046f, 0.521953f, 0.525825f, 0.529664f,
+    0.533469f, 0.537242f, 0.540983f, 0.544693f, 0.548374f, 0.552025f, 0.555647f, 0.559241f, 0.562808f, 0.566348f, 0.569861f, 0.573348f, 0.576811f, 0.580248f, 0.583662f, 0.587051f,
+    0.590417f, 0.593760f, 0.597081f, 0.600380f, 0.603657f, 0.606913f, 0.610149f, 0.613363f, 0.616558f, 0.619733f, 0.622888f, 0.626025f, 0.629142f, 0.632242f, 0.635323f, 0.638386f,
+    0.641432f, 0.644460f, 0.647472f, 0.650467f, 0.653445f, 0.656407f, 0.659353f, 0.662284f, 0.665199f, 0.668099f, 0.670983f, 0.673853f, 0.676708f, 0.679549f, 0.682376f, 0.685189f,
+    0.687988f, 0.690773f, 0.693545f, 0.696304f, 0.699050f, 0.701783f, 0.704503f, 0.707210f, 0.709905f, 0.712588f, 0.715259f, 0.717918f, 0.720565f, 0.723201f, 0.725825f, 0.728438f,
+    0.731039f, 0.733630f, 0.736210f, 0.738778f, 0.741336f, 0.743884f, 0.746421f, 0.748948f, 0.751465f, 0.753971f, 0.756468f, 0.758954f, 0.761432f, 0.763899f, 0.766357f, 0.768805f,
+    0.771244f, 0.773674f, 0.776095f, 0.778507f, 0.780909f, 0.783303f, 0.785689f, 0.788065f, 0.790433f, 0.792793f, 0.795144f, 0.797487f, 0.799821f, 0.802148f, 0.804466f, 0.806776f,
+    0.809079f, 0.811373f, 0.813660f, 0.815939f, 0.818211f, 0.820475f, 0.822732f, 0.824981f, 0.827222f, 0.829457f, 0.831684f, 0.833905f, 0.836118f, 0.838324f, 0.840523f, 0.842715f,
+    0.844901f, 0.847079f, 0.849251f, 0.851417f, 0.853576f, 0.855728f, 0.857874f, 0.860013f, 0.862146f, 0.864273f, 0.866393f, 0.868507f, 0.870615f, 0.872717f, 0.874813f, 0.876903f,
+    0.878987f, 0.881065f, 0.883137f, 0.885203f, 0.887264f, 0.889318f, 0.891368f, 0.893411f, 0.895449f, 0.897481f, 0.899508f, 0.901529f, 0.903545f, 0.905556f, 0.907561f, 0.909561f,
+    0.911556f, 0.913545f, 0.915529f, 0.917509f, 0.919483f, 0.921451f, 0.923415f, 0.925374f, 0.927328f, 0.929277f, 0.931221f, 0.933160f, 0.935095f, 0.937025f, 0.938949f, 0.940870f,
+    0.942785f, 0.944696f, 0.946602f, 0.948504f, 0.950401f, 0.952293f, 0.954181f, 0.956064f, 0.957944f, 0.959818f, 0.961688f, 0.963554f, 0.965416f, 0.967273f, 0.969126f, 0.970975f,
+    0.972820f, 0.974660f, 0.976496f, 0.978328f, 0.980156f, 0.981980f, 0.983800f, 0.985616f, 0.987428f, 0.989235f, 0.991039f, 0.992839f, 0.994635f, 0.996427f, 0.998216f, 1.000000f,
+};
+
+static void rb_init_filter_luts(void) {
+    if (sFilterLutsInitialized) return;
+    for (int c = 0; c < 65536; c++) {
+        uint8_t r5 = (c >> 11) & 0x1F;
+        uint8_t g6 = (c >> 5) & 0x3F;
+        uint8_t b5 = c & 0x1F;
+
+        /* GBA Color Correction (Hunterk / Pokefan531 matrix with gamma 2.2) */
+        float r_lin = sGamma32[r5];
+        float g_lin = sGamma64[g6];
+        float b_lin = sGamma32[b5];
+
+        float r_out = (0.82f * r_lin + 0.125f * g_lin + 0.195f * b_lin) * 0.94f;
+        float g_out = (0.24f * r_lin + 0.665f * g_lin + 0.075f * b_lin) * 0.94f;
+        float b_out = (-0.06f * r_lin + 0.21f * g_lin + 0.73f * b_lin) * 0.94f;
+
+        if (r_out < 0.0f) r_out = 0.0f; else if (r_out > 1.0f) r_out = 1.0f;
+        if (g_out < 0.0f) g_out = 0.0f; else if (g_out > 1.0f) g_out = 1.0f;
+        if (b_out < 0.0f) b_out = 0.0f; else if (b_out > 1.0f) b_out = 1.0f;
+
+        int ri = (int)(r_out * 255.0f); if (ri > 255) ri = 255;
+        int gi = (int)(g_out * 255.0f); if (gi > 255) gi = 255;
+        int bi = (int)(b_out * 255.0f); if (bi > 255) bi = 255;
+
+        uint16_t ro = (uint16_t)(sInvGamma256[ri] * 31.0f + 0.5f);
+        uint16_t go = (uint16_t)(sInvGamma256[gi] * 63.0f + 0.5f);
+        uint16_t bo = (uint16_t)(sInvGamma256[bi] * 31.0f + 0.5f);
+        sGbaColorLut[c] = (ro << 11) | (go << 5) | bo;
+
+        /* Luminance for Game Boy palettes */
+        float lum = 0.299f * (r5 / 31.0f) + 0.587f * (g6 / 63.0f) + 0.114f * (b5 / 31.0f);
+
+        /* Game Boy DMG classic olive green */
+        if (lum < 0.25f) sGbDmgLut[c] = 0x09C2;       /* dark olive */
+        else if (lum < 0.50f) sGbDmgLut[c] = 0x3326;  /* olive */
+        else if (lum < 0.75f) sGbDmgLut[c] = 0x8D62;  /* pea soup green */
+        else sGbDmgLut[c] = 0x9DE2;                   /* light green */
+
+        /* Game Boy Pocket grayscale */
+        if (lum < 0.25f) sGbPocketLut[c] = 0x0000;
+        else if (lum < 0.50f) sGbPocketLut[c] = 0x52AA;
+        else if (lum < 0.75f) sGbPocketLut[c] = 0xA555;
+        else sGbPocketLut[c] = 0xFFFF;
+    }
+    sFilterLutsInitialized = 1;
+}
 
 static uint32_t sPrevKeys;
 static int sPrevX;
@@ -318,6 +410,9 @@ static void rb_config_load(void) {
         else if (sscanf(line, "hud_pos=%d", &v) == 1) {
             if (v >= 0 && v < RB_POS_COUNT) sCfg.hud_pos = v;
         }
+        else if (sscanf(line, "visual_filter=%d", &v) == 1) {
+            if (v >= 0 && v < RB_FILTER_COUNT) sCfg.visual_filter = v;
+        }
         else if (sscanf(line, "bind_save=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SAVE][0]=a; sCfg.chord[ACT_SAVE][1]=b; }
         else if (sscanf(line, "bind_load=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_LOAD][0]=a; sCfg.chord[ACT_LOAD][1]=b; }
         else if (sscanf(line, "bind_subtitle=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SUBTITLE][0]=a; sCfg.chord[ACT_SUBTITLE][1]=b; }
@@ -333,6 +428,7 @@ static void rb_config_save(void) {
     fprintf(f, "x_action=%d\n", sCfg.x_action);
     fprintf(f, "slot=%d\n", sCfg.slot);
     fprintf(f, "hud_pos=%d\n", sCfg.hud_pos);
+    fprintf(f, "visual_filter=%d\n", sCfg.visual_filter);
     for (int i = 0; i < ACT_COUNT; i++) {
         const char* key = i == ACT_SAVE ? "bind_save" : i == ACT_LOAD ? "bind_load" : "bind_subtitle";
         fprintf(f, "%s=%d,%d\n", key, sCfg.chord[i][0], sCfg.chord[i][1]);
@@ -621,12 +717,12 @@ static void poll_volume_level(void) {
     if (!sVolumeKnown) {
         sVolumeKnown = 1;
         sVolumeLevel = (int)value;
-        if (event_changed) sVolumeTicks = 90;
+        if (event_changed) sVolumeTicks = 45;
         return;
     }
     int level_changed = sVolumeLevel != (int)value;
     if (level_changed) sVolumeLevel = (int)value;
-    if (event_changed || level_changed) sVolumeTicks = 90;
+    if (event_changed || level_changed) sVolumeTicks = 45;
 }
 
 static void set_toast(const char* msg) {
@@ -901,15 +997,18 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     if (sState == RB_MENU) {
         if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 5;
         if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 4) % 5;
-        if (sMenuCursor == 1 || sMenuCursor == 2) {
+        if (sMenuCursor == 0 || sMenuCursor == 1) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.slot = (sCfg.slot + 1) % RB_SLOT_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.slot = (sCfg.slot + RB_SLOT_COUNT - 1) % RB_SLOT_COUNT; rb_config_save(); }
-        } else if (sMenuCursor == 3) {
+        } else if (sMenuCursor == 2) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.x_action = (sCfg.x_action + X_ACT_COUNT - 1) % X_ACT_COUNT; rb_config_save(); }
-        } else if (sMenuCursor == 4) {
+        } else if (sMenuCursor == 3) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.hud_pos = (sCfg.hud_pos + RB_POS_COUNT - 1) % RB_POS_COUNT; rb_config_save(); }
+        } else if (sMenuCursor == 4) {
+            if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); }
+            if (edge(now, prev, RB_KEY_LEFT)) { sCfg.visual_filter = (sCfg.visual_filter + RB_FILTER_COUNT - 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); }
         }
 
         if (y_just || edge(now, prev, RB_KEY_B)) {
@@ -917,11 +1016,11 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             sState = RB_GAME;
         } else if (edge(now, prev, RB_KEY_A)) {
             switch (sMenuCursor) {
-            case 0: rb_resume(core); sState = RB_GAME; break;
-            case 1: do_save(core); rb_resume(core); sState = RB_GAME; break;
-            case 2: do_load(core); sState = RB_GAME; break;
-            case 3: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
-            case 4: sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); break;
+            case 0: do_save(core); rb_resume(core); sState = RB_GAME; break;
+            case 1: do_load(core); sState = RB_GAME; break;
+            case 2: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
+            case 3: sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); break;
+            case 4: sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); break;
             default: break;
             }
         }
@@ -1163,13 +1262,13 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             ui_text(fb, p, nx, ny, "NO TRANSLATION", 0xFFFF);
         }
     } else if (sState == RB_MENU || sState == RB_BINDINGS) {
-        int mw = 192, mh = 112;
-        int mx = (RB_FB_W - mw) / 2, my = 14;
+        int mw = 192, mh = 110;
+        int mx = (RB_FB_W - mw) / 2, my = 15;
         rect(fb, p, mx - 2, my - 2, mw + 4, mh + 4, 0x7BEF);
         rect(fb, p, mx, my, mw, mh, 0x0000);
         if (sState == RB_MENU) {
             static const char* labels[5] = {
-                "RESUME", "QUICK SAVE", "QUICK LOAD", "X BUTTON", "POSITION"
+                "QUICK SAVE", "QUICK LOAD", "X BUTTON", "POSITION", "FILTER"
             };
             static const char* x_names[X_ACT_COUNT] = {
                 "TRANSLATE", "SAVE", "LOAD"
@@ -1178,24 +1277,28 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 "AUTO", "TOP", "CENTER", "BOTTOM"
             };
             for (int i = 0; i < 5; i++) {
-                int iy = my + 8 + i * 15;
+                int iy = my + 7 + i * 14;
                 if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 12, 0x2965);
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
-                if (i == 1 || i == 2) {
+                if (i == 0 || i == 1) {
                     char buf[24];
                     int has_data = rb_slot_has_data(sCfg.slot);
                     uint16_t slot_col = has_data ? 0x2FE5 : 0x7BEF; /* Green if has data, Gray if empty */
                     snprintf(buf, sizeof(buf), "< SLOT %d >", sCfg.slot + 1);
                     ui_text(fb, p, mx + mw - 62, iy, buf, slot_col);
-                } else if (i == 3) {
+                } else if (i == 2) {
                     ui_text(fb, p, mx + mw - 62, iy, x_names[sCfg.x_action], 0xFFE0);
-                } else if (i == 4) {
+                } else if (i == 3) {
                     ui_text(fb, p, mx + mw - 48, iy, pos_names[sCfg.hud_pos], 0xFFE0);
+                } else if (i == 4) {
+                    char buf[24];
+                    snprintf(buf, sizeof(buf), "< %s >", sFilterNames[sCfg.visual_filter]);
+                    ui_text(fb, p, mx + mw - 80, iy, buf, 0x07FF);
                 }
             }
 
             /* Slot details card */
-            rect(fb, p, mx + 4, my + 84, mw - 8, 1, 0x2965);
+            rect(fb, p, mx + 4, my + 78, mw - 8, 1, 0x2965);
 
             RBSlotInfo info;
             rb_get_slot_info(sCfg.slot, &info);
@@ -1218,8 +1321,8 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                 snprintf(l2, sizeof(l2), "NO SAVED STATE DATA");
             }
 
-            ui_text(fb, p, mx + 8, my + 88, l1, col1);
-            ui_text(fb, p, mx + 8, my + 98, l2, col2);
+            ui_text(fb, p, mx + 8, my + 82, l1, col1);
+            ui_text(fb, p, mx + 8, my + 93, l2, col2);
         } else {
             ui_text(fb, p, mx + 8, my + 8, "BIND ACTION (A=CAPTURE)", 0xFFFF);
             for (int a = 0; a < ACT_COUNT; a++) {
@@ -1266,6 +1369,123 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
     (void)core;
 }
 
+void retrobilingual_present(void* in_pixels, unsigned in_w, unsigned in_h, unsigned in_pitch,
+                            void** out_pixels, unsigned* out_w, unsigned* out_h, unsigned* out_pitch)
+{
+    if (!in_pixels || in_w != RB_FB_W || in_h != RB_FB_H) {
+        if (out_pixels) *out_pixels = in_pixels;
+        if (out_w) *out_w = in_w;
+        if (out_h) *out_h = in_h;
+        if (out_pitch) *out_pitch = in_pitch;
+        return;
+    }
+    rb_init_filter_luts();
+
+    const uint16_t* src_base = (const uint16_t*)in_pixels;
+    unsigned src_pitch_pixels = in_pitch >> 1;
+    int mode = sCfg.visual_filter;
+    if (mode < 0 || mode >= RB_FILTER_COUNT) mode = RB_FILTER_OFF;
+
+    for (unsigned y = 0; y < RB_FB_H; y++) {
+        const uint16_t* src = src_base + y * src_pitch_pixels;
+        uint16_t* row0 = sScaleFrame + (y * 3 + 0) * RB_OUT_W;
+        uint16_t* row1 = sScaleFrame + (y * 3 + 1) * RB_OUT_W;
+        uint16_t* row2 = sScaleFrame + (y * 3 + 2) * RB_OUT_W;
+
+        switch (mode) {
+        case RB_FILTER_OFF:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t c = src[x];
+                row0[x * 3 + 0] = c; row0[x * 3 + 1] = c; row0[x * 3 + 2] = c;
+                row1[x * 3 + 0] = c; row1[x * 3 + 1] = c; row1[x * 3 + 2] = c;
+                row2[x * 3 + 0] = c; row2[x * 3 + 1] = c; row2[x * 3 + 2] = c;
+            }
+            break;
+
+        case RB_FILTER_LCD_GRID:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t c = src[x];
+                uint16_t c50 = (c + (c & 0x0821)) >> 1;
+                uint16_t c75 = (c + c50 + ((c ^ c50) & 0x0821)) >> 1;
+                row0[x * 3 + 0] = c;   row0[x * 3 + 1] = c;   row0[x * 3 + 2] = c75;
+                row1[x * 3 + 0] = c;   row1[x * 3 + 1] = c;   row1[x * 3 + 2] = c75;
+                row2[x * 3 + 0] = c75; row2[x * 3 + 1] = c75; row2[x * 3 + 2] = c50;
+            }
+            break;
+
+        case RB_FILTER_GBA_COLOR:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t cg = sGbaColorLut[src[x]];
+                row0[x * 3 + 0] = cg; row0[x * 3 + 1] = cg; row0[x * 3 + 2] = cg;
+                row1[x * 3 + 0] = cg; row1[x * 3 + 1] = cg; row1[x * 3 + 2] = cg;
+                row2[x * 3 + 0] = cg; row2[x * 3 + 1] = cg; row2[x * 3 + 2] = cg;
+            }
+            break;
+
+        case RB_FILTER_LCD_COLOR:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t cg = sGbaColorLut[src[x]];
+                uint16_t c50 = (cg + (cg & 0x0821)) >> 1;
+                uint16_t c75 = (cg + c50 + ((cg ^ c50) & 0x0821)) >> 1;
+                row0[x * 3 + 0] = cg;  row0[x * 3 + 1] = cg;  row0[x * 3 + 2] = c75;
+                row1[x * 3 + 0] = cg;  row1[x * 3 + 1] = cg;  row1[x * 3 + 2] = c75;
+                row2[x * 3 + 0] = c75; row2[x * 3 + 1] = c75; row2[x * 3 + 2] = c50;
+            }
+            break;
+
+        case RB_FILTER_CRT_SCANLINE:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t c = src[x];
+                uint16_t c50 = (c + (c & 0x0821)) >> 1;
+                row0[x * 3 + 0] = c;   row0[x * 3 + 1] = c;   row0[x * 3 + 2] = c;
+                row1[x * 3 + 0] = c;   row1[x * 3 + 1] = c;   row1[x * 3 + 2] = c;
+                row2[x * 3 + 0] = c50; row2[x * 3 + 1] = c50; row2[x * 3 + 2] = c50;
+            }
+            break;
+
+        case RB_FILTER_SUBPIXEL_RGB:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t c = src[x];
+                uint16_t cr = (c & 0xF800) | ((c >> 2) & 0x01E0) | ((c >> 2) & 0x0007);
+                uint16_t cg = ((c >> 2) & 0x3800) | (c & 0x07E0) | ((c >> 2) & 0x0007);
+                uint16_t cb = ((c >> 2) & 0x3800) | ((c >> 2) & 0x01E0) | (c & 0x001F);
+                uint16_t c50 = (c + (c & 0x0821)) >> 1;
+                row0[x * 3 + 0] = cr;  row0[x * 3 + 1] = cg;  row0[x * 3 + 2] = cb;
+                row1[x * 3 + 0] = cr;  row1[x * 3 + 1] = cg;  row1[x * 3 + 2] = cb;
+                row2[x * 3 + 0] = c50; row2[x * 3 + 1] = c50; row2[x * 3 + 2] = c50;
+            }
+            break;
+
+        case RB_FILTER_GB_DMG:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t cd = sGbDmgLut[src[x]];
+                uint16_t c50 = (cd + (cd & 0x0821)) >> 1;
+                uint16_t c75 = (cd + c50 + ((cd ^ c50) & 0x0821)) >> 1;
+                row0[x * 3 + 0] = cd;  row0[x * 3 + 1] = cd;  row0[x * 3 + 2] = c75;
+                row1[x * 3 + 0] = cd;  row1[x * 3 + 1] = cd;  row1[x * 3 + 2] = c75;
+                row2[x * 3 + 0] = c75; row2[x * 3 + 1] = c75; row2[x * 3 + 2] = c50;
+            }
+            break;
+
+        case RB_FILTER_GB_POCKET:
+            for (unsigned x = 0; x < RB_FB_W; x++) {
+                uint16_t cp = sGbPocketLut[src[x]];
+                uint16_t c50 = (cp + (cp & 0x0821)) >> 1;
+                uint16_t c75 = (cp + c50 + ((cp ^ c50) & 0x0821)) >> 1;
+                row0[x * 3 + 0] = cp;  row0[x * 3 + 1] = cp;  row0[x * 3 + 2] = c75;
+                row1[x * 3 + 0] = cp;  row1[x * 3 + 1] = cp;  row1[x * 3 + 2] = c75;
+                row2[x * 3 + 0] = c75; row2[x * 3 + 1] = c75; row2[x * 3 + 2] = c50;
+            }
+            break;
+        }
+    }
+
+    if (out_pixels) *out_pixels = sScaleFrame;
+    if (out_w) *out_w = RB_OUT_W;
+    if (out_h) *out_h = RB_OUT_H;
+    if (out_pitch) *out_pitch = RB_OUT_W * sizeof(uint16_t);
+}
+
 #ifdef RB_HOST_TEST
 int rb_test_pack_loaded(void) { return sPack.loaded; }
 int rb_test_state(void) { return (int)sState; }
@@ -1276,6 +1496,7 @@ int rb_test_slot_has_data(int slot) { return rb_slot_has_data(slot); }
 int rb_test_hud_pos(void) { return sCfg.hud_pos; }
 int rb_test_hud_scroll(void) { return sHudScroll; }
 int rb_test_hud_first_visible_line(void) { return sHudFirstVisibleLine; }
+int rb_test_visual_filter(void) { return sCfg.visual_filter; }
 const char* rb_test_toast(void) { return sToastTicks > 0 ? sToastMsg : ""; }
 int rb_test_slot_info(int slot, char* area_out, size_t area_sz, int* hearts_out, int* rupees_out) {
     RBSlotInfo info;

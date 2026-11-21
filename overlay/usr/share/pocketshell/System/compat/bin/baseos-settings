@@ -27,7 +27,7 @@ radio() {
 }
 if [ "$#" -gt 1 ]; then
     case "$key" in
-        bluetooth|wifi|btAudio|headphoneFix|ntp|adb|ssh|mdns|showClock|animations|bootResume) case "$want" in on|off) ;; *) fail invalid ;; esac ;;
+        bluetooth|wifi|btAudio|headphoneFix|ntp|adb|ssh|mdns|showClock|animations|bootResume|pixelateCovers) case "$want" in on|off) ;; *) fail invalid ;; esac ;;
         fontSize) case "$want" in normal|large|huge) ;; *) fail invalid ;; esac ;;
         themeColor) case "$want" in purple|blue|green|pink|amber|teal|coral|ice|mono) ;; *) fail invalid ;; esac ;;
         games.lastPlayed)
@@ -76,7 +76,7 @@ case "$key" in
         state=$("$services" status avahi.enabled 2>/dev/null | sed 's/^[^=]*=//')
         flag "$state"
         ;;
-    showClock|animations|fontSize|themeColor|bootResume)
+    showClock|animations|fontSize|themeColor|bootResume|pixelateCovers)
         conf="$ROOT/storage/.config/pocketjs/ui-settings.conf"
         mkdir -p "${conf%/*}" 2>/dev/null || :
         if [ "$#" -gt 1 ]; then
@@ -94,6 +94,7 @@ case "$key" in
             fontSize) [ -n "$val" ] && echo "$val" || echo "normal" ;;
             themeColor) [ -n "$val" ] && echo "$val" || echo "purple" ;;
             bootResume) [ -n "$val" ] && echo "$val" || echo "off" ;;
+            pixelateCovers) [ -n "$val" ] && echo "$val" || echo "off" ;;
             *) echo "${val:-unknown}" ;;
         esac
         ;;
