@@ -25,6 +25,7 @@ python3 "$HERE/src/apply-pocketjs-gba3x-package-budget.py" "$BUILD/src/programs/
 python3 "$HERE/src/apply-pocketjs-input.py" "$BUILD/src"
 python3 "$HERE/src/apply-pocketjs-fractional-display.py" "$BUILD/src"
 python3 "$HERE/src/apply-pocketjs-fbdev-rotate.py" "$BUILD/src"
+python3 "$HERE/src/apply-pocketjs-fbdev-pan.py" "$BUILD/src"
 BRIDGE="$BUILD/src/engine/guest-rquickjs/src/pocketshell_launcher.rs"
 for patch in apps rom-arm battery panel settings system-info network-bridge power-bridge forcequit favorites cover player-path restore kanade fs saves; do
     python3 "$HERE/src/apply-pocketjs-$patch.py" "$BRIDGE"
