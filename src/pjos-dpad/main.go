@@ -43,6 +43,9 @@ const (
 
 	absHat0X = 0x10
 	absHat0Y = 0x11
+	absX     = 0x00
+	absY     = 0x01
+	stickDeadzone = 12000
 
 	keyUp    = 103
 	keyDown  = 108
@@ -79,9 +82,10 @@ type inputEvent struct {
 // One slot per direction; the two nodes may disagree for a moment, so each
 // source has its own flag and the emitted state is their union.
 type padState struct {
-	hat  [4]bool // up, down, left, right
-	keys [4]bool
-	live [4]bool
+	hat   [4]bool // up, down, left, right
+	stick [4]bool
+	keys  [4]bool
+	live  [4]bool
 }
 
 type volumeMsg struct {
@@ -127,7 +131,7 @@ func writeEvent(ev inputEvent) {
 
 func publish() {
 	for i := 0; i < 4; i++ {
-		live := state.hat[i] || state.keys[i]
+		live := state.hat[i] || state.stick[i] || state.keys[i]
 		if live == state.live[i] {
 			continue
 		}
@@ -189,6 +193,15 @@ func readDevices(path string, hat bool) {
 			} else {
 				state.hat[2] = ev.Value < 0
 				state.hat[3] = ev.Value > 0
+			}
+			publish()
+		case hat && ev.Type == evAbs && (ev.Code == absX || ev.Code == absY):
+			if ev.Code == absY {
+				state.stick[0] = ev.Value < -stickDeadzone
+				state.stick[1] = ev.Value > stickDeadzone
+			} else {
+				state.stick[2] = ev.Value < -stickDeadzone
+				state.stick[3] = ev.Value > stickDeadzone
 			}
 			publish()
 		case !hat && ev.Type == evKey:

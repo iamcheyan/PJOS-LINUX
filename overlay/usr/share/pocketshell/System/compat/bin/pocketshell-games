@@ -60,7 +60,9 @@ emit_file() {
     cover=
     if [ "$section" = games ]; then
         directory=${path%/*}
+        group_dir=${directory##*/}
         for candidate in "$directory/$title.png" "$directory/$title.jpg" "$directory/$title.jpeg" \
+            "/mnt/SDCARD/Imgs/$group_dir/$title.png" "/mnt/SDCARD/Imgs/$group_dir/$title.jpg" \
             "$directory/images/$title.png" "$directory/images/$title.jpg" "$directory/images/$title.jpeg" \
             "$directory/images/$title-image.png" "$directory/images/$title-image.jpg" \
             "$directory/downloaded_images/$title.png" "$directory/downloaded_images/$title.jpg" \
@@ -189,7 +191,7 @@ scan() {
     else
         scan_games_root /storage/content/games
         scan_series_root /storage/content/games
-        for root in /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
+        for root in /mnt/SDCARD/Roms /mnt/sdcard/Roms /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
             scan_games_root "$root"
         done
         for mount in /media/*; do
@@ -269,7 +271,7 @@ scan() {
     ' "$SORTED" > "$LIBRARY.new" || return 1
     mv "$LIBRARY.new" "$LIBRARY" || return 1
     awk -F '\t' '
-        !seen[$2]++ { list = list (n++ ? "," : "") "\"" $2 "\"" }
+        !seen[$2]++ { sep = (n++ ? "," : ""); list = list sep "\"" $2 "\"" }
         END { printf "{\"total\":%d,\"sections\":[%s]}\n", NR, list }
     ' "$SORTED"
 }
