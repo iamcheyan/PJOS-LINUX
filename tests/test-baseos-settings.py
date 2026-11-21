@@ -103,4 +103,10 @@ class Settings(unittest.TestCase):
     def test_boot_resume_rejects_invalid_value_and_series_key(self):
         self.assertNotEqual(self.run_setting('bootResume', 'maybe').returncode, 0)
         self.assertNotEqual(self.run_setting('series.Bad-ID.lastVariant', 'ja').returncode, 0)
+    def test_series_recents_supports_comma_separated_app_list(self):
+        key = 'series.recents.lastVariant'
+        val = 'series:golden-sun-the-lost-age,series:zelda-minish-cap,files,saves'
+        self.assertEqual(self.run_setting(key, val).stdout.strip(), val)
+        self.assertEqual(self.run_setting(key).stdout.strip(), val)
+        self.assertIn(f'{key}={val}', (self.root/'storage/.config/pocketjs/ui-settings.conf').read_text())
 if __name__ == '__main__': unittest.main()

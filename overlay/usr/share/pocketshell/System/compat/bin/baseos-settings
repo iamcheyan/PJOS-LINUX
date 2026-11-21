@@ -41,8 +41,13 @@ if [ "$#" -gt 1 ]; then
             case "$sid" in ''|*[!a-z0-9-]*) fail invalid ;; esac
             case "$sid" in [a-z]*) ;; *) fail invalid ;; esac
             [ "${#sid}" -le 64 ] || fail invalid
-            case "$want" in ''|*[!A-Za-z0-9._-]*) fail invalid ;; esac
-            [ "${#want}" -le 64 ] || fail invalid
+            if [ "$sid" = "recents" ] || [ "$sid" = "order" ]; then
+                case "$want" in *[!A-Za-z0-9%._,:/\(\)\ -]*) fail invalid ;; esac
+                [ "${#want}" -le 4096 ] || fail invalid
+            else
+                case "$want" in ''|*[!A-Za-z0-9._-]*) fail invalid ;; esac
+                [ "${#want}" -le 64 ] || fail invalid
+            fi
             ;;
     esac
 fi
