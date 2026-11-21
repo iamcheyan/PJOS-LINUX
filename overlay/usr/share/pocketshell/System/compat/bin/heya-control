@@ -4,7 +4,10 @@
 # Bluetooth is reported unsupported when bluetoothctl cannot talk to D-Bus.
 set -u
 volume_state=${BASEOS_VOLUME_STATE:-/run/baseos-volume.percent}
+[ -d /run ] || volume_state=/tmp/baseos-volume.percent
 persistent_state=${BASEOS_VOLUME_PERSISTENT:-/storage/.config/baseos/volume.percent}
+event_state=${BASEOS_VOLUME_EVENT:-/run/baseos-volume.sequence}
+[ -d /run ] || event_state=/tmp/baseos-volume.sequence
 case "${1-}" in
     volume-state)
         value=$(cat "$volume_state" 2>/dev/null || :)
@@ -85,10 +88,34 @@ case "${1-}" in
         [ "$value" -le 100 ] || exit 0
         exec "$0" volume "$value" --no-beep
         ;;
+    brightness-state)
+        if [ -f /sys/class/led/tg5040_exterme_brightness ]; then
+            val=$(cat /sys/class/led/tg5040_exterme_brightness 2>/dev/null || :)
+            case "$val" in
+                ''|*[!0-9]*) echo 60 ;;
+                *) echo "$val" ;;
+            esac
+            exit 0
+        fi
+        if [ -f /sys/devices/virtual/disp/disp/attr/enhance_bright ]; then
+            val=$(awk '{print $1}' /sys/devices/virtual/disp/disp/attr/enhance_bright 2>/dev/null || :)
+            case "$val" in
+                ''|*[!0-9]*) echo 50 ;;
+                *) echo "$val" ;;
+            esac
+            exit 0
+        fi
+        exit 1
+        ;;
     brightness)
         value=${2-}
         case "$value" in ''|*[!0-9]*) exit 2 ;; esac
         [ "$value" -le 100 ] || exit 2
+        if [ -w /sys/class/led/tg5040_exterme_brightness ]; then
+            echo "$value" > /sys/class/led/tg5040_exterme_brightness 2>/dev/null
+            [ -w /sys/devices/virtual/disp/disp/attr/enhance_bright ] && echo "$value" > /sys/devices/virtual/disp/disp/attr/enhance_bright 2>/dev/null || :
+            exit 0
+        fi
         # enhance_bright is not the backlight: baseos-panel drives dispdbg and
         # verifies the driver's read-back. Floor at the same 10 the helper uses.
         panel=/mnt/sdcard/System/bin/baseos-panel

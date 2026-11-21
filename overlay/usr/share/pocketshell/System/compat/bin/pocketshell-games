@@ -191,9 +191,14 @@ scan() {
     else
         scan_games_root /storage/content/games
         scan_series_root /storage/content/games
-        for root in /mnt/SDCARD/Roms /mnt/sdcard/Roms /storage/games-internal/roms /storage/games-external/roms /storage/roms; do
+        for root in /storage/Roms /storage/roms /storage/games-internal/roms /storage/games-external/roms; do
             scan_games_root "$root"
         done
+        if [ ! -d /storage/Roms ]; then
+            for root in /mnt/SDCARD/Roms /mnt/sdcard/Roms; do
+                scan_games_root "$root"
+            done
+        fi
         for mount in /media/*; do
             [ -d "$mount" ] || continue
             scan_games_root "$mount/content/games"
