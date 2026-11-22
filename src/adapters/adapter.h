@@ -21,6 +21,9 @@ typedef struct {
     /* Page indices advance on A presses for this game, so a stale index may
      * overshoot the built pages while the next message is loading. */
     uint8_t page_slack;
+    /* Optional: returns active area/map identifier (>0), or 0 when inactive/unknown.
+     * Used by autosave to detect map/area transitions. */
+    uint32_t (*get_area_id)(struct mCore* core);
 } RBAdapter;
 
 /* Built-in game adapters */

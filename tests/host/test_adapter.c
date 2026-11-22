@@ -36,6 +36,17 @@ static int read_dialogue(struct mCore* core, uint16_t keys,
     return 1;
 }
 
+static uint32_t get_area_id(struct mCore* core) {
+    if (!core || !core->board) return 0;
+    const struct GBA* gba = core->board;
+    if (!gba->memory.wram) return 0;
+    const uint8_t* ewram = (const uint8_t*)gba->memory.wram;
+    uint8_t area = ewram[0x33A90];
+    uint8_t loc = ewram[0x33A91];
+    if (loc == 0 && area == 0) return 0;
+    return ((uint32_t)area << 8) | (uint32_t)loc;
+}
+
 const RBAdapter g_rb_adapter_tmc = {
     .game_id = "host_fixture",
     .title = "Host adapter fixture",
@@ -43,6 +54,7 @@ const RBAdapter g_rb_adapter_tmc = {
     .sha256_hex = "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
     .reset = reset,
     .read_dialogue = read_dialogue,
+    .get_area_id = get_area_id,
 };
 
 const RBAdapter g_rb_adapter_golden_sun = {0};

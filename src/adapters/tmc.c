@@ -71,6 +71,18 @@ static int tmc_read(struct mCore* core, uint16_t keys, uint16_t* out_text_id, ui
     return 1;
 }
 
+static uint32_t tmc_get_area_id(struct mCore* core) {
+    if (!core || !core->board) return 0;
+    const struct GBA* gba = (const struct GBA*)core->board;
+    if (!gba || !gba->memory.wram) return 0;
+    const uint8_t* wram = (const uint8_t*)gba->memory.wram;
+    /* EWRAM 0x02033A90: areaIndex (u8), 0x02033A91: locationIndex (u8) */
+    uint8_t area = wram[0x33A90];
+    uint8_t loc = wram[0x33A91];
+    if (loc == 0 && area == 0) return 0;
+    return ((uint32_t)area << 8) | (uint32_t)loc;
+}
+
 const RBAdapter g_rb_adapter_tmc = {
     .game_id = "zelda_minish_cap",
     .title = "The Legend of Zelda: The Minish Cap (Japan)",
@@ -79,4 +91,5 @@ const RBAdapter g_rb_adapter_tmc = {
     .reset = tmc_reset,
     .read_dialogue = tmc_read,
     .page_slack = 0,
+    .get_area_id = tmc_get_area_id,
 };

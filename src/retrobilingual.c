@@ -94,11 +94,13 @@ static int sMenuCursor;
 static int sBindingCursor;
 static int64_t sAutoSaveLastTimeMs;
 static int sAutoSaveClockStarted;
+static uint32_t sLastAreaId;
 static int sBindingCapture;
 static int sBindingPending[2];
 static int sBindingCount;
 
-#define RB_SLOT_COUNT 5
+#define RB_SLOT_COUNT 6
+#define RB_SLOT_AUTO 5
 
 typedef enum {
     RB_POS_AUTO = 0,
@@ -111,7 +113,7 @@ typedef enum {
 typedef struct {
     int enabled;
     int x_action;              /* 0: SUBTITLE, 1: SAVE, 2: LOAD */
-    int slot;                  /* 0..4 (Slot 1..5) */
+    int slot;                  /* 0..5 (0..4: Slot 1..5, 5: AUTO) */
     int hud_pos;               /* 0: AUTO, 1: TOP, 2: CENTER, 3: BOTTOM */
     int visual_filter;         /* RBVisualFilter (0..7) */
     int autosave_interval;     /* index into sAutoSaveMinutes; 0 disables */
@@ -131,8 +133,19 @@ static RBConfig sCfg = {
     },
 };
 
-static const int sAutoSaveMinutes[] = { 0, 1, 3, 5, 10, 15, 30 };
-static const char* sAutoSaveNames[] = { "OFF", "1 MIN", "3 MIN", "5 MIN", "10 MIN", "15 MIN", "30 MIN" };
+#define AUTOSAVE_OPT_COUNT 8
+static const int sAutoSaveMinutes[AUTOSAVE_OPT_COUNT] = { 0, 0, 1, 3, 5, 10, 3, 5 };
+static const int sAutoSaveOnMap[AUTOSAVE_OPT_COUNT]    = { 0, 1, 0, 0, 0, 0, 1, 1 };
+static const char* sAutoSaveNames[AUTOSAVE_OPT_COUNT] = {
+    "OFF",
+    "ON MAP",
+    "1 MIN",
+    "3 MIN",
+    "5 MIN",
+    "10 MIN",
+    "MAP+3M",
+    "MAP+5M"
+};
 
 static const char* sFilterNames[RB_FILTER_COUNT] = {
     "OFF (RAW 3X)", "LCD GRID", "GBA COLOR", "LCD+COLOR", "CRT SCAN", "RGB STRIPE", "GB DMG", "GB POCKET"
@@ -327,6 +340,7 @@ static int rb_rom_identity(const struct GBA* gba) {
     sAdapter = rb_adapter_match((uint32_t)rom_size, sRomSha256);
     sRomIdentityReady = 1;
     if (sAdapter && sAdapter->reset) sAdapter->reset();
+    sLastAreaId = 0;
     return sAdapter != NULL;
 }
 
@@ -423,7 +437,7 @@ static void rb_config_load(void) {
             if (v >= 0 && v < RB_FILTER_COUNT) sCfg.visual_filter = v;
         }
         else if (sscanf(line, "autosave_interval=%d", &v) == 1) {
-            if (v >= 0 && v < 7) sCfg.autosave_interval = v;
+            if (v >= 0 && v < AUTOSAVE_OPT_COUNT) sCfg.autosave_interval = v;
         }
         else if (sscanf(line, "bind_save=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SAVE][0]=a; sCfg.chord[ACT_SAVE][1]=b; }
         else if (sscanf(line, "bind_load=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_LOAD][0]=a; sCfg.chord[ACT_LOAD][1]=b; }
@@ -746,7 +760,11 @@ static void set_toast(const char* msg) {
 static void rb_state_path(int slot, char* out, size_t out_sz) {
     const char* dir = getenv("RETROBILINGUAL_DIR");
     if (!dir) dir = "/storage/.config/pocketjs";
-    snprintf(out, out_sz, "%s/retrobilingual-slot%d.state", dir, slot + 1);
+    if (slot == RB_SLOT_AUTO) {
+        snprintf(out, out_sz, "%s/retrobilingual-autosave.state", dir);
+    } else {
+        snprintf(out, out_sz, "%s/retrobilingual-slot%d.state", dir, slot + 1);
+    }
 }
 
 static int rb_slot_has_data(int slot) {
@@ -844,15 +862,36 @@ static int rb_state_save_path(struct mCore* core, const char* path) {
         free(buf);
         return 0;
     }
-    FILE* f = fopen(path, "wb");
+    char tmp_path[540];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    FILE* f = fopen(tmp_path, "wb");
     if (!f) {
+        f = fopen(path, "wb");
+        if (!f) {
+            free(buf);
+            return 0;
+        }
+        size_t written = fwrite(buf, 1, size, f);
+        fflush(f);
+        fsync(fileno(f));
+        fclose(f);
         free(buf);
-        return 0;
+        return written == size;
     }
     size_t written = fwrite(buf, 1, size, f);
+    fflush(f);
+    fsync(fileno(f));
     fclose(f);
     free(buf);
-    return written == size;
+    if (written != size) {
+        unlink(tmp_path);
+        return 0;
+    }
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+        return 0;
+    }
+    return 1;
 }
 
 static int rb_slot_save(struct mCore* core, int slot) {
@@ -915,6 +954,10 @@ static int rb_slot_load(struct mCore* core, int slot) {
 }
 
 static void do_save(struct mCore* core) {
+    if (sCfg.slot == RB_SLOT_AUTO) {
+        set_toast("AUTO SLOT IS READ-ONLY");
+        return;
+    }
     int ok = rb_slot_save(core, sCfg.slot);
     char buf[48];
     if (ok) snprintf(buf, sizeof(buf), "SAVED TO SLOT %d", sCfg.slot + 1);
@@ -925,8 +968,14 @@ static void do_save(struct mCore* core) {
 static void do_load(struct mCore* core) {
     int res = rb_slot_load(core, sCfg.slot);
     char buf[48];
-    if (res == 1) snprintf(buf, sizeof(buf), "LOADED SLOT %d", sCfg.slot + 1);
-    else if (res == -1) snprintf(buf, sizeof(buf), "SLOT %d IS EMPTY", sCfg.slot + 1);
+    if (res == 1) {
+        if (sCfg.slot == RB_SLOT_AUTO) snprintf(buf, sizeof(buf), "LOADED AUTOSAVE");
+        else snprintf(buf, sizeof(buf), "LOADED SLOT %d", sCfg.slot + 1);
+    }
+    else if (res == -1) {
+        if (sCfg.slot == RB_SLOT_AUTO) snprintf(buf, sizeof(buf), "AUTOSAVE IS EMPTY");
+        else snprintf(buf, sizeof(buf), "SLOT %d IS EMPTY", sCfg.slot + 1);
+    }
     else snprintf(buf, sizeof(buf), "LOAD FAILED!");
     set_toast(buf);
 }
@@ -942,18 +991,46 @@ static void rb_auto_save_tick_at(struct mCore* core, int64_t now_ms) {
         sAutoSaveLastTimeMs = now_ms;
         sAutoSaveClockStarted = 1;
     }
-    int minutes = sAutoSaveMinutes[sCfg.autosave_interval];
-    if (minutes == 0) {
+    if (sCfg.autosave_interval < 0 || sCfg.autosave_interval >= AUTOSAVE_OPT_COUNT) return;
+    if (sCfg.autosave_interval == 0) {
         sAutoSaveLastTimeMs = now_ms;
         return;
     }
-    if (now_ms < sAutoSaveLastTimeMs || now_ms - sAutoSaveLastTimeMs < (int64_t)minutes * 60000) return;
+    int minutes = sAutoSaveMinutes[sCfg.autosave_interval];
+    int check_map = sAutoSaveOnMap[sCfg.autosave_interval];
 
-    char path[512];
-    rb_auto_state_path(path, sizeof(path));
-    int ok = rb_state_save_path(core, path);
-    sAutoSaveLastTimeMs = now_ms;
-    set_toast(ok ? "AUTO SAVED" : "AUTO SAVE FAILED");
+    int trigger = 0;
+    const char* trigger_msg = "AUTO SAVED";
+
+    /* Check map change */
+    if (check_map && sAdapter && sAdapter->get_area_id) {
+        uint32_t area = sAdapter->get_area_id(core);
+        if (area != 0) {
+            if (sLastAreaId != 0 && area != sLastAreaId) {
+                if (now_ms < sAutoSaveLastTimeMs || now_ms - sAutoSaveLastTimeMs >= 5000) {
+                    trigger = 1;
+                    trigger_msg = "AUTO SAVED (MAP)";
+                }
+            }
+            sLastAreaId = area;
+        }
+    }
+
+    /* Check time interval */
+    if (!trigger && minutes > 0) {
+        if (now_ms >= sAutoSaveLastTimeMs && (now_ms - sAutoSaveLastTimeMs >= (int64_t)minutes * 60000)) {
+            trigger = 1;
+            trigger_msg = "AUTO SAVED (TIME)";
+        }
+    }
+
+    if (trigger) {
+        char path[512];
+        rb_auto_state_path(path, sizeof(path));
+        int ok = rb_state_save_path(core, path);
+        sAutoSaveLastTimeMs = now_ms;
+        set_toast(ok ? trigger_msg : "AUTO SAVE FAILED");
+    }
 }
 
 static void rb_auto_save_tick(struct mCore* core) {
@@ -973,9 +1050,16 @@ static void rb_resume(struct mCore* core) {
     if (sStateBuf) core->loadState(core, sStateBuf);
     sAutoSaveLastTimeMs = rb_monotonic_ms();
     sAutoSaveClockStarted = 1;
+    if (sAdapter && sAdapter->get_area_id) {
+        sLastAreaId = sAdapter->get_area_id(core);
+    }
 }
 
 static void request_save(struct mCore* core) {
+    if (sCfg.slot == RB_SLOT_AUTO) {
+        set_toast("AUTO SLOT IS READ-ONLY");
+        return;
+    }
     if (rb_slot_has_data(sCfg.slot)) {
         rb_pause(core);
         sState = RB_CONFIRM_OVERWRITE;
@@ -1076,8 +1160,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.visual_filter = (sCfg.visual_filter + RB_FILTER_COUNT - 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); }
         } else if (sMenuCursor == 5) {
-            if (edge(now, prev, RB_KEY_RIGHT)) sCfg.autosave_interval = (sCfg.autosave_interval + 1) % 7;
-            if (edge(now, prev, RB_KEY_LEFT)) sCfg.autosave_interval = (sCfg.autosave_interval + 6) % 7;
+            if (edge(now, prev, RB_KEY_RIGHT)) sCfg.autosave_interval = (sCfg.autosave_interval + 1) % AUTOSAVE_OPT_COUNT;
+            if (edge(now, prev, RB_KEY_LEFT)) sCfg.autosave_interval = (sCfg.autosave_interval + AUTOSAVE_OPT_COUNT - 1) % AUTOSAVE_OPT_COUNT;
             if (edge(now, prev, RB_KEY_RIGHT) || edge(now, prev, RB_KEY_LEFT)) {
                 sAutoSaveLastTimeMs = rb_monotonic_ms();
                 sAutoSaveClockStarted = 1;
@@ -1101,7 +1185,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             case 3: sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); break;
             case 4: sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); break;
             case 5:
-                sCfg.autosave_interval = (sCfg.autosave_interval + 1) % 7;
+                sCfg.autosave_interval = (sCfg.autosave_interval + 1) % AUTOSAVE_OPT_COUNT;
                 sAutoSaveLastTimeMs = rb_monotonic_ms();
                 sAutoSaveClockStarted = 1;
                 rb_config_save();
@@ -1384,8 +1468,18 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     char buf[24];
                     int has_data = rb_slot_has_data(sCfg.slot);
                     uint16_t slot_col = has_data ? 0x2FE5 : 0x7BEF; /* Green if has data, Gray if empty */
-                    snprintf(buf, sizeof(buf), "< SLOT %d >", sCfg.slot + 1);
-                    ui_text(fb, p, mx + mw - 62, iy, buf, slot_col);
+                    if (sCfg.slot == RB_SLOT_AUTO) {
+                        if (i == 0) {
+                            snprintf(buf, sizeof(buf), "< AUTO (RO) >");
+                            slot_col = 0x7BEF;
+                        } else {
+                            snprintf(buf, sizeof(buf), "< AUTO >");
+                        }
+                    } else {
+                        snprintf(buf, sizeof(buf), "< SLOT %d >", sCfg.slot + 1);
+                    }
+                    int off_x = (sCfg.slot == RB_SLOT_AUTO && i == 0) ? 84 : 62;
+                    ui_text(fb, p, mx + mw - off_x, iy, buf, slot_col);
                 } else if (i == 2) {
                     ui_text(fb, p, mx + mw - 62, iy, x_names[sCfg.x_action], 0xFFE0);
                 } else if (i == 3) {
@@ -1414,14 +1508,17 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
 
             if (info.valid) {
                 if (info.area_name[0]) {
-                    snprintf(l1, sizeof(l1), "SLOT %d: %s", sCfg.slot + 1, info.area_name);
+                    if (sCfg.slot == RB_SLOT_AUTO) snprintf(l1, sizeof(l1), "AUTO: %s", info.area_name);
+                    else snprintf(l1, sizeof(l1), "SLOT %d: %s", sCfg.slot + 1, info.area_name);
                     snprintf(l2, sizeof(l2), "%d HEARTS  %dR   %s", info.hearts, info.rupees, info.time_str);
                 } else {
-                    snprintf(l1, sizeof(l1), "SLOT %d: SAVED STATE", sCfg.slot + 1);
+                    if (sCfg.slot == RB_SLOT_AUTO) snprintf(l1, sizeof(l1), "AUTO: SAVED STATE");
+                    else snprintf(l1, sizeof(l1), "SLOT %d: SAVED STATE", sCfg.slot + 1);
                     snprintf(l2, sizeof(l2), "SAVED %s", info.time_str);
                 }
             } else {
-                snprintf(l1, sizeof(l1), "SLOT %d: (EMPTY SLOT)", sCfg.slot + 1);
+                if (sCfg.slot == RB_SLOT_AUTO) snprintf(l1, sizeof(l1), "AUTO: (EMPTY)");
+                else snprintf(l1, sizeof(l1), "SLOT %d: (EMPTY SLOT)", sCfg.slot + 1);
                 snprintf(l2, sizeof(l2), "NO SAVED STATE DATA");
             }
 
