@@ -52,16 +52,18 @@ static void apply_volume(int vol) {
     if (f) { fprintf(f, "%lu\n", seq); fclose(f); }
 
     /* Set ALSA volume:
-     * TrimUI Allwinner A133 sndcodec:
-     * LINEOUT volume: range 0-31
-     * Headphone: range 0-7
+     * 1. Soft Volume Master: 0-255 (the actual PCM master volume defined in /etc/asound.conf)
+     * 2. Headphone: 0-7 (analog gain)
+     * 3. DAC volume: 160 (unmuted 0dB baseline)
      */
-    int lineout = (vol * 31 + 50) / 100;
+    int master = (vol * 255 + 50) / 100;
     int hp = (vol * 7 + 50) / 100;
-    char cmd[128];
-    snprintf(cmd, sizeof(cmd), "amixer -q -c 0 sset 'LINEOUT volume' %d >/dev/null 2>&1 &", lineout);
-    system(cmd);
-    snprintf(cmd, sizeof(cmd), "amixer -q -c 0 sset 'Headphone' %d >/dev/null 2>&1 &", hp);
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+        "amixer -q -c 0 sset 'Soft Volume Master' %d >/dev/null 2>&1; "
+        "amixer -q -c 0 sset 'Headphone' %d >/dev/null 2>&1; "
+        "amixer -q -c 0 cset name='DAC volume' 160,160 >/dev/null 2>&1 &",
+        master, hp);
     system(cmd);
 }
 
@@ -76,6 +78,19 @@ int main(int argc, char **argv) {
     if (daemon(1, 0) < 0) {
         perror("daemon");
         return 1;
+    }
+
+    int pid_fd = open("/tmp/trimui-volumed.pid", O_RDWR | O_CREAT, 0644);
+    if (pid_fd >= 0) {
+        if (lockf(pid_fd, F_TLOCK, 0) < 0) {
+            /* Already running */
+            return 0;
+        }
+        if (ftruncate(pid_fd, 0) == 0) {
+            char pbuf[32];
+            int plen = snprintf(pbuf, sizeof(pbuf), "%d\n", getpid());
+            (void)write(pid_fd, pbuf, plen);
+        }
     }
 
     struct input_event ev;
