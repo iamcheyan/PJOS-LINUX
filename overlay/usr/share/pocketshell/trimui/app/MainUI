@@ -24,6 +24,14 @@ export POCKETJS_HOME=$SDCARD/System/pocketjs
 [ -e /etc/os-release ] || ln -sf $SDCARD/System/etc/os-release /etc/os-release 2>/dev/null || :
 [ -e /etc/baseos-release ] || ln -sf $SDCARD/System/etc/baseos-release /etc/baseos-release 2>/dev/null || :
 
+# Normalize apps directory and ensure native app stubs for launcher
+if [ -d /mnt/SDCARD/Apps ] && [ ! -d /mnt/SDCARD/apps ]; then
+    mv /mnt/SDCARD/Apps /mnt/SDCARD/apps_tmp 2>/dev/null && mv /mnt/SDCARD/apps_tmp /mnt/SDCARD/apps 2>/dev/null || :
+fi
+if [ -d /mnt/SDCARD/apps/Zircon ] || [ -d /mnt/SDCARD/apps/zircon ] || [ -d /mnt/SDCARD/Apps/Zircon ]; then
+    [ -f /mnt/SDCARD/apps/zircon.pocket ] || touch /mnt/SDCARD/apps/zircon.pocket 2>/dev/null || :
+fi
+
 # 3. Ensure hardware daemons are alive (singleton)
 if ! pgrep trimui_inputd > /dev/null 2>&1; then
     echo "Starting trimui_inputd..." >> $LOG
@@ -55,16 +63,23 @@ while true; do
     if [ -s "$ACTIVE_MARKER" ]; then
         ROM_REQ=$(head -n 1 "$ACTIVE_MARKER" | tr -d '\r')
         # Native applications hand the panel to their own launcher instead of
-        # an emulator: @zircon is written by compat/bin/pocketjs-native-launch.
+        # an emulator: @zircon or zircon is written by compat/bin/pocketjs-native-launch.
         case "$ROM_REQ" in
-            @zircon)
+            @zircon|zircon|Zircon)
                 echo "Supervisor: native app requested: zircon" >> $LOG
-                if [ -x "$SDCARD/Apps/Zircon/launch.sh" ]; then
+                ZIRCON_DIR=
+                for cand in "$SDCARD/apps/Zircon" "$SDCARD/Apps/Zircon" "$SDCARD/apps/zircon" "$SDCARD/Apps/zircon"; do
+                    if [ -d "$cand" ]; then
+                        ZIRCON_DIR="$cand"
+                        break
+                    fi
+                done
+                if [ -n "$ZIRCON_DIR" ] && [ -x "$ZIRCON_DIR/launch.sh" ]; then
                     echo "Starting Zircon at $(date)..." >> $LOG
-                    "$SDCARD/Apps/Zircon/launch.sh" >> $LOG 2>&1
+                    "$ZIRCON_DIR/launch.sh" >> $LOG 2>&1
                     echo "Zircon exited at $(date)" >> $LOG
                 else
-                    echo "Supervisor: Zircon launch script missing: $SDCARD/Apps/Zircon/launch.sh" >> $LOG
+                    echo "Supervisor: Zircon launch script missing: $ZIRCON_DIR/launch.sh" >> $LOG
                 fi
                 rm -f "$ACTIVE_MARKER"
                 sleep 1
