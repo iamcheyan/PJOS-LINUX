@@ -57,7 +57,7 @@
 #define RB_MAX_ENTRIES 16384
 #define RB_MAX_TEXT 512
 
-typedef enum { RB_GAME, RB_MENU, RB_SUBTITLE, RB_BINDINGS } RBState;
+typedef enum { RB_GAME, RB_MENU, RB_SUBTITLE, RB_BINDINGS, RB_CONFIRM_OVERWRITE } RBState;
 typedef enum { ACT_SAVE, ACT_LOAD, ACT_SUBTITLE, ACT_COUNT } RBAction;
 typedef enum { X_ACT_SUBTITLE = 0, X_ACT_SAVE = 1, X_ACT_LOAD = 2, X_ACT_COUNT } XAction;
 
@@ -920,6 +920,17 @@ static void rb_resume(struct mCore* core) {
     if (sStateBuf) core->loadState(core, sStateBuf);
 }
 
+static void request_save(struct mCore* core) {
+    if (rb_slot_has_data(sCfg.slot)) {
+        rb_pause(core);
+        sState = RB_CONFIRM_OVERWRITE;
+    } else {
+        do_save(core);
+        rb_resume(core);
+        sState = RB_GAME;
+    }
+}
+
 /* ---------- input ------------------------------------------------------ */
 static int edge(uint32_t now, uint32_t prev, uint32_t bit) {
     return (now & bit) && !(prev & bit);
@@ -1016,13 +1027,27 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             sState = RB_GAME;
         } else if (edge(now, prev, RB_KEY_A)) {
             switch (sMenuCursor) {
-            case 0: do_save(core); rb_resume(core); sState = RB_GAME; break;
+            case 0: request_save(core); break;
             case 1: do_load(core); sState = RB_GAME; break;
             case 2: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
             case 3: sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); break;
             case 4: sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); break;
             default: break;
             }
+        }
+        *keys = 0;
+        goto done;
+    }
+
+    if (sState == RB_CONFIRM_OVERWRITE) {
+        if (edge(now, prev, RB_KEY_A)) {
+            do_save(core);
+            rb_resume(core);
+            sState = RB_GAME;
+        } else if (y_just || edge(now, prev, RB_KEY_B)) {
+            set_toast("SAVE CANCELLED");
+            rb_resume(core);
+            sState = RB_GAME;
         }
         *keys = 0;
         goto done;
@@ -1053,7 +1078,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
             rb_pause(core);
             sState = RB_SUBTITLE;
         } else if (sCfg.x_action == X_ACT_SAVE) {
-            do_save(core);
+            request_save(core);
         } else if (sCfg.x_action == X_ACT_LOAD) {
             do_load(core);
         }
@@ -1061,7 +1086,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         for (int a = 0; a < ACT_COUNT; a++) {
             int c = chord_down((uint16_t)now, sCfg.chord[a]);
             if (c && !sPrevAction[a]) {
-                if (a == ACT_SAVE) do_save(core);
+                if (a == ACT_SAVE) request_save(core);
                 else if (a == ACT_LOAD) do_load(core);
                 else if (a == ACT_SUBTITLE) {
                     rb_dialogue_read(core, 0);
@@ -1336,6 +1361,34 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             }
         }
         ui_text(fb, p, 4, RB_FB_H - 10, "Y/B:CLOSE  A:OK  < >:SLOT/OPTION", 0xAD55);
+    } else if (sState == RB_CONFIRM_OVERWRITE) {
+        int mw = 180, mh = 64;
+        int mx = (RB_FB_W - mw) / 2, my = (RB_FB_H - mh) / 2;
+        rect(fb, p, mx - 2, my - 2, mw + 4, mh + 4, 0x0000);
+        rect(fb, p, mx - 1, my - 1, mw + 2, mh + 2, 0xF800);
+        rect(fb, p, mx, my, mw, mh, 0x0000);
+
+        char title[32];
+        snprintf(title, sizeof(title), "OVERWRITE SLOT %d?", sCfg.slot + 1);
+        ui_text(fb, p, mx + (mw - (int)strlen(title) * 6) / 2, my + 8, title, 0xFFE0);
+
+        RBSlotInfo info;
+        rb_get_slot_info(sCfg.slot, &info);
+        if (info.valid && info.area_name[0]) {
+            char l1[36];
+            snprintf(l1, sizeof(l1), "%s", info.area_name);
+            ui_text(fb, p, mx + (mw - (int)strlen(l1) * 6) / 2, my + 22, l1, 0x2FE5);
+            char l2[36];
+            snprintf(l2, sizeof(l2), "%s", info.time_str);
+            ui_text(fb, p, mx + (mw - (int)strlen(l2) * 6) / 2, my + 32, l2, 0xCE79);
+        } else {
+            const char* sub = "SLOT HAS EXISTING DATA";
+            ui_text(fb, p, mx + (mw - (int)strlen(sub) * 6) / 2, my + 26, sub, 0xCE79);
+        }
+
+        rect(fb, p, mx + 6, my + 44, mw - 12, 1, 0x2965);
+        const char* act = "A:OVERWRITE   B:CANCEL";
+        ui_text(fb, p, mx + (mw - (int)strlen(act) * 6) / 2, my + 48, act, 0xFFFF);
     }
 
     if (sVolumeTicks > 0) {
