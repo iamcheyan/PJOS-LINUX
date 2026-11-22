@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /* RetroBilingual mGBA integration: in-frame menu, pause and subtitle overlay.
  * SPDX-License-Identifier: MPL-2.0
  *
@@ -90,6 +92,8 @@ static RBState sState;
 static int sInitialized;
 static int sMenuCursor;
 static int sBindingCursor;
+static int64_t sAutoSaveLastTimeMs;
+static int sAutoSaveClockStarted;
 static int sBindingCapture;
 static int sBindingPending[2];
 static int sBindingCount;
@@ -110,6 +114,7 @@ typedef struct {
     int slot;                  /* 0..4 (Slot 1..5) */
     int hud_pos;               /* 0: AUTO, 1: TOP, 2: CENTER, 3: BOTTOM */
     int visual_filter;         /* RBVisualFilter (0..7) */
+    int autosave_interval;     /* index into sAutoSaveMinutes; 0 disables */
     int chord[ACT_COUNT][2];   /* RetroPad ids, -1 = unset */
 } RBConfig;
 static RBConfig sCfg = {
@@ -118,12 +123,16 @@ static RBConfig sCfg = {
     .slot = 0,
     .hud_pos = RB_POS_AUTO,
     .visual_filter = RB_FILTER_LCD_COLOR,
+    .autosave_interval = 0,
     .chord = {
         { -1, -1 },            /* save */
         { -1, -1 },            /* load */
         { RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_SELECT },
     },
 };
+
+static const int sAutoSaveMinutes[] = { 0, 1, 3, 5, 10, 15, 30 };
+static const char* sAutoSaveNames[] = { "OFF", "1 MIN", "3 MIN", "5 MIN", "10 MIN", "15 MIN", "30 MIN" };
 
 static const char* sFilterNames[RB_FILTER_COUNT] = {
     "OFF (RAW 3X)", "LCD GRID", "GBA COLOR", "LCD+COLOR", "CRT SCAN", "RGB STRIPE", "GB DMG", "GB POCKET"
@@ -413,6 +422,9 @@ static void rb_config_load(void) {
         else if (sscanf(line, "visual_filter=%d", &v) == 1) {
             if (v >= 0 && v < RB_FILTER_COUNT) sCfg.visual_filter = v;
         }
+        else if (sscanf(line, "autosave_interval=%d", &v) == 1) {
+            if (v >= 0 && v < 7) sCfg.autosave_interval = v;
+        }
         else if (sscanf(line, "bind_save=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SAVE][0]=a; sCfg.chord[ACT_SAVE][1]=b; }
         else if (sscanf(line, "bind_load=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_LOAD][0]=a; sCfg.chord[ACT_LOAD][1]=b; }
         else if (sscanf(line, "bind_subtitle=%d,%d", &a, &b) == 2) { sCfg.chord[ACT_SUBTITLE][0]=a; sCfg.chord[ACT_SUBTITLE][1]=b; }
@@ -429,6 +441,7 @@ static void rb_config_save(void) {
     fprintf(f, "slot=%d\n", sCfg.slot);
     fprintf(f, "hud_pos=%d\n", sCfg.hud_pos);
     fprintf(f, "visual_filter=%d\n", sCfg.visual_filter);
+    fprintf(f, "autosave_interval=%d\n", sCfg.autosave_interval);
     for (int i = 0; i < ACT_COUNT; i++) {
         const char* key = i == ACT_SAVE ? "bind_save" : i == ACT_LOAD ? "bind_load" : "bind_subtitle";
         fprintf(f, "%s=%d,%d\n", key, sCfg.chord[i][0], sCfg.chord[i][1]);
@@ -821,7 +834,7 @@ static void rb_get_slot_info(int slot, RBSlotInfo* info) {
     }
 }
 
-static int rb_slot_save(struct mCore* core, int slot) {
+static int rb_state_save_path(struct mCore* core, const char* path) {
     if (!core || !core->stateSize || !core->saveState) return 0;
     size_t size = core->stateSize(core);
     if (!size) return 0;
@@ -831,8 +844,6 @@ static int rb_slot_save(struct mCore* core, int slot) {
         free(buf);
         return 0;
     }
-    char path[512];
-    rb_state_path(slot, path, sizeof(path));
     FILE* f = fopen(path, "wb");
     if (!f) {
         free(buf);
@@ -843,6 +854,19 @@ static int rb_slot_save(struct mCore* core, int slot) {
     free(buf);
     return written == size;
 }
+
+static int rb_slot_save(struct mCore* core, int slot) {
+    char path[512];
+    rb_state_path(slot, path, sizeof(path));
+    return rb_state_save_path(core, path);
+}
+
+static void rb_auto_state_path(char* out, size_t out_sz) {
+    const char* dir = getenv("RETROBILINGUAL_DIR");
+    if (!dir) dir = "/storage/.config/pocketjs";
+    snprintf(out, out_sz, "%s/retrobilingual-autosave.state", dir);
+}
+
 
 static int rb_slot_load(struct mCore* core, int slot) {
     if (!core || !core->stateSize || !core->loadState) return 0;
@@ -907,6 +931,35 @@ static void do_load(struct mCore* core) {
     set_toast(buf);
 }
 
+static int64_t rb_monotonic_ms(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static void rb_auto_save_tick_at(struct mCore* core, int64_t now_ms) {
+    if (!sAutoSaveClockStarted) {
+        sAutoSaveLastTimeMs = now_ms;
+        sAutoSaveClockStarted = 1;
+    }
+    int minutes = sAutoSaveMinutes[sCfg.autosave_interval];
+    if (minutes == 0) {
+        sAutoSaveLastTimeMs = now_ms;
+        return;
+    }
+    if (now_ms < sAutoSaveLastTimeMs || now_ms - sAutoSaveLastTimeMs < (int64_t)minutes * 60000) return;
+
+    char path[512];
+    rb_auto_state_path(path, sizeof(path));
+    int ok = rb_state_save_path(core, path);
+    sAutoSaveLastTimeMs = now_ms;
+    set_toast(ok ? "AUTO SAVED" : "AUTO SAVE FAILED");
+}
+
+static void rb_auto_save_tick(struct mCore* core) {
+    rb_auto_save_tick_at(core, rb_monotonic_ms());
+}
+
 static void rb_pause(struct mCore* core) {
     size_t need = core->stateSize(core);
     if (need != sStateSize) {
@@ -918,6 +971,8 @@ static void rb_pause(struct mCore* core) {
 }
 static void rb_resume(struct mCore* core) {
     if (sStateBuf) core->loadState(core, sStateBuf);
+    sAutoSaveLastTimeMs = rb_monotonic_ms();
+    sAutoSaveClockStarted = 1;
 }
 
 static void request_save(struct mCore* core) {
@@ -1006,8 +1061,8 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     }
 
     if (sState == RB_MENU) {
-        if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 5;
-        if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 4) % 5;
+        if (edge(now, prev, RB_KEY_DOWN)) sMenuCursor = (sMenuCursor + 1) % 6;
+        if (edge(now, prev, RB_KEY_UP)) sMenuCursor = (sMenuCursor + 5) % 6;
         if (sMenuCursor == 0 || sMenuCursor == 1) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.slot = (sCfg.slot + 1) % RB_SLOT_COUNT; rb_config_save(); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.slot = (sCfg.slot + RB_SLOT_COUNT - 1) % RB_SLOT_COUNT; rb_config_save(); }
@@ -1020,6 +1075,14 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         } else if (sMenuCursor == 4) {
             if (edge(now, prev, RB_KEY_RIGHT)) { sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); }
             if (edge(now, prev, RB_KEY_LEFT)) { sCfg.visual_filter = (sCfg.visual_filter + RB_FILTER_COUNT - 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); }
+        } else if (sMenuCursor == 5) {
+            if (edge(now, prev, RB_KEY_RIGHT)) sCfg.autosave_interval = (sCfg.autosave_interval + 1) % 7;
+            if (edge(now, prev, RB_KEY_LEFT)) sCfg.autosave_interval = (sCfg.autosave_interval + 6) % 7;
+            if (edge(now, prev, RB_KEY_RIGHT) || edge(now, prev, RB_KEY_LEFT)) {
+                sAutoSaveLastTimeMs = rb_monotonic_ms();
+                sAutoSaveClockStarted = 1;
+                rb_config_save();
+            }
         }
 
         if (y_just || edge(now, prev, RB_KEY_B)) {
@@ -1028,10 +1091,21 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
         } else if (edge(now, prev, RB_KEY_A)) {
             switch (sMenuCursor) {
             case 0: request_save(core); break;
-            case 1: do_load(core); sState = RB_GAME; break;
+            case 1:
+                do_load(core);
+                sAutoSaveLastTimeMs = rb_monotonic_ms();
+                sAutoSaveClockStarted = 1;
+                sState = RB_GAME;
+                break;
             case 2: sCfg.x_action = (sCfg.x_action + 1) % X_ACT_COUNT; rb_config_save(); break;
             case 3: sCfg.hud_pos = (sCfg.hud_pos + 1) % RB_POS_COUNT; rb_config_save(); break;
             case 4: sCfg.visual_filter = (sCfg.visual_filter + 1) % RB_FILTER_COUNT; rb_config_save(); set_toast(sFilterNames[sCfg.visual_filter]); break;
+            case 5:
+                sCfg.autosave_interval = (sCfg.autosave_interval + 1) % 7;
+                sAutoSaveLastTimeMs = rb_monotonic_ms();
+                sAutoSaveClockStarted = 1;
+                rb_config_save();
+                break;
             default: break;
             }
         }
@@ -1067,6 +1141,7 @@ void retrobilingual_process_input(struct mCore* core, uint16_t* keys,
     }
 
     /* RB_GAME */
+    rb_auto_save_tick(core);
     if (y_just) {
         rb_pause(core);
         sState = RB_MENU;
@@ -1287,13 +1362,13 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             ui_text(fb, p, nx, ny, "NO TRANSLATION", 0xFFFF);
         }
     } else if (sState == RB_MENU || sState == RB_BINDINGS) {
-        int mw = 192, mh = 110;
-        int mx = (RB_FB_W - mw) / 2, my = 15;
+        int mw = 192, mh = sState == RB_MENU ? 132 : 110;
+        int mx = (RB_FB_W - mw) / 2, my = 12;
         rect(fb, p, mx - 2, my - 2, mw + 4, mh + 4, 0x7BEF);
         rect(fb, p, mx, my, mw, mh, 0x0000);
         if (sState == RB_MENU) {
-            static const char* labels[5] = {
-                "QUICK SAVE", "QUICK LOAD", "X BUTTON", "POSITION", "FILTER"
+            static const char* labels[6] = {
+                "QUICK SAVE", "QUICK LOAD", "X BUTTON", "POSITION", "FILTER", "AUTO SAVE"
             };
             static const char* x_names[X_ACT_COUNT] = {
                 "TRANSLATE", "SAVE", "LOAD"
@@ -1301,9 +1376,9 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
             static const char* pos_names[RB_POS_COUNT] = {
                 "AUTO", "TOP", "CENTER", "BOTTOM"
             };
-            for (int i = 0; i < 5; i++) {
-                int iy = my + 7 + i * 14;
-                if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 12, 0x2965);
+            for (int i = 0; i < 6; i++) {
+                int iy = my + 5 + i * 11;
+                if (i == sMenuCursor) rect(fb, p, mx + 2, iy - 2, mw - 4, 10, 0x2965);
                 ui_text(fb, p, mx + 8, iy, labels[i], 0xFFFF);
                 if (i == 0 || i == 1) {
                     char buf[24];
@@ -1319,6 +1394,10 @@ void retrobilingual_draw(struct mCore* core, void* pixels, unsigned width,
                     char buf[24];
                     snprintf(buf, sizeof(buf), "< %s >", sFilterNames[sCfg.visual_filter]);
                     ui_text(fb, p, mx + mw - 80, iy, buf, 0x07FF);
+                } else if (i == 5) {
+                    char buf[24];
+                    snprintf(buf, sizeof(buf), "< %s >", sAutoSaveNames[sCfg.autosave_interval]);
+                    ui_text(fb, p, mx + mw - 62, iy, buf, sCfg.autosave_interval ? 0x2FE5 : 0x7BEF);
                 }
             }
 
@@ -1550,6 +1629,9 @@ int rb_test_hud_pos(void) { return sCfg.hud_pos; }
 int rb_test_hud_scroll(void) { return sHudScroll; }
 int rb_test_hud_first_visible_line(void) { return sHudFirstVisibleLine; }
 int rb_test_visual_filter(void) { return sCfg.visual_filter; }
+int rb_test_autosave_interval(void) { return sCfg.autosave_interval; }
+void rb_test_autosave_start_at(int64_t now_ms) { sAutoSaveClockStarted = 0; sAutoSaveLastTimeMs = now_ms; }
+void rb_test_autosave_tick_at(struct mCore* core, int64_t now_ms) { rb_auto_save_tick_at(core, now_ms); }
 const char* rb_test_toast(void) { return sToastTicks > 0 ? sToastMsg : ""; }
 int rb_test_slot_info(int slot, char* area_out, size_t area_sz, int* hearts_out, int* rupees_out) {
     RBSlotInfo info;
