@@ -14,10 +14,11 @@
 | Profile 校验、深合并、第三块 fake board | PASS | `python3 tools/bsp_validate.py all`、`tests/test-bsp-profiles.py`、`tests/test-bsp-build-integration.py`；无新增板名分支。 |
 | 熄屏状态、亮度恢复、短按/长按、重复 owner | PASS（fixture） | `tests/test-dal-baseosctl.py`、`tests/test-screen-idle.py`、`go -C src/baseos-hotkeys test -race -count=1`；不代替实体键测试。 |
 | H700 原有 11 个目标的准备输入 | PASS | `verify-target.sh` 逐板校验，`work/acceptance/fleet-input-results.log`；不等于构建或启动。 |
-| H700 新镜像、内容级差异、设备启动 | NOT VERIFIED | 逐板 build/boot 结果以 `work/acceptance/` 为准。无新镜像真机启动记录。M1 的缓存 rootfs 属于历史样本，不能冒充本次新构建。 |
-| 两种 PocketJS runtime | PASS（宿主构建及 QEMU user-mode） | 两个静态 AArch64 runtime 分别用匹配包完成 3 帧逻辑执行（720×480、1280×720），日志 `work/acceptance/build-{h700,card}-runtime.log`。不算系统启动。 |
+| H700 全 11 目标 stock-boot rootfs/QEMU/SD 镜像/更新包/更新回环 | PASS（旧提交 `b32c151`） | `work/final-acceptance/evidence.json` 记录 55 步全部通过、33 个产物哈希；全 11 个 rootfs 烘焙 `b32c151`。后续 DAL 输入状态辅助程序变更需重新构建当前 HEAD 产物，不能把前版结果冒充本版。 |
+| H700 内容级基线与真机启动 | PASS（内容差异已分类）/ NOT VERIFIED（真机） | 用同一批厂商输入、同一共享工具和匹配 runtime 在干净 `2423f9c` tree 重建 11 台 rootfs：`work/final-comparison/*-base.manifest`。本版差异仅在 `work/acceptance/fleet-changed-rootfs-paths.txt` 所列 BSP/DAL/启动/前端文件及其父目录；未对新镜像做真机启动。 |
+| 两种 PocketJS runtime | PASS（宿主构建及 QEMU user-mode） | 两个静态 AArch64 runtime 分别用匹配包完成 3 帧逻辑执行（720×480、1280×720），日志 `work/acceptance/{h700,tg5040}-runtime-final.log`。不算系统启动。 |
 | TG5040 卡侧载荷 | PASS（宿主） | `tools/build_card.py` 生成 `trimui/app/MainUI`、`System/profile`、DAL 和匹配包；载荷 manifest 在 `work/acceptance/`。只在新目录生成，不挂载或写设备。 |
-| TG5040 真机查询 | PASS（只读） | 将当次 DAL 与生成 profile 解包到厂商系统的 `/tmp`，执行 `version`、`display info`、`input node`、`power battery/charger`、`audio cards`、`network info`。`work/acceptance/tg5040-live-readonly.log` 显示 A133/TG5040、1280×720、三个输入角色、电池在充电、audiocodec 与 WLAN。未检验扬声器实际出声或联网吞吐。 |
+| TG5040 真机查询 | PASS（只读） | 将当次 DAL 与生成 profile 解包到厂商系统的 `/tmp`，执行 `version`、`display info`、`input node`、`power battery/charger`、`audio cards`、`network info`。`work/acceptance/tg5040-input-readonly.log` 显示 A133/TG5040、1280×720、三个输入角色、电池在充电、audiocodec 与 WLAN。未检验扬声器实际出声或联网吞吐。 |
 | TG5040 实体键熄屏/再按唤醒，游戏及音频网络不停止，长按不关机 | NOT VERIFIED | 新卡侧载荷未替换设备上的活动 System；现有厂商到 SD 的证据见 [卡侧启动报告](../40-trimui-smart-pro-dual-boot-implementation-plan.md)。没有改变设备启动状态。 |
 | A133 独立 BaseOS image | BLOCKED | `build-rootfs.sh tg5040` / `build-image.sh tg5040` 显式拒绝 card 模式。没有生成或启动 A133 固件。 |
 
