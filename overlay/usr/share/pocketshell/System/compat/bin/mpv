@@ -94,8 +94,16 @@ pid=$!
 # Companion key daemon: maps RG34XX physical buttons to mpv & audio
 # B / Select / Start = quit, A = pause, Up/Down = volume, Left/Right = seek
 if [ -x /storage/System/compat/bin/baseos-mpv-keys ]; then
-    /storage/System/compat/bin/baseos-mpv-keys "$pid" "$sock" >/dev/null 2>&1 &
-    keys_pid=$!
+    set --
+    for role in gamepad keyboard directions; do
+        node=$(/usr/sbin/baseosctl input node "$role" 2>/dev/null) || continue
+        case " $* " in *" $node "*) continue;; esac
+        set -- "$@" "$node"
+    done
+    if [ "$#" -gt 0 ]; then
+        /storage/System/compat/bin/baseos-mpv-keys "$pid" "$sock" "$@" >/dev/null 2>&1 &
+        keys_pid=$!
+    fi
 fi
 
 wait $pid

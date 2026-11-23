@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <linux/input.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #define STATE_DIR "/run"
 #define FALLBACK_DIR "/tmp"
@@ -23,55 +24,30 @@ static int get_current_volume(void) {
     return vol;
 }
 
-static unsigned long get_current_sequence(void) {
-    unsigned long seq = 0;
-    FILE *f = fopen(STATE_DIR "/baseos-volume.sequence", "r");
-    if (!f) f = fopen(FALLBACK_DIR "/baseos-volume.sequence", "r");
-    if (f) {
-        if (fscanf(f, "%lu", &seq) != 1) seq = 0;
-        fclose(f);
-    }
-    return seq;
-}
+static const char *volume_control;
 
 static void apply_volume(int vol) {
-    if (vol < 0) vol = 0;
-    if (vol > 100) vol = 100;
-
-    /* Write percentage */
-    FILE *f = fopen(STATE_DIR "/baseos-volume.percent", "w");
-    if (f) { fprintf(f, "%d\n", vol); fclose(f); }
-    f = fopen(FALLBACK_DIR "/baseos-volume.percent", "w");
-    if (f) { fprintf(f, "%d\n", vol); fclose(f); }
-
-    /* Increment sequence to notify HUD */
-    unsigned long seq = get_current_sequence() + 1;
-    f = fopen(STATE_DIR "/baseos-volume.sequence", "w");
-    if (f) { fprintf(f, "%lu\n", seq); fclose(f); }
-    f = fopen(FALLBACK_DIR "/baseos-volume.sequence", "w");
-    if (f) { fprintf(f, "%lu\n", seq); fclose(f); }
-
-    /* Set ALSA volume:
-     * 1. Soft Volume Master: 0-255 (the actual PCM master volume defined in /etc/asound.conf)
-     * 2. Headphone: 0-7 (analog gain)
-     * 3. DAC volume: 160 (unmuted 0dB baseline)
-     */
-    int master = (vol * 255 + 50) / 100;
-    int hp = (vol * 7 + 50) / 100;
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd),
-        "amixer -q -c 0 sset 'Soft Volume Master' %d >/dev/null 2>&1; "
-        "amixer -q -c 0 sset 'Headphone' %d >/dev/null 2>&1; "
-        "amixer -q -c 0 cset name='DAC volume' 160,160 >/dev/null 2>&1 &",
-        master, hp);
-    system(cmd);
+    char level[4];
+    snprintf(level, sizeof(level), "%d", vol);
+    pid_t child = fork();
+    if (child == 0) {
+        execl(volume_control, volume_control, "volume", level, "--no-beep", (char *)NULL);
+        _exit(127);
+    }
+    if (child > 0) {
+        while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {}
+    }
 }
 
 int main(int argc, char **argv) {
-    const char *dev = argc > 1 ? argv[1] : "/dev/input/event0";
-    int fd = open(dev, O_RDONLY);
+    if (argc != 3 || argv[2][0] != '/') {
+        fprintf(stderr, "usage: trimui-volumed <volume-input-node> <volume-control>\n");
+        return 1;
+    }
+    volume_control = argv[2];
+    int fd = open(argv[1], O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-        perror("open event0");
+        perror(argv[1]);
         return 1;
     }
 

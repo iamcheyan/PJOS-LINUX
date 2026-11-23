@@ -52,22 +52,19 @@ static void step_volume(int delta) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: baseos-mpv-keys <mpv_pid> [ipc_sock]\n");
+    if (argc < 4) {
+        fprintf(stderr, "usage: baseos-mpv-keys <mpv_pid> <ipc_sock> <input-node>...\n");
         return 1;
     }
     pid_t mpv_pid = (pid_t)atoi(argv[1]);
-    const char *sock_path = (argc > 2) ? argv[2] : NULL;
+    const char *sock_path = argv[2];
 
-    int fd1 = open("/dev/input/event1", O_RDONLY | O_NONBLOCK);
-    int fd2 = open("/dev/input/event2", O_RDONLY | O_NONBLOCK);
-    int fd3 = open("/dev/input/event3", O_RDONLY | O_NONBLOCK);
-
-    struct pollfd pfds[3];
+    struct pollfd pfds[argc - 3];
     int n_pfds = 0;
-    if (fd1 >= 0) { pfds[n_pfds].fd = fd1; pfds[n_pfds].events = POLLIN; n_pfds++; }
-    if (fd2 >= 0) { pfds[n_pfds].fd = fd2; pfds[n_pfds].events = POLLIN; n_pfds++; }
-    if (fd3 >= 0) { pfds[n_pfds].fd = fd3; pfds[n_pfds].events = POLLIN; n_pfds++; }
+    for (int i = 3; i < argc; ++i) {
+        int fd = open(argv[i], O_RDONLY | O_NONBLOCK);
+        if (fd >= 0) pfds[n_pfds++] = (struct pollfd){.fd = fd, .events = POLLIN};
+    }
 
     if (n_pfds == 0) {
         fprintf(stderr, "baseos-mpv-keys: no input devices\n");
@@ -142,8 +139,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (fd1 >= 0) close(fd1);
-    if (fd2 >= 0) close(fd2);
-    if (fd3 >= 0) close(fd3);
+    for (int i = 0; i < n_pfds; ++i) close(pfds[i].fd);
     return 0;
 }

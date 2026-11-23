@@ -1,11 +1,10 @@
 // pjos-padmerge — one gamepad out of two kernel devices.
 //
-// The RG34XX panel exposes the face/shoulder/menu buttons through
-// ANBERNIC-keys (event1) already carries the D-pad as ABS_HAT0X/ABS_HAT0Y
+// ANBERNIC-keys carries the face buttons and ABS_HAT0X/ABS_HAT0Y
 // (vendor DTB linux,input-type = EV_ABS). RetroArch's linuxraw driver reads
 // one js device and has no hat ids, so those axes must be bound by number
 // (js0 axis 3 = HAT0X, axis 4 = HAT0Y). This daemon is not used for that.
-// It still mirrors event1 buttons and hats, plus KEY_UP/DOWN/LEFT/RIGHT if
+// It mirrors physical buttons and hats, plus KEY_UP/DOWN/LEFT/RIGHT if
 // dierct-keys-polled emits them, into one uinput gamepad ("PJOS Pad").
 package main
 
@@ -76,6 +75,15 @@ func ioctl(fd uintptr, req uintptr, arg uintptr) error {
 }
 
 func main() {
+	if len(os.Args) < 2 || len(os.Args) > 3 {
+		fmt.Fprintln(os.Stderr, "usage: pjos-padmerge <gamepad-node> [directions-node]")
+		os.Exit(2)
+	}
+	pad := os.Args[1]
+	var directions string
+	if len(os.Args) == 3 {
+		directions = os.Args[2]
+	}
 	ui, err := os.OpenFile("/dev/uinput", os.O_WRONLY, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "padmerge: /dev/uinput: %v\n", err)
@@ -107,7 +115,7 @@ func main() {
 	fmt.Println("padmerge: PJOS Pad created")
 	time.Sleep(300 * time.Millisecond)
 
-	go forward("/dev/input/event1", func(ev inputEvent) bool {
+	buttonsAndHat := func(ev inputEvent) bool {
 		switch ev.Type {
 		case evKey:
 			for _, b := range buttons {
@@ -125,8 +133,8 @@ func main() {
 			}
 		}
 		return false
-	})
-	go forward("/dev/input/event2", func(ev inputEvent) bool {
+	}
+	arrows := func(ev inputEvent) bool {
 		if ev.Type != evKey {
 			return false
 		}
@@ -147,8 +155,15 @@ func main() {
 			return false
 		}
 		return true
-	})
-	select {}
+	}
+	if directions == pad {
+		forward(pad, func(ev inputEvent) bool { return buttonsAndHat(ev) || arrows(ev) })
+	} else {
+		if directions != "" {
+			go forward(directions, arrows)
+		}
+		forward(pad, buttonsAndHat)
+	}
 }
 
 func emit(fd uintptr, kind uint16, code uint16, value int32) {

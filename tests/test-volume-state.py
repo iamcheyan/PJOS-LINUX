@@ -15,9 +15,11 @@ class VolumeState(unittest.TestCase):
         self.path = Path(self.tmp.name)
         self.cache = self.path / 'volume.percent'
         self.env = dict(os.environ, PATH=str(self.path)+':'+os.environ['PATH'], BASEOS_VOLUME_STATE=str(self.cache))
-        mixer = self.path / 'amixer'
-        mixer.write_text('#!/bin/sh\n[ \"${MIXER_FAIL:-0}\" = 0 ] || exit 1\ncase "$*" in *sget*) echo "  Mono: Playback 63 [100%]" ;; esac\n')
-        mixer.chmod(0o755)
+        ctl = self.path / 'baseosctl'
+        ctl.write_text('#!/bin/sh\n[ "${MIXER_FAIL:-0}" = 0 ] || exit 1\ncase "$*" in "audio get-volume") echo 100;; "audio set-volume 40") :;; *) exit 2;; esac\n')
+        ctl.chmod(0o755)
+        self.env.update(PJOS_BASEOSCTL=str(ctl), BASEOS_VOLUME_EVENT=str(self.path / 'event'),
+                        BASEOS_VOLUME_PERSISTENT=str(self.path / 'saved'))
     def run_control(self, *args):
         return subprocess.run(['sh', str(CONTROL), *args], env=self.env, text=True, capture_output=True)
     def test_pcm_transient_maximum_does_not_replace_requested_volume(self):

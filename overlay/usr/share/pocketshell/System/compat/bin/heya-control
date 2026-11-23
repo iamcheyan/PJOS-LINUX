@@ -3,6 +3,8 @@
 # Wi-Fi is only changed through an existing wpa_supplicant control socket;
 # Bluetooth is reported unsupported when bluetoothctl cannot talk to D-Bus.
 set -u
+ctl=${PJOS_BASEOSCTL:-/usr/sbin/baseosctl}
+case "$ctl" in /*) ;; *) exit 2 ;; esac
 volume_state=${BASEOS_VOLUME_STATE:-/run/baseos-volume.percent}
 [ -d /run ] || volume_state=/tmp/baseos-volume.percent
 persistent_state=${BASEOS_VOLUME_PERSISTENT:-/storage/.config/baseos/volume.percent}
@@ -20,40 +22,14 @@ case "${1-}" in
             ''|*[!0-9]*) ;;
             *) if [ "$value" -le 100 ] 2>/dev/null; then echo "$value"; exit 0; fi ;;
         esac
-        mixer=$(command -v amixer 2>/dev/null || echo /bin/amixer)
-        value=$("$mixer" -c 0 sget 'digital volume' 2>/dev/null |
-            sed -n 's/.*\[\([0-9]*\)%\].*/\1/p' | head -1)
-        case "$value" in ''|*[!0-9]*) exit 1 ;; esac
-        [ "$value" -le 100 ] || exit 1
-        echo "$value"
+        exec "$ctl" audio get-volume
         ;;
     volume)
         value=${2-}
         case "$value" in ''|*[!0-9]*) exit 2 ;; esac
         [ "$value" -le 100 ] || exit 2
-        mixer=$(command -v amixer 2>/dev/null || echo /bin/amixer)
-        # The codec's DAC gain alone did not change the speaker loudness on this
-        # panel; lineout is the analog stage that does. Drive both from the same
-        # percentage so the UI, the wheel and the tick all agree.
-        #
-        # Write raw register values. The codec also temporarily sets digital
-        # gain to its maximum during PCM power transitions, including the tick
-        # below. Publish the user's setting separately after successful writes;
-        # UI polling and the wheel must use volume-state, not that ramp register.
-        digital=$(( (value * 63 + 50) / 100 ))
-        lineout=$(( (value * 31 + 50) / 100 ))
-        "$mixer" -q -c 0 cset numid=3 "$lineout" >/dev/null 2>&1 \
-            || "$mixer" -q -c 0 set "lineout volume" "${value}%" >/dev/null 2>&1 || :
-        "$mixer" -q -c 0 cset numid=2 "$digital" >/dev/null 2>&1 \
-            || "$mixer" -q -c 0 set "digital volume" "${value}%" >/dev/null 2>&1 || :
-        # Zero really means silent: the amp stays enabled at 0% on this codec, so
-        # close the speaker switch as well and reopen it on the next step.
-        if [ "$value" -eq 0 ]; then
-            "$mixer" -q -c 0 sset 'SPK' off >/dev/null 2>&1 || :
-        else
-            "$mixer" -q -c 0 sset 'SPK' on >/dev/null 2>&1 || :
-        fi
-        # Atomic publication prevents readers seeing a truncated/empty value.
+        "$ctl" audio set-volume "$value" || exit $?
+        # Publish the requested level only after a successful hardware write.
         printf '%s\n' "$value" > "$volume_state.$$" &&
             mv -f "$volume_state.$$" "$volume_state" || {
                 rm -f "$volume_state.$$"
@@ -89,41 +65,15 @@ case "${1-}" in
         exec "$0" volume "$value" --no-beep
         ;;
     brightness-state)
-        if [ -f /sys/class/led/tg5040_exterme_brightness ]; then
-            val=$(cat /sys/class/led/tg5040_exterme_brightness 2>/dev/null || :)
-            case "$val" in
-                ''|*[!0-9]*) echo 60 ;;
-                *) echo "$val" ;;
-            esac
-            exit 0
-        fi
-        if [ -f /sys/devices/virtual/disp/disp/attr/enhance_bright ]; then
-            val=$(awk '{print $1}' /sys/devices/virtual/disp/disp/attr/enhance_bright 2>/dev/null || :)
-            case "$val" in
-                ''|*[!0-9]*) echo 50 ;;
-                *) echo "$val" ;;
-            esac
-            exit 0
-        fi
-        exit 1
+        level=$("$ctl" display get-brightness) || exit $?
+        case "$level" in ''|*[!0-9]*) exit 1 ;; esac
+        [ "$level" -le 255 ] || exit 1
+        echo "$(( (level * 100 + 127) / 255 ))"
         ;;
     brightness)
         value=${2-}
-        case "$value" in ''|*[!0-9]*) exit 2 ;; esac
-        [ "$value" -le 100 ] || exit 2
-        if [ -w /sys/class/led/tg5040_exterme_brightness ]; then
-            echo "$value" > /sys/class/led/tg5040_exterme_brightness 2>/dev/null
-            [ -w /sys/devices/virtual/disp/disp/attr/enhance_bright ] && echo "$value" > /sys/devices/virtual/disp/disp/attr/enhance_bright 2>/dev/null || :
-            exit 0
-        fi
-        # enhance_bright is not the backlight: baseos-panel drives dispdbg and
-        # verifies the driver's read-back. Floor at the same 10 the helper uses.
-        panel=/mnt/sdcard/System/bin/baseos-panel
-        [ -x "$panel" ] || panel=/usr/sbin/baseos-panel
-        [ -x "$panel" ] || exit 1
-        level=$(( (value * 255 + 50) / 100 ))
-        [ "$level" -ge 10 ] || level=10
-        exec "$panel" level "$level"
+        case "$value" in [0-9]|[1-9][0-9]|100) ;; *) exit 2 ;; esac
+        exec "$ctl" display set-brightness "$(( (value * 255 + 50) / 100 ))"
         ;;
     wifi)
         state=${2-}

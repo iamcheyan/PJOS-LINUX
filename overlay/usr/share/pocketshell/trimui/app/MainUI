@@ -13,16 +13,33 @@ fi
 
 # 2. Setup paths and environment
 export SDCARD=/mnt/SDCARD
-export PATH=$SDCARD/System/bin:$SDCARD/System/compat/bin:/usr/trimui/bin:$PATH
+export PJOS_PROFILE_DIR=${PJOS_PROFILE_DIR:-$SDCARD/System/profile}
+export DAL_DIR=${DAL_DIR:-$SDCARD/System/dal}
+export DAL_LIB=${DAL_LIB:-$SDCARD/System/dal.sh}
+export PATH=$SDCARD/System/bin:$SDCARD/System/compat/bin:$SDCARD/System:$SDCARD/System/dal:/usr/trimui/bin:$PATH
 export LD_LIBRARY_PATH=$SDCARD/System/compat/lib:/usr/trimui/lib:$LD_LIBRARY_PATH
 export POCKETJS_HOME=$SDCARD/System/pocketjs
 
-# Ensure storage link and run directory exist
-[ -e /storage ] || ln -s /mnt/SDCARD /storage 2>/dev/null || :
-[ -e /run ] || ln -sf /tmp /run 2>/dev/null || :
-[ -e /usr/bin/timeout ] || ln -sf $SDCARD/System/bin/timeout /usr/bin/timeout 2>/dev/null || :
-[ -e /etc/os-release ] || ln -sf $SDCARD/System/etc/os-release /etc/os-release 2>/dev/null || :
-[ -e /etc/baseos-release ] || ln -sf $SDCARD/System/etc/baseos-release /etc/baseos-release 2>/dev/null || :
+# Validate the composed profile before starting any hardware-facing service.
+[ -r "$DAL_LIB" ] || { echo "Missing DAL: $DAL_LIB" >> "$LOG"; exit 1; }
+. "$DAL_LIB" || { echo "Unable to load DAL" >> "$LOG"; exit 1; }
+dal_init || { echo "Invalid PJOS profile" >> "$LOG"; exit 1; }
+board=$(dal_meta board) && soc=$(dal_meta soc) && mode=$(dal_meta firmware.mode) || exit 1
+[ "$mode" = card ] || { echo 'Image profile in card launcher' >>"$LOG"; exit 1; }
+# Validate the declared SoC against the live tree before accessing hardware.
+matched=0
+for compat in $(dal_meta soc.compatible); do
+    tr '\000' '\n' </proc/device-tree/compatible | grep -Fxq "$compat" && matched=1
+done
+[ "$matched" = 1 ] || { echo "Incompatible SoC: $soc" >>"$LOG"; exit 1; }
+DISPLAY_NODE=$(dal_display_node) && [ -c "$DISPLAY_NODE" ] || exit 1
+case $(dal_meta display.backend) in fbdev) display_flag=--fb;; drm) display_flag=--card;; *) exit 1;; esac
+policy=$(dal_meta power.long_press) || exit 1
+# Never install links or libraries on the internal root. The vendor launcher
+# supplies the storage mount; runtime state goes on tmpfs.
+export PJOS_BASEOSCTL="$SDCARD/System/baseosctl"
+export PJOS_RUN_ROOT=/tmp/pjos-state
+mkdir -p "$PJOS_RUN_ROOT/run" || exit 1
 
 # Normalize apps directory and ensure native app stubs for launcher
 if [ -d /mnt/SDCARD/Apps ] && [ ! -d /mnt/SDCARD/apps ]; then
@@ -42,10 +59,17 @@ if ! pgrep trimui_scened > /dev/null 2>&1; then
     echo "Starting trimui_scened..." >> $LOG
     /usr/trimui/bin/trimui_scened &
 fi
-if ! pgrep trimui-volumed > /dev/null 2>&1; then
-    echo "Starting trimui-volumed..." >> $LOG
-    $SDCARD/System/bin/trimui-volumed &
-fi
+# The gamepad can appear only after the vendor input daemon has registered it.
+tries=0
+while ! PAD_DEV=$(dal_input_node gamepad); do
+    tries=$((tries + 1)); [ "$tries" -lt 20 ] || exit 1
+    sleep 0.1
+done
+POWER_DEV=$(dal_input_node power) && VOLUME_DEV=$(dal_input_node keyboard) || exit 1
+printf 'board=%s soc=%s profile=%s power=%s pad=%s volume=%s\n' \
+    "$board" "$soc" "$PJOS_PROFILE_DIR" "$POWER_DEV" "$PAD_DEV" "$VOLUME_DEV" >>"$LOG"
+"$SDCARD/System/baseos-hotkeys" --baseosctl "$PJOS_BASEOSCTL" --power-dev "$POWER_DEV" \
+    --pad-dev "$PAD_DEV" --long-press "$policy" >>"$LOG" 2>&1 &
 
 # 4. Run game library scan in background
 $SDCARD/System/compat/bin/pocketshell-games scan >> $LOG 2>&1 &
@@ -56,7 +80,7 @@ FAIL_COUNT=0
 
 while true; do
     if ! pgrep trimui-volumed > /dev/null 2>&1 && [ -x "$SDCARD/System/bin/trimui-volumed" ]; then
-        "$SDCARD/System/bin/trimui-volumed" &
+        "$SDCARD/System/bin/trimui-volumed" "$VOLUME_DEV" "$SDCARD/System/compat/bin/heya-control" &
     fi
     # Check if a game was requested
     ACTIVE_MARKER=$SDCARD/System/pocketjs/active
@@ -110,7 +134,7 @@ while true; do
 
     echo "Starting pocket-linux-kms at $(date)..." >> $LOG
     START_TIME=$(date +%s)
-    ./bin/pocket-linux-kms --package ./apps/boot.pocket --fb /dev/fb0 >> $LOG 2>&1
+    ./bin/pocket-linux-kms --package ./apps/boot.pocket "$display_flag" "$DISPLAY_NODE" --input "$PAD_DEV" >> $LOG 2>&1
     EXIT_CODE=$?
     END_TIME=$(date +%s)
     ELAPSED=$((END_TIME - START_TIME))

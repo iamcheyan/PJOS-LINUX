@@ -246,14 +246,6 @@ if [ -n "$ROM_PLAY" ]; then
         kill_matching pjos-padmerge
         killall -9 pjos-padmerge 2>/dev/null || :
     fi
-    if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
-        kill_matching baseos-hotkeys
-        killall -9 baseos-hotkeys 2>/dev/null || :
-        rm -f /run/baseos-hotkeys.pid
-        "$SD/System/bin/baseos-hotkeys" --power-dev /dev/input/event0 --pad-dev /dev/input/event1 \
-            --runtime "pocket-linux-kms,retroarch" </dev/null >/dev/null 2>&1 &
-        log "helpers: hotkeys started for ROM session"
-    fi
     play=/storage/System/compat/bin/pocket-game-play
     [ -x "$play" ] || play=/usr/bin/pocket-game-play
     printf 'game\n' > "$FOREGROUND.tmp" && mv "$FOREGROUND.tmp" "$FOREGROUND"
@@ -267,91 +259,36 @@ if [ -n "$ROM_PLAY" ]; then
     exit 0
 fi
 
-card=
-for candidate in /dev/dri/card0 /dev/dri/card1; do
-    if [ -e "$candidate" ]; then
-        card=$candidate
-        break
-    fi
-done
-if [ -n "$card" ]; then
-    log "display: DRM card=$card"
-    display_args="--card $card"
-else
-    log "display: fbdev /dev/fb0"
-    display_args="--fb /dev/fb0"
-fi
+card=$(/usr/sbin/baseosctl display node 2>/dev/null) && [ -c "$card" ] || { log "display role unavailable"; exit 1; }
+case "$card" in /dev/dri/*) display_args="--card $card";; *) display_args="--fb $card";; esac
+log "display: DAL node=$card"
 
-# One D-pad source for the runtime: the vendor DTB reports directions as hat
-# axes on ANBERNIC-keys and (depending on the driver path) as arrow key codes
-# on dierct-keys-polled. pjos-dpad mirrors both into one uinput keyboard device,
-# so the runtime only needs to understand arrow keys.
-if [ -x "$SD/System/bin/pjos-dpad" ]; then
-    dpad=$SD/System/bin/pjos-dpad
-elif [ -x /usr/bin/pjos-dpad ]; then
-    dpad=/usr/bin/pjos-dpad
-else
-    dpad=
-fi
-if [ -n "$dpad" ]; then
-    kill_matching pjos-dpad
-    # Let the previous daemon's uinput node leave /dev/input first, otherwise the
-    # runtime receives two "PJOS D-pad" nodes and every press steps twice.
-    tries=0
-    while [ "$tries" -lt 15 ]; do
-        stale=
-        for candidate in /dev/input/event*; do
-            [ -e "$candidate" ] || continue
-            [ "$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null)" = "PJOS D-pad" ] && stale=1
-        done
-        [ -z "$stale" ] && break
-        tries=$((tries + 1))
-        sleep 0.1
-    done
-    "$dpad" </dev/null >>"$LOG" 2>&1 &
-    tries=0
-    while [ "$tries" -lt 15 ]; do
-        for candidate in /dev/input/event*; do
-            [ -e "$candidate" ] || continue
-            [ "$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null)" = "PJOS D-pad" ] && break 2
-        done
-        tries=$((tries + 1))
-        sleep 0.1
-    done
-    log "helpers: pad arrows started"
-fi
-
-inputs=
+pad=$(/usr/sbin/baseosctl input node gamepad 2>/dev/null) && [ -c "$pad" ] || { log "input gamepad role unavailable"; exit 1; }
+input_args="--input $pad"
 add_input() {
-    candidate=$1
-    case " $inputs " in
-        *" $candidate "*) return 0 ;;
-    esac
-    inputs="$inputs $candidate"
+    case " $input_args " in *" --input $1 "*) return;; esac
+    input_args="$input_args --input $1"
 }
-# Prefer ANBERNIC-keys, then add the remaining event nodes (the D-pad is a
-# separate gpio-keys device on event2).
-for candidate in /dev/input/event*; do
-    [ -e "$candidate" ] || continue
-    name=$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null || :)
-    [ "$name" = "ANBERNIC-keys" ] && add_input "$candidate"
-done
-for candidate in /dev/input/event*; do
-    [ -e "$candidate" ] || continue
-    name=$(cat "/sys/class/input/${candidate##*/}/device/name" 2>/dev/null || :)
-    # pjos-dpad already publishes these directions as arrow keys.
-    [ "$name" = "dierct-keys-polled" ] && continue
-    add_input "$candidate"
-done
-if [ -n "$inputs" ]; then
-    input_args=
-    for candidate in $inputs; do
-        input_args="$input_args --input $candidate"
-    done
-    log "inputs:$inputs"
-else
-    log "input: no evdev device found; runtime will probe /dev/input"
-    input_args=
+keyboard=$(/usr/sbin/baseosctl input node keyboard 2>/dev/null) && [ -c "$keyboard" ] && add_input "$keyboard"
+directions=$(/usr/sbin/baseosctl input node directions 2>/dev/null) && [ -c "$directions" ] && add_input "$directions" || directions=
+if [ -f /etc/baseos/compat-pjos-dpad ]; then
+    dpad="$SD/System/bin/pjos-dpad"
+    [ -x "$dpad" ] || dpad=/usr/bin/pjos-dpad
+    if [ -x "$dpad" ]; then
+        if ! pidof pjos-dpad >/dev/null 2>&1; then
+            "$dpad" -hat-dev "$pad" -keys-dev "$directions" </dev/null >>"$LOG" 2>&1 &
+        fi
+        # Add only the helper's virtual keyboard, never a substitute gamepad.
+        tries=0
+        while [ "$tries" -lt 15 ]; do
+            if candidate=$(/usr/sbin/baseosctl input node virtual_dpad 2>/dev/null) && [ -c "$candidate" ]; then
+                add_input "$candidate"
+                break
+            fi
+            tries=$((tries + 1))
+            sleep 0.1
+        done
+    fi
 fi
 
 if [ ! -d /storage ]; then
@@ -392,25 +329,6 @@ if ! select_runtime "$PACKAGE"; then
     fi
 fi
 
-# Sleep and hotkey helpers are kept on the card so they can be fixed without
-# rebuilding the (read-only) OS image. rcS starts the image copies; kill every
-# instance of them here — image and card, by cmdline — and start exactly one card
-# copy each. Two idle daemons fight over the panel and the screen never sleeps.
-if [ -x "$SD/System/baseos-screen-idle" ]; then
-    kill_matching baseos-screen-idle
-    kill_matching .screen-idle-
-    rm -f /run/baseos-screen-idle.pid /tmp/.screen-idle-*
-    /bin/sh "$SD/System/baseos-screen-idle" </dev/null >/dev/null 2>&1 &
-    log "helpers: card screen-idle started"
-fi
-if [ -x "$SD/System/bin/baseos-hotkeys" ]; then
-    kill_matching baseos-hotkeys
-    rm -f /run/baseos-hotkeys.pid
-    "$SD/System/bin/baseos-hotkeys" --power-dev /dev/input/event0 --pad-dev /dev/input/event1 \
-        --runtime "pocket-linux-kms,retroarch" \
-        </dev/null >/dev/null 2>&1 &
-    log "helpers: hotkeys started"
-fi
 if [ -x "$SD/System/bin/videod" ] && ! pidof videod >/dev/null 2>&1; then
     mkdir -p /storage/.config/kanade /tmp/kanade-ipc
     export KANADE_MPV=/storage/System/compat/bin/mpv
@@ -418,6 +336,7 @@ if [ -x "$SD/System/bin/videod" ] && ! pidof videod >/dev/null 2>&1; then
     setsid "$SD/System/bin/videod" -addr 127.0.0.1:8732 -data /storage/.config/kanade >/tmp/videod.log 2>&1 </dev/null &
     log "helpers: videod started"
 fi
+
 
 # Publish only the installed app that this invocation actually launches.
 if [ -n "$FOREGROUND_APP" ] && [ "$PACKAGE" = "$SD/apps/$FOREGROUND_APP.pocket" ]; then

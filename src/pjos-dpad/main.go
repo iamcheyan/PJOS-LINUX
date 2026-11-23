@@ -8,8 +8,7 @@
 //
 // This daemon reads both and mirrors the combined state into one uinput
 // keyboard device ("PJOS D-pad") that emits only arrow keys. The frontend
-// passes that node to the runtime and skips the raw D-pad node, so exactly one
-// source of directions exists no matter which node the kernel updates.
+// keeps the physical role nodes and adds this compatibility keyboard when ready.
 //
 // The volume wheel is wired to KEY_VOLUMEUP/DOWN on the same two nodes and had
 // no listener at all, so rolling it did nothing. Those codes step the mixer
@@ -168,7 +167,9 @@ func createDevice(name string) error {
 	return nil
 }
 
-func readDevices(path string, hat bool) {
+var directionMu sync.Mutex
+
+func readDevices(path string, hat, keys bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pjos-dpad: %s: %v\n", path, err)
@@ -183,45 +184,51 @@ func readDevices(path string, hat bool) {
 			return
 		}
 		ev := *(*inputEvent)(unsafe.Pointer(&buf[0]))
-		switch {
-		case hat && ev.Type == evKey && (ev.Code == keyVolumeUp || ev.Code == keyVolumeDown):
-			handleVolumeKey(ev.Code, ev.Value)
-		case hat && ev.Type == evAbs && (ev.Code == absHat0X || ev.Code == absHat0Y):
-			if ev.Code == absHat0Y {
-				state.hat[0] = ev.Value < 0
-				state.hat[1] = ev.Value > 0
-			} else {
-				state.hat[2] = ev.Value < 0
-				state.hat[3] = ev.Value > 0
-			}
-			publish()
-		case hat && ev.Type == evAbs && (ev.Code == absX || ev.Code == absY):
-			if ev.Code == absY {
-				state.stick[0] = ev.Value < -stickDeadzone
-				state.stick[1] = ev.Value > stickDeadzone
-			} else {
-				state.stick[2] = ev.Value < -stickDeadzone
-				state.stick[3] = ev.Value > stickDeadzone
-			}
-			publish()
-		case !hat && ev.Type == evKey:
-			switch ev.Code {
-			case keyVolumeUp, keyVolumeDown:
-				handleVolumeKey(ev.Code, ev.Value)
-				continue
-			case keyUp:
-				state.keys[0] = ev.Value != 0
-			case keyDown:
-				state.keys[1] = ev.Value != 0
-			case keyLeft:
-				state.keys[2] = ev.Value != 0
-			case keyRight:
-				state.keys[3] = ev.Value != 0
-			default:
-				continue
-			}
-			publish()
+		handleDirectionEvent(ev, hat, keys)
+	}
+}
+
+func handleDirectionEvent(ev inputEvent, hat, keys bool) {
+	directionMu.Lock()
+	defer directionMu.Unlock()
+	switch {
+	case hat && ev.Type == evKey && (ev.Code == keyVolumeUp || ev.Code == keyVolumeDown):
+		handleVolumeKey(ev.Code, ev.Value)
+	case hat && ev.Type == evAbs && (ev.Code == absHat0X || ev.Code == absHat0Y):
+		if ev.Code == absHat0Y {
+			state.hat[0] = ev.Value < 0
+			state.hat[1] = ev.Value > 0
+		} else {
+			state.hat[2] = ev.Value < 0
+			state.hat[3] = ev.Value > 0
 		}
+		publish()
+	case hat && ev.Type == evAbs && (ev.Code == absX || ev.Code == absY):
+		if ev.Code == absY {
+			state.stick[0] = ev.Value < -stickDeadzone
+			state.stick[1] = ev.Value > stickDeadzone
+		} else {
+			state.stick[2] = ev.Value < -stickDeadzone
+			state.stick[3] = ev.Value > stickDeadzone
+		}
+		publish()
+	case keys && ev.Type == evKey:
+		switch ev.Code {
+		case keyVolumeUp, keyVolumeDown:
+			handleVolumeKey(ev.Code, ev.Value)
+			return
+		case keyUp:
+			state.keys[0] = ev.Value != 0
+		case keyDown:
+			state.keys[1] = ev.Value != 0
+		case keyLeft:
+			state.keys[2] = ev.Value != 0
+		case keyRight:
+			state.keys[3] = ev.Value != 0
+		default:
+			return
+		}
+		publish()
 	}
 }
 
@@ -408,10 +415,14 @@ func volumeWorker() {
 }
 
 func main() {
-	hatDev := flag.String("hat-dev", "/dev/input/event1", "node reporting ABS_HAT0X/Y")
-	keyDev := flag.String("keys-dev", "/dev/input/event2", "node reporting arrow key codes")
+	hatDev := flag.String("hat-dev", "", "physical gamepad node (required)")
+	keyDev := flag.String("keys-dev", "", "optional directions node")
 	name := flag.String("name", "PJOS D-pad", "uinput device name")
 	flag.Parse()
+	if *hatDev == "" {
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	if err := createDevice(*name); err != nil {
 		fmt.Fprintf(os.Stderr, "pjos-dpad: %v\n", err)
@@ -429,6 +440,8 @@ func main() {
 	}()
 
 	go volumeWorker()
-	go readDevices(*keyDev, false)
-	readDevices(*hatDev, true)
+	if *keyDev != "" && *keyDev != *hatDev {
+		go readDevices(*keyDev, false, true)
+	}
+	readDevices(*hatDev, true, *hatDev == *keyDev)
 }

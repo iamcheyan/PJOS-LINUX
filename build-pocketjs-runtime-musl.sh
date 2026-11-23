@@ -30,8 +30,6 @@ OUT="$HERE/work/pocketjs-runtime/pocket-linux-kms"
 [ -f "$TARBALL" ] || { echo "missing $TARBALL" >&2; exit 1; }
 [ -f "$BRIDGE_SCRIPTS/patch-runtime.py" ] || { echo "missing $BRIDGE_SCRIPTS/patch-runtime.py (set PJOS_BRIDGE_SCRIPTS)" >&2; exit 1; }
 [ -f "$PROFILE" ] || { echo "missing profile export $PROFILE (run the host build first)" >&2; exit 1; }
-grep -Fq 'logical_viewports: ::pocket_runtime::Cow::Borrowed(&[[720, 480]])' "$PROFILE" || { echo "profile is not the RG34XX 720x480 export: $PROFILE" >&2; exit 1; }
-grep -Fq 'density: 1,' "$PROFILE" || { echo "profile is not the RG34XX 1x raster export: $PROFILE" >&2; exit 1; }
 
 mkdir -p "$HERE/work/pocketjs-runtime" "$HERE/work/bridge-scripts"
 # Work from a copy: the committed ROCKNIX script has one doubly-escaped char
@@ -50,42 +48,6 @@ if fixed != text:
 else:
     print("no escaped newline literal to normalize in", p.name)
 PYFIX
-# The fuel gauge on the RG34XX is axp2202-battery, and the stock bridge only
-# looks for BAT0/BAT1/rk817/cw2015: the panel showed neither a percentage nor a
-# charging icon. Add the gauge and the charging state the launcher polls.
-python3 - "$HERE/work/bridge-scripts/pocketshell-launcher.rs" <<'PYBATT'
-import sys, pathlib
-p = pathlib.Path(sys.argv[1])
-text = p.read_text()
-if '"axp2202-battery"' not in text:
-    text = text.replace(
-        'for name in ["battery", "BAT0", "BAT1", "rk817-battery", "cw2015-battery"] {',
-        'for name in ["axp2202-battery", "battery", "BAT0", "BAT1", "rk817-battery", "cw2015-battery"] {',
-    )
-if '"LEVEL", "battery-status"' not in text:
-    anchor = '        // First IPv4 address of an interface that is up and not loopback'
-    arm = (
-        '        // Charging state of the fuel gauge: "charging" | "discharging" | "full" | "unknown".\n'
-        '        ["LEVEL", "battery-status"] => {\n'
-        '            for name in ["axp2202-battery", "battery", "BAT0", "BAT1", "rk817-battery", "cw2015-battery"] {\n'
-        '                let base = std::path::Path::new("/sys/class/power_supply").join(name);\n'
-        '                if let Ok(raw) = std::fs::read_to_string(base.join("status")) {\n'
-        '                    return match raw.trim().to_ascii_lowercase().as_str() {\n'
-        '                        "charging" => "charging".into(),\n'
-        '                        "discharging" => "discharging".into(),\n'
-        '                        "full" | "not charging" => "full".into(),\n'
-        '                        _ => "unknown".into(),\n'
-        '                    };\n'
-        '                }\n'
-        '            }\n'
-        '            "unknown".into()\n'
-        '        }\n'
-    )
-    if anchor in text:
-        text = text.replace(anchor, arm + anchor, 1)
-p.write_text(text)
-print("battery arm present:", '"LEVEL", "battery-status"' in text)
-PYBATT
 
 docker run --rm --platform linux/arm64 \
   -e DEBIAN_FRONTEND=noninteractive -e PJOS_RUN_TESTS="${PJOS_RUN_TESTS:-0}" \
@@ -97,6 +59,7 @@ docker run --rm --platform linux/arm64 \
   -v "$HERE/src/apply-pocketjs-apps.py:/in/apply-apps.py:ro" \
   -v "$HERE/src/apply-pocketjs-rom-arm.py:/in/apply-rom-arm.py:ro" \
   -v "$HERE/src/apply-pocketjs-battery.py:/in/apply-battery.py:ro" \
+  -v "$HERE/src/apply-pocketjs-bridge.py:/in/apply-bridge.py:ro" \
   -v "$HERE/src/apply-pocketjs-panel.py:/in/apply-panel.py:ro" \
   -v "$HERE/src/apply-pocketjs-settings.py:/in/apply-settings.py:ro" \
   -v "$HERE/src/apply-pocketjs-system-info.py:/in/apply-system-info.py:ro" \
@@ -147,8 +110,7 @@ docker run --rm --platform linux/arm64 \
     python3 /in/apply-gba3x-package-budget.py /work/src/programs/linux-kms/src/main.rs
     echo "bridge markers in source: $(grep -c __launcher /work/src/engine/guest-rquickjs/src/lib.rs)"
     # One ROM hand-off arm, anchored on the LAUNCH arm every revision carries.
-    # The older BaseOS bridge rewrite (apply-pocketjs-bridge.py) is not used: it
-    # targets a dispatcher revision that no longer exists in any checkout.
+    python3 /in/apply-bridge.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-apps.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-rom-arm.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
     python3 /in/apply-battery.py /work/src/engine/guest-rquickjs/src/pocketshell_launcher.rs
@@ -213,7 +175,7 @@ sha256sum "$OUT"
 # Assert what the card will actually run. A bridge-less build compiles, admits
 # packages and draws the UI, so the missing host bridge only shows up later as a
 # dead battery gauge; catch it here instead.
-for marker in __launcher __pocketshell power_supply; do
+for marker in __launcher __pocketshell PJOS_BASEOSCTL; do
     grep -qa "$marker" "$OUT" || { echo "FATAL: runtime is missing the host bridge ($marker)" >&2; exit 1; }
 done
 if head -c 4 "$OUT" | od -An -tx1 | grep -q "7f 45 4c 46"; then :; else

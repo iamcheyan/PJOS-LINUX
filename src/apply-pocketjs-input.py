@@ -1,233 +1,90 @@
 #!/usr/bin/env python3
-"""Apply hardware evdev mapping to PocketJS source tree for RG34XX and TrimUI Smart Pro.
-
-- RG34XX (vendor H700 DTB): Anbernic hardware mappings (304=A, 305=B, 306=X, 307=Y, etc.)
-- TrimUI Smart Pro (A133): TRIMUI Player1 virtual Xbox controller (305=A, 304=B, 308=X, 307=Y,
-  310=L1, 311=R1, 314=Select, 315=Start, 316=Menu, ABS_HAT0X/Y=Dpad, ABS_X/Y=LeftStick,
-  ABS_Z/RZ=L2/R2, ABS_RX=RightStick).
-
-Auto-detected at runtime via EVIOCGNAME ("TRIMUI"). 100% zero regression for RG34XX.
-"""
+"""Install profile-driven evdev bindings in the staged PocketJS checkout."""
 from pathlib import Path
 import sys
 
-tree = Path(sys.argv[1])
-source = tree / "platforms/linux/evdev/src/lib.rs"
-text = source.read_text()
 
-# 1. Add is_trimui field to Decoder struct if not present
-if "pub is_trimui: bool," not in text:
-    old_struct = """    pointer_enabled: bool,
-}"""
-    new_struct = """    pointer_enabled: bool,
-    pub is_trimui: bool,
-}"""
-    text = text.replace(old_struct, new_struct, 1)
+def once(text, old, new):
+    if text.count(old) != 1:
+        raise SystemExit(f'evdev source drift: {old[:60]}')
+    return text.replace(old, new, 1)
 
-# 2. Add is_trimui: false to Decoder::new
-if "is_trimui: false," not in text:
-    old_new = """            pointer_enabled: false,
-        })"""
-    new_new = """            pointer_enabled: false,
-            is_trimui: false,
-        })"""
-    text = text.replace(old_new, new_new, 1)
 
-# 3. Add ABS handling in Decoder::event
-old_abs = """            (3, 0 | 1) if !self.multitouch => {
-                if code == 0 {
-                    self.current.touches[0].x = value;
-                } else {
-                    self.current.touches[0].y = value;
-                }
-            }"""
-
-new_abs = """            (3, 16) if self.is_trimui => {
-                self.current.keys[105] = value < 0;
-                self.current.keys[106] = value > 0;
-            }
-            (3, 17) if self.is_trimui => {
-                self.current.keys[103] = value < 0;
-                self.current.keys[108] = value > 0;
-            }
-            (3, 0) if self.is_trimui => {
-                self.current.keys[105] = value < -12000;
-                self.current.keys[106] = value > 12000;
-            }
-            (3, 1) if self.is_trimui => {
-                self.current.keys[103] = value < -12000;
-                self.current.keys[108] = value > 12000;
-            }
-            (3, 2) if self.is_trimui => {
-                self.current.keys[312] = value > 128;
-            }
-            (3, 5) if self.is_trimui => {
-                self.current.keys[313] = value > 128;
-            }
-            (3, 3) if self.is_trimui => {
-                self.current.keys[602] = value < -16000;
-                self.current.keys[603] = value > 16000;
-            }
-            (3, 0 | 1) if !self.multitouch && !self.is_trimui => {
-                if code == 0 {
-                    self.current.touches[0].x = value;
-                } else {
-                    self.current.touches[0].y = value;
-                }
-            }"""
-
-if old_abs in text:
-    text = text.replace(old_abs, new_abs, 1)
-
-# 4. Patch Decoder::append with dual mapping (TrimUI vs RG34XX)
-target_anchor = "let keys = &self.published.keys;"
-if "if self.is_trimui {" not in text:
-    old_mapping = """        let keys = &self.published.keys;
-        for (codes, mask) in [
-            (&[103u16, 544][..], btn::UP),
-            (&[108, 545], btn::DOWN),
-            (&[105, 546], btn::LEFT),
-            (&[106, 547], btn::RIGHT),
-            (&[28], btn::START),
-            // RG34XX vendor H700 DTB: the physical face buttons are named by
-            // their printed labels, and BTN_SOUTH/BTN_EAST are the reverse of
-            // ROCKNIX's mainline table. A must confirm and B must cancel.
-            (&[304, 45], btn::CIRCLE),
-            (&[305, 57, 44], btn::CROSS),
-            (&[306, 42], btn::SQUARE),
-            (&[307, 46], btn::TRIANGLE),
-            (&[308], btn::LTRIGGER),
-            (&[309], btn::RTRIGGER),
-            (&[310], btn::SELECT),
-            (&[311, 312], btn::START),
-            (&[314], btn::ZL),
-            (&[315], btn::ZR),
-        ] {
-            if codes.iter().any(|c| keys[*c as usize]) {
+root = Path(sys.argv[1]) / 'platforms/linux/evdev/src'
+lib = root / 'lib.rs'
+native = root / 'native.rs'
+s = lib.read_text()
+n = native.read_text()
+if 'fn pjos_layout(' not in s:
+    # Preserve upstream USB input behavior for secondary devices. The primary
+    # gamepad has an explicit map and never takes the upstream branch.
+    start = s.index('        let keys = &self.published.keys;')
+    end = s.index('        if self.pointer_enabled {', start)
+    s = s[:start] + """        for &(code, mask) in &self.layout_keys {
+            if self.published.keys[code] { frame.buttons |= mask; }
+        }
+        for &(code, greater, threshold, mask) in &self.layout_axes {
+            if self.published.axes[code].is_some_and(|v| if greater { v > threshold } else { v < threshold }) {
                 frame.buttons |= mask;
             }
-        }"""
-
-    # If the original unmodified upstream mapping is present:
-    upstream_mapping = """        let keys = &self.published.keys;
-        for (codes, mask) in [
-            (&[103u16, 544][..], btn::UP),
-            (&[108, 545], btn::DOWN),
-            (&[105, 546], btn::LEFT),
-            (&[106, 547], btn::RIGHT),
-            (&[28, 315], btn::START),
-            (&[57, 44, 304], btn::CROSS),
-            (&[45, 305], btn::CIRCLE),
-            (&[42, 307], btn::SQUARE),
-            (&[46, 308], btn::TRIANGLE),
-            (&[310], btn::LTRIGGER),
-            (&[311], btn::RTRIGGER),
-        ] {
-            if codes.iter().any(|c| keys[*c as usize]) {
-                frame.buttons |= mask;
-            }
-        }"""
-
-    new_dual_mapping = """        let keys = &self.published.keys;
-        if self.is_trimui {
-            for (codes, mask) in [
-                (&[103u16, 544][..], btn::UP),
-                (&[108, 545], btn::DOWN),
-                (&[105, 546], btn::LEFT),
-                (&[106, 547], btn::RIGHT),
-                (&[28], btn::START),
-                // TrimUI Smart Pro layout (TRIMUI Player1 virtual Xbox pad):
-                // Physical 'A' (Right) emits BTN_B (305) -> Confirm (CIRCLE)
-                (&[305, 45], btn::CIRCLE),
-                // Physical 'B' (Bottom) emits BTN_A (304) -> Cancel (CROSS)
-                (&[304, 57, 44], btn::CROSS),
-                // Physical 'X' (Top) emits BTN_Y (308) -> Triangle
-                (&[308, 46], btn::TRIANGLE),
-                // Physical 'Y' (Left) emits BTN_X (307) -> Square
-                (&[307, 42], btn::SQUARE),
-                // Shoulders: L1 (310), Right stick left (602)
-                (&[310, 602], btn::LTRIGGER),
-                // Shoulders: R1 (311), Right stick right (603)
-                (&[311, 603], btn::RTRIGGER),
-                // Select (314)
-                (&[314], btn::SELECT),
-                // Start (315) or Menu/FN (316)
-                (&[315, 316], btn::START),
-                // Triggers L2 (312), R2 (313)
-                (&[312], btn::ZL),
-                (&[313], btn::ZR),
-            ] {
-                if codes.iter().any(|c| keys[*c as usize]) {
-                    frame.buttons |= mask;
+        }
+""" + s[end:]
+    s = once(s, '    keys: [bool; 768],', '    keys: [bool; 768],\n    axes: [Option<i32>; 64],')
+    s = once(s, '            keys: [false; 768],', '            keys: [false; 768],\n            axes: [None; 64],')
+    s = once(s, '        self.current.keys.fill(false);', '        self.current.axes.fill(None);\n        self.current.keys.fill(false);')
+    s = once(s, '        match (kind, code) {', '        if kind == 3 && (code as usize) < 64 { self.current.axes[code as usize] = Some(value); }\n        match (kind, code) {')
+    s = once(s, '    pointer_enabled: bool,', '    layout_keys: Vec<(usize, u32)>,\n    layout_axes: Vec<(usize, bool, i32, u32)>,\n    pointer_enabled: bool,')
+    s = once(s, '            pointer_enabled: false,', '            layout_keys: Vec::new(),\n            layout_axes: Vec::new(),\n            pointer_enabled: false,')
+    names = 'UP DOWN LEFT RIGHT START SELECT CIRCLE CROSS SQUARE TRIANGLE LTRIGGER RTRIGGER ZL ZR'.split()
+    s += r'''
+impl Decoder {
+    fn pjos_layout(&mut self, text: &str) -> io::Result<()> {
+        let bad = || io::Error::new(io::ErrorKind::InvalidData, "invalid PocketJS input.map");
+        let mut lines = text.lines();
+        if lines.next() != Some("schema=pjos.input/1") { return Err(bad()); }
+        for line in lines {
+            let mut fields = line.split_whitespace();
+            let mask = match fields.next() {
+BUTTON_NAMES
+                _ => return Err(bad()),
+            };
+            match fields.next() {
+                Some("key") => {
+                    let first = fields.next().ok_or_else(bad)?;
+                    for word in std::iter::once(first).chain(fields) {
+                        let code: usize = word.parse().map_err(|_| bad())?;
+                        if code >= 768 { return Err(bad()); }
+                        self.layout_keys.push((code, mask));
+                    }
                 }
-            }
-        } else {
-            // RG34XX vendor H700 DTB (100% UNCHANGED!)
-            for (codes, mask) in [
-                (&[103u16, 544][..], btn::UP),
-                (&[108, 545], btn::DOWN),
-                (&[105, 546], btn::LEFT),
-                (&[106, 547], btn::RIGHT),
-                (&[28], btn::START),
-                (&[304, 45], btn::CIRCLE),
-                (&[305, 57, 44], btn::CROSS),
-                (&[306, 42], btn::SQUARE),
-                (&[307, 46], btn::TRIANGLE),
-                (&[308], btn::LTRIGGER),
-                (&[309], btn::RTRIGGER),
-                (&[310], btn::SELECT),
-                (&[311, 312], btn::START),
-                (&[314], btn::ZL),
-                (&[315], btn::ZR),
-            ] {
-                if codes.iter().any(|c| keys[*c as usize]) {
-                    frame.buttons |= mask;
+                Some(op @ ("lt" | "gt")) => {
+                    let code: usize = fields.next().ok_or_else(bad)?.parse().map_err(|_| bad())?;
+                    let threshold = fields.next().ok_or_else(bad)?.parse().map_err(|_| bad())?;
+                    if code >= 64 || fields.next().is_some() { return Err(bad()); }
+                    self.layout_axes.push((code, op == "gt", threshold, mask));
                 }
+                _ => return Err(bad()),
             }
-        }"""
-
-    if old_mapping in text:
-        text = text.replace(old_mapping, new_dual_mapping, 1)
-        print("Updated existing RG34XX mapping to dual TrimUI/RG34XX mapping")
-    elif upstream_mapping in text:
-        text = text.replace(upstream_mapping, new_dual_mapping, 1)
-        print("Replaced upstream mapping with dual TrimUI/RG34XX mapping")
-    else:
-        raise SystemExit("pinned PocketJS evdev mapping anchor changed")
-
-source.write_text(text)
-
-# 5. Patch native.rs with musl ioctl cast and EVIOCGNAME device detection
-native = tree / "platforms/linux/evdev/src/native.rs"
-ntext = native.read_text()
-if ntext.count("request(0x20 + kind, bytes.len())") == 1 or \
-        ntext.count("request(0x40 + code, size_of::<AbsInfo>())") == 1:
-    ntext = ntext.replace("request(0x20 + kind, bytes.len()),",
-                          "request(0x20 + kind, bytes.len()) as _,", 1)
-    ntext = ntext.replace("request(0x40 + code, size_of::<AbsInfo>()),",
-                          "request(0x40 + code, size_of::<AbsInfo>()) as _,", 1)
-    print("applied musl ioctl request cast")
-
-old_native_decoder = """        let mut decoder = Decoder::new(extent, ranges, first_contact, count)?;
-        decoder.pointer_enabled = pointer;
-        decoder.accept_multitouch = type_b;"""
-
-new_native_decoder = """        let mut decoder = Decoder::new(extent, ranges, first_contact, count)?;
-        decoder.pointer_enabled = pointer;
-        decoder.accept_multitouch = type_b;
-        let mut name_buf = [0u8; 128];
-        unsafe {
-            let res = libc::ioctl(file.as_raw_fd(), 0x80804506, name_buf.as_mut_ptr());
-            if res > 0 {
-                let s = std::str::from_utf8_unchecked(&name_buf[..res as usize]);
-                if s.contains("TRIMUI") {
-                    decoder.is_trimui = true;
-                }
-            }
-        }"""
-
-if old_native_decoder in ntext:
-    ntext = ntext.replace(old_native_decoder, new_native_decoder, 1)
-    print("applied TrimUI EVIOCGNAME auto-detection to native.rs")
-
-native.write_text(ntext)
+        }
+        if self.layout_keys.is_empty() && self.layout_axes.is_empty() { return Err(bad()); }
+        Ok(())
+    }
+}
+'''.replace('BUTTON_NAMES', '\n'.join(f'                Some("{name}") => btn::{name},' for name in names))
+    anchor = '        decoder.pointer_enabled = pointer;'
+    n = once(n, anchor, """        let dir = std::env::var_os("PJOS_PROFILE_DIR").unwrap_or_else(|| "/etc/pjos".into());
+        let map = std::fs::read_to_string(Path::new(&dir).join("input.map"))?;
+        decoder.pjos_layout(&map)?;
+        // Axis wiring belongs only to the first (DAL-resolved gamepad) input.
+        if first_contact != 0 { decoder.layout_axes.clear(); }
+""" + anchor)
+    a = n.index('        let buttons = ['); b = n.index('        let mut classes', a)
+    n = n[:a] + n[b:]; a=n.index('        if buttons {'); b=n.index('        let codes',a); n=n[:a]+n[b:]
+    n = once(n, anchor, """        if decoder.layout_keys.iter().any(|&(c, _)| has(&keys, c)) || decoder.layout_axes.iter().any(|&(c, _, _, _)| has(&absolute, c)) {
+            classes |= InputClasses::BUTTONS;
+        }
+""" + anchor)
+    for call in ('request(0x20 + kind, bytes.len())', 'request(0x40 + code, size_of::<AbsInfo>())'):
+        n = n.replace(call + ',', call + ' as _,')
+    native.write_text(n)
+    lib.write_text(s)
