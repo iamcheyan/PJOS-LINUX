@@ -20,6 +20,7 @@
     "brightness_min": 0,
     "brightness_max": 100,
     "backend": "fbdev",
+    "runtime_profile": "trimui-tsp-fbdev",
     "node": "/dev/fb0",
     "brightness_control": "sysfs"
   },

@@ -58,6 +58,7 @@
         "backend": { "enum": ["fbdev", "drm"] },
         "node": { "type": "string", "pattern": "^/dev/" },
         "vsync": { "enum": ["timer", "pageflip"] },
+        "runtime_profile": { "type": "string", "pattern": "^[a-z0-9-]+$" },
         "brightness_node": { "type": "string", "pattern": "^/sys/.+" },
         "brightness_min": { "type": "integer", "minimum": 0 },
         "brightness_max": { "type": "integer", "minimum": 1 },

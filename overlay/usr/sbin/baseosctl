@@ -77,6 +77,7 @@ case "$g" in
         case "$verb" in
             info) [ $# -eq 0 ] || exit 2; dal_display_info; exit $?;;
             node) [ $# -eq 0 ] || exit 2; dal_display_node; exit $?;;
+            state) [ $# -eq 0 ] || exit 2; dal_display_state; exit $?;;
             get-brightness) [ $# -eq 0 ] || exit 2; dal_display_brightness_get; exit $?;;
             set-brightness) [ $# -eq 1 ] || exit 2; dal_display_brightness_set "$1"; exit $?;;
             blank) [ $# -ge 1 ] && [ $# -le 2 ] || exit 2; dal_display_blank "$@"; exit $?;;

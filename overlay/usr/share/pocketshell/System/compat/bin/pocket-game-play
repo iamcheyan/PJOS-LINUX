@@ -9,14 +9,24 @@ set -eu
 [ "$#" -eq 1 ] || { echo "usage: pocket-game-play <rom>" >&2; exit 2; }
 rom=$1
 
-# /storage is a bind of the SD card's FAT partition, so a ROM may be named by
-# either path. Accept both spellings rather than guess which one the caller has.
-case "$rom" in
-    /mnt/sdcard/*) rom=/storage/${rom#/mnt/sdcard/} ;;
-    /mnt/SDCARD/*) rom=/storage/${rom#/mnt/SDCARD/} ;;
+# The image mounts its card at /mnt/sdcard. The vendor launcher supplies its
+# actual mount explicitly. Translate legacy input paths toward that mount.
+root=${PJOS_CARD_ROOT:-${SDCARD:-/mnt/sdcard}}
+root=${root%/}
+case "$root" in
+    /*) ;;
+    *) echo 'card root must be absolute' >&2; exit 2 ;;
 esac
 case "$rom" in
-    /storage/content/games/*|/storage/[rR][oO][mM][sS]/*|/storage/games-internal/roms/*|/storage/games-external/roms/*|/media/*/content/games/*|/media/*/[rR][oO][mM][sS]/*) ;;
+    "$root"/*) ;;
+    /storage/*) rom=$root/${rom#/storage/} ;;
+    /mnt/sdcard/*) rom=$root/${rom#/mnt/sdcard/} ;;
+    /mnt/SDCARD/*) rom=$root/${rom#/mnt/SDCARD/} ;;
+esac
+case "$rom" in
+    "$root"/content/games/*|"$root"/[rR][oO][mM][sS]/*|"$root"/games-internal/roms/*|"$root"/games-external/roms/*) ;;
+    /media/*/content/games/*|/media/*/[rR][oO][mM][sS]/*)
+        [ -z "${PJOS_CARD_ROOT:-}${SDCARD:-}" ] || exit 2 ;;
     *) echo "ROM must be under a scanned storage games directory" >&2; exit 2 ;;
 esac
 case "$rom" in
@@ -24,11 +34,10 @@ case "$rom" in
 esac
 [ -f "$rom" ] || { echo "ROM not found: $rom" >&2; exit 2; }
 
-compat=${PJOS_COMPAT:-/storage/System/compat}
+compat=$root/System/compat
 is_trimui=0
-if [ -x /storage/RetroArch/ra64.trimui ] || [ -x /mnt/SDCARD/RetroArch/ra64.trimui ]; then
-    ra_dir=/storage/RetroArch
-    [ -d "$ra_dir" ] || ra_dir=/mnt/SDCARD/RetroArch
+ra_dir=$root/RetroArch
+if [ -x "$ra_dir/ra64.trimui" ]; then
     frontend=$ra_dir/ra64.trimui
     core_dir=$ra_dir/.retroarch/cores
     config=$ra_dir/retroarch.cfg
@@ -89,9 +98,13 @@ fi
 [ -z "$lib_dir" ] || export LD_LIBRARY_PATH=$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
 # Record active session for resume/auto power-off state saving.
-mkdir -p /storage/.config/pocketjs 2>/dev/null || :
-printf 'kind=rom\ntarget=%s\n' "$rom" > /storage/.config/pocketjs/last-active 2>/dev/null || :
-printf '%s\n' "$rom" > /tmp/pocketjs-current-rom 2>/dev/null || :
+state=$root/.config/pocketjs
+mkdir -p "$state" 2>/dev/null || :
+printf 'kind=rom\ntarget=%s\n' "$rom" > "$state/last-active" 2>/dev/null || :
+if [ -z "${PJOS_CARD_ROOT:-}${SDCARD:-}" ]; then
+    # Legacy image save-state hook reads this transient marker.
+    printf '%s\n' "$rom" > /tmp/pocketjs-current-rom 2>/dev/null || :
+fi
 
 # Auto-load last savestate for this ROM when returning after an intentional stop.
 # RetroArch is configured with savestate_auto_load=true; keep this hook as a
@@ -105,5 +118,5 @@ if [ "$is_trimui" -eq 1 ]; then
         exec "$frontend" -v --config "$config" -L "$core" "$rom"
     fi
 else
-    exec "$frontend" -v --config "$config" --appendconfig "/storage/System/compat/share/retroarch/driver.cfg" -L "$core" "$rom"
+    exec "$frontend" -v --config "$config" --appendconfig "$compat/share/retroarch/driver.cfg" -L "$core" "$rom"
 fi

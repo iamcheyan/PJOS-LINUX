@@ -94,6 +94,7 @@ charger_state() {
 DAL=/usr/sbin/baseosctl
 [ -x "$DAL" ] || { log "baseosctl unavailable; idle blanking disabled"; exit 0; }
 set_blank() { "$DAL" display blank "$1" idle; }
+display_state() { "$DAL" display state 2>/dev/null || printf 'lit\n'; }
 
 # Linux releases flock after a crash. Reader subprocesses must close this fd.
 exec 9>"$PIDFILE.lock" || exit 1
@@ -151,6 +152,8 @@ READERS=
 spawn_readers
 
 blanked=0
+initial_state=$(display_state)
+if [ "$initial_state" = blank ]; then blanked=1; log "restored blank state from DAL"; fi
 charger_previous=unknown
 while :; do
     # Power-off is independent of screen blanking. Evaluate it before either the
@@ -211,7 +214,8 @@ while :; do
         continue
     fi
 
-
+    current_state=$(display_state)
+    if [ "$current_state" = blank ]; then blanked=1; else blanked=0; fi
     if [ "$blanked" = 0 ] && [ "$idle" -ge "$timeout" ]; then
         if set_blank on; then
             blanked=1; log "panel off after ${idle}s idle"

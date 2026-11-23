@@ -270,7 +270,8 @@ add_input() {
     input_args="$input_args --input $1"
 }
 keyboard=$(/usr/sbin/baseosctl input node keyboard 2>/dev/null) && [ -c "$keyboard" ] && add_input "$keyboard"
-directions=$(/usr/sbin/baseosctl input node directions 2>/dev/null) && [ -c "$directions" ] && add_input "$directions" || directions=
+directions=$(/usr/sbin/baseosctl input node directions 2>/dev/null) && [ -c "$directions" ] || directions=
+virtual_dpad=
 if [ -f /etc/baseos/compat-pjos-dpad ]; then
     dpad="$SD/System/bin/pjos-dpad"
     [ -x "$dpad" ] || dpad=/usr/bin/pjos-dpad
@@ -282,7 +283,8 @@ if [ -f /etc/baseos/compat-pjos-dpad ]; then
         tries=0
         while [ "$tries" -lt 15 ]; do
             if candidate=$(/usr/sbin/baseosctl input node virtual_dpad 2>/dev/null) && [ -c "$candidate" ]; then
-                add_input "$candidate"
+                virtual_dpad=$candidate
+                add_input "$virtual_dpad"
                 break
             fi
             tries=$((tries + 1))
@@ -290,6 +292,8 @@ if [ -f /etc/baseos/compat-pjos-dpad ]; then
         done
     fi
 fi
+# Physical arrows remain available only when the virtual owner is absent.
+[ -n "$virtual_dpad" ] || [ -z "$directions" ] || add_input "$directions"
 
 if [ ! -d /storage ]; then
     if mkdir -p /storage 2>/dev/null; then

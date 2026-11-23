@@ -5,9 +5,17 @@ dal_display_info() {
         v=$(dal_meta "display.$k" 2>/dev/null) || continue
         printf '%s=%s\n' "$k" "$v"
     done
-    value=$(dal_display_brightness_get 2>/dev/null) && printf 'brightness=%s\n' "$value"
+    value=$(dal_display_brightness_get 2>/dev/null) || value=unknown
+    printf 'brightness=%s\n' "$value"
+}
+dal_display_state() {
+    dal_init || return $?
+    statefile="${PJOS_RUN_ROOT:-}/run/baseos-display.state"
+    state=$(cat "$statefile" 2>/dev/null) || state=lit
+    case "$state" in blank|lit) printf '%s\n' "$state";; *) printf 'lit\n';; esac
 }
 dal_display_node() { dal_meta display.node; }
+display_state() { dal_display_state; }
 dal_display_helper() {
     for helper in "${PJOS_SYS_ROOT:-}${BASEOS_SBIN_ROOT:-}/usr/sbin/baseos-panel" "${PJOS_DEV_ROOT:-}${BASEOS_SBIN_ROOT:-}/usr/sbin/baseos-panel" /usr/sbin/baseos-panel /mnt/sdcard/System/bin/baseos-panel; do
         [ -x "$helper" ] && { printf '%s\n' "$helper"; return 0; }

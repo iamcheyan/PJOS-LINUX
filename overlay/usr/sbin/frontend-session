@@ -247,6 +247,12 @@ if [ -f "$SD/System/frontend" ]; then
 	LAUNCH_TYPE=binary
 elif [ -f "$SD/System/launch_frontend.sh" ]; then
 	LAUNCH="$SD/System/launch_frontend.sh"
+	# PocketJS cards use this SYSTEM's semantic wrapper. Running an older card
+	# wrapper would kill/restart the sole input owner with obsolete device args.
+	if [ -f "$SD/System/pocketjs/apps/boot.pocket" ] \
+		&& [ -x /usr/share/pocketshell/System/launch_frontend.sh ]; then
+		LAUNCH=/usr/share/pocketshell/System/launch_frontend.sh
+	fi
 	FRONTEND=generic
 elif [ -f "$SD/System/slot" ]; then
 	LAUNCH="$SD/System/slot"

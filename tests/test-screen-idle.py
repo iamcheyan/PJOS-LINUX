@@ -9,26 +9,59 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'overlay/usr/sbin/baseos-screen-idle'
 
+
 class ScreenIdle(unittest.TestCase):
+    def idle_fixture(self, base, timeout, state='lit', manual=False, last='0'):
+        for name in ['bin', 'run', 'input']:
+            (base/name).mkdir()
+        (base/'last').write_text(last)
+        (base/'config').write_text(f'timeout = {timeout}\nauto_stop_timeout = never\n')
+        (base/'run/baseos-display.state').write_text(state + '\n')
+        if manual:
+            (base/'run/baseos-display.manual').touch()
+        def program(name, body):
+            target = base/'bin'/name
+            target.write_text('#!/bin/sh\n' + body + '\n')
+            target.chmod(0o755)
+        program('baseosctl', '''case "$1:$2" in
+  display:state) cat "$TEST_BASE/run/baseos-display.state" ;;
+  display:blank)
+    if [ "$3" = off ] && [ -e "$TEST_BASE/run/baseos-display.manual" ]; then exit 0; fi
+    state=$(cat "$TEST_BASE/run/baseos-display.state")
+    if [ "$3:$state" = on:lit ]; then
+        echo blank > "$TEST_BASE/run/baseos-display.state"; echo on >> "$TEST_BASE/actions"
+    elif [ "$3:$state" = off:blank ]; then
+        echo lit > "$TEST_BASE/run/baseos-display.state"; echo off >> "$TEST_BASE/actions"
+    fi ;;
+  power:charger) echo online=0 ;;
+  *) exit 2 ;;
+esac''')
+        program('date', 'case "$1" in +%s) echo 100;; *) echo now;; esac')
+        program('stat', 'cat "$TEST_BASE/last"')
+        program('sleep', '''n=$(cat "$TEST_BASE/count" 2>/dev/null || echo 0)
+n=$((n+1)); echo "$n" > "$TEST_BASE/count"
+echo 100 > "$TEST_BASE/last"
+if [ "$n" -ge 3 ]; then kill -TERM "$PPID"; fi''')
+        source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseosctl', str(base/'bin/baseosctl'))
+        daemon = base/'idle.sh'
+        daemon.write_text(source)
+        result = subprocess.run(['sh', str(daemon)], env=dict(os.environ, TEST_BASE=str(base), PATH=str(base/'bin')+':'+os.environ['PATH']), timeout=3, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return (base/'actions').read_text().splitlines() if (base/'actions').exists() else []
+
     def test_auto_blank_marker_does_not_block_input_wake(self):
         with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
-            for name in ['bin', 'run', 'input']: (base/name).mkdir()
-            (base/'last').write_text('0')
-            (base/'config').write_text('timeout = 10s\nauto_stop_timeout = never\n')
-            def program(name, code):
-                path = base/'bin'/name
-                path.write_text('#!/bin/sh\n'+code)
-                path.chmod(0o755)
-            program('baseosctl', 'if [ "$1" = power ]; then echo online=0; else echo "$3" >> "$TEST_BASE/actions"; fi\n')
-            program('date', 'case "$1" in +%s) echo 100;; *) echo now;; esac\n')
-            program('stat', 'cat "$TEST_BASE/last"\n')
-            program('sleep', 'n=$(cat "$TEST_BASE/count" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$TEST_BASE/count"; echo 100 > "$TEST_BASE/last"; if [ "$n" -ge 3 ]; then kill -TERM "$PPID"; fi\n')
-            source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'missing-runtime')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseosctl', str(base/'bin/baseosctl'))
-            daemon = base/'idle.sh'; daemon.write_text(source)
-            env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
-            subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)
-            self.assertEqual((base/'actions').read_text().splitlines(), ['on', 'off'])
+            self.assertEqual(self.idle_fixture(Path(d), '10s'), ['on', 'off'])
+
+    def test_restart_recovers_auto_blank_and_preserves_manual_blank(self):
+        for timeout in ['10s', 'never']:
+            for manual in [True, False]:
+                with self.subTest(timeout=timeout, manual=manual), tempfile.TemporaryDirectory() as d:
+                    base = Path(d)
+                    actions = self.idle_fixture(base, timeout, 'blank', manual, last='100')
+                    self.assertEqual(actions, [] if manual else ['off'])
+                    self.assertEqual((base/'run/baseos-display.state').read_text().strip(), 'blank' if manual else 'lit')
+
     def test_audio_owner_defers_poweroff_but_stale_marker_does_not(self):
         for owner, expected in [(str(os.getpid()), False), ('99999999', True)]:
             with self.subTest(owner=owner), tempfile.TemporaryDirectory() as d:
