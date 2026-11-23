@@ -2,6 +2,7 @@
 set -eu
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
+export BASEOS_SOC_HOOK="$HERE/bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init"
 SCRIPT="$HERE/overlay/usr/sbin/boot-menu-held"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM

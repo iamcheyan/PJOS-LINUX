@@ -2,13 +2,15 @@
 # Called only for a latched charger boot, before GPU, services or update trials.
 # Return success only for MENU, the persistent opt-out, or a fresh POWER hold.
 
+. "${BASEOS_SOC_HOOK:-/etc/init.d/soc-hw-init}"
+
 if /usr/sbin/boot-menu-held; then
 	: > /run/boot-menu-held
 	exit 0
 fi
 
 data_mounted=0
-if /bin/mount -t ext4 -o ro,noatime /dev/mmcblk0p6 /data 2>/dev/null; then
+if /bin/mount -t ext4 -o ro,noatime "$DATA_DEVICE" /data 2>/dev/null; then
 	data_mounted=1
 	if [ -e /data/no-charger-off ]; then
 		/bin/umount /data || exit 1
@@ -23,13 +25,13 @@ if /bin/mount -t ext4 -o ro,noatime /dev/mmcblk0p6 /data 2>/dev/null; then
 	# A recent or future stamp may be a failed poweroff/reboot loop. A rapid
 	# deliberate replug is indistinguishable, so both wait for explicit input.
 	if [ "$now" -gt 0 ] && { [ "$last" -eq 0 ] || [ "$((now - last))" -ge 120 ]; } \
-		&& /usr/sbin/axp-off >/dev/null 2>&1 \
+		&& "$PMIC_OFF" >/dev/null 2>&1 \
 		&& /bin/mount -o remount,rw /data \
 		&& printf '%s\n' "$now" > /data/charger-off-stamp.new \
 		&& /bin/mv /data/charger-off-stamp.new /data/charger-off-stamp; then
 		# axp-off flushes and makes every persistent mount read-only, including
 		# /, before writing the PMIC. A failure never starts a frontend.
-		/usr/sbin/axp-off --now
+		"$PMIC_OFF" --now
 	fi
 fi
 
@@ -61,8 +63,7 @@ while read -r setting old; do
 done < /run/charger/restore
 # Give feedback while POWER is still held. This one-shot draw happens only
 # after explicit boot intent; regular boots and idle charging do no rendering.
-work_led=/sys/class/power_supply/axp2202-battery/work_led
-[ ! -w "$work_led" ] || printf '1\n' > "$work_led" 2>/dev/null
+[ ! -w "$WORK_LED" ] || printf '1\n' > "$WORK_LED" 2>/dev/null
 [ ! -x /usr/bin/baseos-splash ] || /usr/bin/baseos-splash --charger-boot >/dev/null 2>&1
 [ "$data_mounted" -eq 0 ] || /bin/umount /data || exit 1
 exit 0

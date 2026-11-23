@@ -9,6 +9,8 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 . "$HERE/tools/docker-platform.sh"
 
 docker run --rm -i --platform "$BASEOS_DOCKER_PLATFORM_HOST" \
+  -v "$HERE/bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init":/etc/init.d/soc-hw-init:ro \
+  -v "$HERE/bsp/allwinner/h700/overlay/etc/baseos":/etc/baseos:ro \
   -v "$HERE/overlay/usr/sbin/frontend-session":/usr/sbin/frontend-session:ro \
   -v "$HERE/overlay/usr/share/baseos/boot-log.sh":/usr/share/baseos/boot-log.sh:ro \
   alpine:3.20 sh -eu <<'TEST'

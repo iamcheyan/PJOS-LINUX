@@ -8,13 +8,14 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 RCS="$HERE/overlay/etc/init.d/rcS"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/bin"
+mkdir -p "$TMP/bin" "$TMP/ext4/mmcblk0p5"
+export ROOT_DEVICE=/dev/mmcblk0p5
 export ROOT_TEST_TMP="$TMP"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 awk '/^# Root filesystem\. The vendor initramfs/{copy=1} /^# \/usr\/lib\. A composed image/{copy=0} copy' "$RCS" \
 	| sed -e "s|/proc/mounts|$TMP/mounts|g" \
-		-e "s|/sys/fs/ext4/mmcblk0p5/errors_count|$TMP/errors_count|g" \
+		-e "s|/sys/fs/ext4/|$TMP/ext4/|g" \
 		-e "s|/usr/sbin/e2fsck|$TMP/bin/e2fsck|g" \
 		-e "s|/bin/mount |$TMP/bin/mount |g" \
 		-e "s|/dev/kmsg|$TMP/kmsg|g" > "$TMP/root-block"
@@ -43,7 +44,7 @@ kernel_root() {
 
 # With the vendor initramfs the root arrives writable: nothing to do.
 printf 'rootfs / rootfs rw 0 0\n/dev/mmcblk0p5 / ext4 rw,noatime,nodiratime,nobarrier,noauto_da_alloc,data=ordered 0 0\n' > "$TMP/mounts"
-echo 0 > "$TMP/errors_count"
+echo 0 > "$TMP/ext4/mmcblk0p5/errors_count"
 fsck_stub 0
 run
 [ ! -s "$TMP/events" ] || fail "writable root was touched: $(cat "$TMP/events")"
@@ -68,7 +69,7 @@ rm "$TMP/full-remount-fails" "$TMP/every-remount-fails"
 echo 'ok: remount falls back to plain options and reports a failure'
 
 # Recorded errors: check first. A checker that changed nothing permits writes.
-echo 3 > "$TMP/errors_count"
+echo 3 > "$TMP/ext4/mmcblk0p5/errors_count"
 run
 [ "$(cat "$TMP/events")" = "$(printf 'e2fsck -y /dev/mmcblk0p5\n%s' "$FULL")" ] \
 	|| fail "flagged root, clean check: $(cat "$TMP/events")"
@@ -90,7 +91,7 @@ rm "$TMP/bin/e2fsck"
 run
 [ "$(cat "$TMP/events")" = "$FULL" ] || fail "missing checker: $(cat "$TMP/events")"
 fsck_stub 1
-rm "$TMP/errors_count"
+rm "$TMP/ext4/mmcblk0p5/errors_count"
 run
 [ "$(cat "$TMP/events")" = "$FULL" ] || fail "missing counter: $(cat "$TMP/events")"
 echo 'ok: no checker or no error counter does not block a writable root'

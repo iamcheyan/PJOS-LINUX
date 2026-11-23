@@ -14,10 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 rcs = (ROOT / 'overlay/etc/init.d/rcS').read_text()
 # The Bluetooth wake driver loads at the head of the same background block,
 # ahead of the WiFi driver.
-start = rcs.index('# Radio initialization')
-end = rcs.index('# machine-id', start)
-assert rcs.index('# Stock loads the Bluetooth') > start and rcs.index('rtl_btlpm.ko') < rcs.index('8821cs.ko')
-SCRIPT = rcs[start:end] + '\necho ready > /run/frontend-handoff\n'
+adapter = (ROOT / 'bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init').read_text()
+start = rcs.index('\nsoc_radio\n') + 1
+# Exercise the radio driver hook, not the separate supplicant service:
+# both issue `ip link set`, but only the former waits for driver loading.
+end = rcs.index('# Bring the supplicant', start)
+assert adapter.index('# Stock loads the Bluetooth') < adapter.index('rtl_btlpm.ko') < adapter.index('8821cs.ko')
+SCRIPT = adapter + "\n" + rcs[start:end] + '\necho ready > /run/frontend-handoff\n'
 
 
 class Radio:

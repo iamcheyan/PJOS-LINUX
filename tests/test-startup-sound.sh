@@ -35,6 +35,7 @@ cat > "$TMP/bin/umount" <<'SH'
 printf 'umount %s\n' "$*" >> "$SOUND_TEST_LOG"
 SH
 chmod +x "$TMP/bin/"*
+export BASEOS_SOC_HOOK="$ROOT/bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init"
 helper="$ROOT/overlay/usr/sbin/baseos-startup-sound"
 printf '/dev/mmcblk0p7 %s vfat rw 0 0\n' "$TMP/tf1" > "$TMP/mounts"
 sh "$helper"
@@ -76,6 +77,6 @@ s = (root / 'overlay/etc/init.d/rcS').read_text()
 hook = s[s.index('if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-startup-sound'):]
 hook = hook.split('\nfi', 1)[0]
 assert '>/run/startup-sound.log 2>&1 &' in hook
-assert s.index('/usr/sbin/h700-speaker-amp-load >/run/') < s.index(hook)
+assert s.index('\nsoc_audio\n') < s.index(hook)
 PY
 echo 'startup sound tests passed'

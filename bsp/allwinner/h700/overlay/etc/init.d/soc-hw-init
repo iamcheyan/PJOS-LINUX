@@ -1,0 +1,261 @@
+# Sourced by rcS and BaseOS services. Definitions only: some callers run
+# before /usr/lib is mounted. Board overlays may replace this adapter.
+SOC_ID=allwinner/h700
+ROOT_DEVICE=/dev/mmcblk0p5
+DATA_DEVICE=/dev/mmcblk0p6
+PRIMARY_DEVICE=/dev/mmcblk0p7
+SECONDARY_DEVICE=/dev/mmcblk1p1
+GPU_DEVICE=/dev/mali0
+WIFI_IFACE=wlan0
+PMIC_OFF=/usr/sbin/axp-off
+WORK_LED=/sys/class/power_supply/axp2202-battery/work_led
+
+soc_standby() {
+	# The SP vendor kernels expose a low-power suspend policy switch. Stock applies
+	# its persisted Super Standby bit as value 16; non-SP kernels have no such file
+	# and already fully stop their USB host controllers during `mem` suspend.
+	os_sleep=/sys/class/power_supply/axp2202-battery/os_sleep
+	[ -w "$os_sleep" ] && printf '16' > "$os_sleep"
+}
+
+soc_debugfs() {
+	# debugfs: the sunxi disp2 driver's only display-output control surface is
+	# /sys/kernel/debug/dispdbg — it is what switches disp0 between the LCD and the
+	# HDMI TX. The stock OS got this mount for free from systemd; without it the
+	# frontend's HDMI switch silently no-ops and a plugged-in TV stays dark while
+	# the 720p UI is scaled onto the internal panel (issue #10).
+	/bin/mount -t debugfs -o nodev,noexec,nosuid debugfs /sys/kernel/debug
+}
+
+soc_boot_reason() {
+	# The kernel latches the boot reason before userspace starts. A normal boot
+	# takes only shell builtins here; use an exact cmdline token on older kernels.
+	boot_mode=
+	if [ -r /sys/class/power_supply/axp2202-battery/boot_mode ]; then
+		read -r boot_mode < /sys/class/power_supply/axp2202-battery/boot_mode
+	fi
+	case "$boot_mode" in
+		0|1) ;;
+		*)
+			read -r boot_cmdline < /proc/cmdline
+			case " $boot_cmdline " in *' bootreason=charger '*) boot_mode=1 ;; esac
+			;;
+	esac
+}
+
+soc_devices() {
+	# GPU: the build strips debug data from the vendor module. Load it in the
+	# background to overlap startup; frontend-session waits for /dev/mali0.
+	/sbin/insmod /lib/modules/mali_kbase.ko 2>/dev/null &
+
+	# USB host controllers: the boot files hold back every one except the one the
+	# OTG port needs, so the kernel does not spend 0.3 s starting them before init.
+	# This module starts them now, beside the rest of startup. On boot files that
+	# hold nothing back it finds nothing to do.
+	[ ! -f /lib/modules/h700_late_usb.ko ] || /sbin/insmod /lib/modules/h700_late_usb.ko 2>/dev/null &
+}
+
+soc_radio() {
+	# Radio initialization stays in the background: never delay frontend handoff.
+	# The vendor kernel can enumerate the bootloader-powered SDIO card, then turn
+	# off its unused WLAN regulator. Discard that stale card while power is still
+	# off, before 8821cs powers it up and registers its driver. Otherwise the driver
+	# probes the stale card concurrently with its own rescan (-123 on H700).
+	# Frontends own association/DHCP and may still need to wait for wlan0.
+	#
+	# Some radios only reset properly after a long power-off. The kernel cuts the
+	# supply at about 1.85 s and the driver re-powers it about 0.6 s later; on
+	# those units the fresh card then answers with a corrupt SDIO ID (020C:C821)
+	# or not at all, while stock, which loads the driver ~3.8 s after the cut,
+	# works. When the first enumeration fails, unload the driver (it powers the
+	# radio off), keep it off for a stock-length interval, and load again. Remember
+	# that on /data so later boots hold the first load instead of failing first.
+	# Units whose first attempt works, the common case, are unaffected.
+	(
+		# Stock loads the Bluetooth wake-handshake driver during early boot
+		# (/etc/modules); its probe drives BT_WAKE (PG17) high. Keep that state,
+		# and keep it ahead of the WiFi driver. Loading it takes about 40 ms.
+		[ ! -f /lib/modules/rtl_btlpm.ko ] || /sbin/insmod /lib/modules/rtl_btlpm.ko 2>/dev/null
+		wifi_slow=/data/wifi-slow-radio
+		wifi_off_cs=500                 # power-off interval, centiseconds (stock: ~380)
+		wifi_cut_cs=185                 # kernel disables the WLAN supply about here
+		wifi_first_cs=225               # startup used to reach the first load about here
+		wifi_uptime() {                 # centiseconds; empty when unavailable
+			read -r wifi_up _ < /proc/uptime 2>/dev/null || wifi_up=
+			wifi_up="${wifi_up%.*}${wifi_up#*.}"
+			while [ "${wifi_up#0}" != "$wifi_up" ]; do wifi_up="${wifi_up#0}"; done
+		}
+		wifi_hold_until() {             # bounded wait for uptime >= $1 cs
+			wifi_n=0
+			wifi_uptime
+			while [ -n "$wifi_up" ] && [ "$wifi_up" -lt "$1" ] && [ "$wifi_n" -lt 80 ]; do
+				sleep 0.25 2>/dev/null || sleep 1
+				wifi_n=$((wifi_n + 1))
+				wifi_uptime
+			done
+		}
+		wifi_load() {
+			wifi_rf=/sys/class/misc/sunxi-wlan/rf-ctrl
+			if [ -w "$wifi_rf/scan_device" ] && [ -r "$wifi_rf/power_state" ] \
+				&& read -r wifi_power < "$wifi_rf/power_state" && [ "$wifi_power" = 0 ]; then
+				printf '1\n' > "$wifi_rf/scan_device"
+				wifi_wait=0
+				for wifi_card in /sys/bus/sdio/devices/*; do
+					while [ -d "$wifi_card" ] && [ "$wifi_wait" -lt 20 ]; do
+						sleep 0.05
+						wifi_wait=$((wifi_wait + 1))
+					done
+				done
+			fi
+			/sbin/insmod /lib/modules/8821cs.ko 2>/dev/null
+			wifi_wait=0
+			while [ ! -d /sys/class/net/wlan0 ] && [ "$wifi_wait" -lt "$1" ]; do
+				sleep 0.25 2>/dev/null || sleep 1
+				wifi_wait=$((wifi_wait + 1))
+			done
+		}
+		if [ -e "$wifi_slow" ]; then
+			echo 'baseos: wifi: holding the driver load for a slow-resetting radio' > /dev/kmsg
+			wifi_hold_until $((wifi_cut_cs + wifi_off_cs))
+			wifi_load 40
+		else
+			# Startup now gets here sooner after the kernel cuts the WLAN supply.
+			# The radio keeps the power-off interval it has always had before its
+			# first power-up: start no earlier than startup used to.
+			wifi_hold_until "$wifi_first_cs"
+			wifi_load 8
+			if [ ! -d /sys/class/net/wlan0 ]; then
+				echo 'baseos: wifi: no wlan0 after the first load; retrying after a longer power-off' > /dev/kmsg
+				/sbin/rmmod 8821cs 2>/dev/null
+				: > "$wifi_slow" 2>/dev/null
+				wifi_uptime
+				[ -n "$wifi_up" ] && wifi_hold_until $((wifi_up + wifi_off_cs)) || sleep 5
+				wifi_load 40
+			fi
+		fi
+		if [ -d /sys/class/net/wlan0 ]; then
+			rfkill unblock wifi 2>/dev/null || true
+			ip link set wlan0 up 2>/dev/null || true
+		fi
+	) &
+}
+
+soc_bluetooth() {
+	# H700 Bluetooth is a UART H5 controller, not a probe-and-go HCI device. The
+	# vendor-compatible script loads rtl_btlpm, attaches ttyS1 with rtk_hciattach,
+	# then raises hci0. Keep attach alive independently of a PocketJS request.
+	(
+		if [ "$(cat /data/baseos-bluetooth-enabled 2>/dev/null)" != no ] && [ -x /mnt/vendor/ctrl/setBluetooth.sh ]; then
+			if /mnt/vendor/ctrl/setBluetooth.sh all; then
+				/usr/sbin/systemctl start bluetooth
+				bluetoothctl power on >/dev/null 2>&1 || true
+				if [ "$(cat /data/baseos-btaudio-enabled 2>/dev/null)" = yes ] && command -v bluealsa >/dev/null 2>&1; then
+					bluealsa -p a2dp-source -p a2dp-sink </dev/null >/run/bluealsa.log 2>&1 &
+				fi
+			fi
+		fi
+		) >/run/bluetooth-init.log 2>&1 &
+}
+
+soc_wait_storage() {
+	# The second card slot (TF2) is powered and identified by the kernel in the
+	# background, about 0.4 s after its controller starts, so its card can still be
+	# missing when rcS gets here. Without a wait, a quick boot quietly uses TF1 as
+	# the frontend card, or exports the wrong disk in USB-storage mode. The kernel
+	# keeps the slot powered only while a card is present or still being
+	# identified, so follow its verdict rather than a card-detect level whose
+	# polarity is board-specific. An empty slot costs one read; the wait ends at
+	# the handoff budget whatever happens.
+	tf2_ios=
+	for tf2_host in /sys/devices/platform/soc/sdc2/mmc_host/mmc*; do
+		[ -d "$tf2_host" ] && tf2_ios="/sys/kernel/debug/${tf2_host##*/}/ios"
+	done
+	tf2_powered() {
+		[ -r "$tf2_ios" ] || return 1
+		while IFS= read -r tf2_line; do
+			case "$tf2_line" in
+				'power mode:'*'(off)'*) return 1 ;;
+				'power mode:'*) return 0 ;;
+			esac
+		done < "$tf2_ios"
+		return 1
+	}
+	tf2_grace=0
+	while [ ! -b /dev/mmcblk1p1 ]; do
+		if [ -b /dev/mmcblk1 ]; then
+			# The disk is up; its partitions follow within milliseconds.
+			[ "$tf2_grace" -lt 5 ] || break
+			tf2_grace=$((tf2_grace + 1))
+		else
+			tf2_powered || break
+		fi
+		read -r tf2_up _ < /proc/uptime 2>/dev/null || break
+		tf2_up="${tf2_up%.*}${tf2_up#*.}"
+		while [ "${tf2_up#0}" != "$tf2_up" ]; do tf2_up="${tf2_up#0}"; done
+		[ "${tf2_up:-0}" -lt 250 ] || break
+		sleep 0.01 2>/dev/null || break
+	done
+}
+
+soc_audio() {
+	# Attach the audio repair before init can start a frontend and open the codec.
+	# The module verifies the running kernel and idle audio state before attaching.
+	# Skip USB-storage maintenance.
+	if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/h700-speaker-amp-load ]; then
+		/usr/sbin/h700-speaker-amp-load >/run/h700-speaker-amp.log 2>&1
+	fi
+
+	# The vendor codec powers up with every output switch off, so the speaker stays
+	# silent until a mixer opens the path. Unmute DAC -> output and the speaker, and
+	# leave a sane level on a fresh card; the settings row only moves the volume
+	# afterwards.
+	if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -c /dev/snd/controlC0 ] && command -v amixer >/dev/null 2>&1; then
+		amixer -q -c 0 sset 'OutputL Mixer DACL' on >/dev/null 2>&1 || :
+		amixer -q -c 0 sset 'OutputR Mixer DACR' on >/dev/null 2>&1 || :
+		amixer -q -c 0 sset 'SPK' on >/dev/null 2>&1 || :
+		saved_vol=$(cat /storage/.config/baseos/volume.percent 2>/dev/null || cat /mnt/sdcard/.config/baseos/volume.percent 2>/dev/null || :)
+		if [ -n "$saved_vol" ] && [ "$saved_vol" -ge 0 ] 2>/dev/null && [ "$saved_vol" -le 100 ] 2>/dev/null; then
+			amixer -q -c 0 sset 'digital volume' "${saved_vol}%" >/dev/null 2>&1 || :
+			[ "$saved_vol" -eq 0 ] && amixer -q -c 0 sset 'SPK' off >/dev/null 2>&1 || :
+		else
+			level=$(amixer -c 0 sget 'digital volume' 2>/dev/null | sed -n 's/.*\[\([0-9]*\)%\].*/\1/p' | head -1)
+			if [ -z "$level" ] || [ "$level" -eq 0 ]; then
+				amixer -q -c 0 sset 'digital volume' '60%' >/dev/null 2>&1 || :
+			fi
+		fi
+		# The three sset calls above are best-effort by design (control names differ
+		# across H700 variants), which is also why a wrong name used to be invisible:
+		# the speaker simply stayed off and nothing was logged. Read the state back
+		# so a silent device is diagnosable from one file.
+		if [ -x /usr/sbin/pocket-audio-check ]; then
+			/usr/sbin/pocket-audio-check >/run/h700-audio.log 2>&1
+		fi
+	else
+		# No mixer or no card at this point is itself the finding.
+		{
+			echo "audio: mixer step skipped"
+			echo "  controlC0: $([ -c /dev/snd/controlC0 ] && echo present || echo missing)"
+			echo "  amixer: $(command -v amixer 2>/dev/null || echo missing)"
+		} >/run/h700-audio.log
+	fi
+}
+
+soc_startup_mixer() {
+	amixer -q -c 0 sset 'digital volume' 63
+	amixer -q -c 0 sset 'lineout volume' 31
+	amixer -q -c 0 sset 'OutputL Mixer DACL' on
+	amixer -q -c 0 sset 'OutputR Mixer DACR' on
+	amixer -q -c 0 sset 'LINEOUT' on
+	amixer -q -c 0 sset 'SPK' on
+}
+
+soc_boot_menu_held() {
+	# Report whether the vendor H700 DT-labelled MENU GPIO is physically held.
+	# The input driver advertises BTN_MODE but its EVIOCGKEY state is stale, so the
+	# active-low GPIO level is the only reliable one-shot source at cold boot.
+
+	GPIO="${BASEOS_GPIO_DEBUG:-/sys/kernel/debug/gpio}"
+	[ -r "$GPIO" ] || return 1
+	grep -Eq '\|GPIO Key [Mm]enu[[:space:]]*\)[[:space:]]+in[[:space:]]+lo([[:space:]]|$)' \
+		"$GPIO" 2>/dev/null
+}

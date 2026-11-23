@@ -146,8 +146,8 @@ check_runtime Last false
 
 # Execute rcS's real config/update block with only paths and OS commands
 # redirected to fixtures. The mount stub insists on a read-only TF1 mount.
-awk '/^# BaseOS settings always/{copy=1} /^# Dev image extras/{copy=0} copy' "$RCS" \
-	| sed -e "s|/dev/mmcblk0p7|$TMP/tf1|g" \
+awk '/^# BaseOS settings always/{copy=1} /^soc_audio$/{copy=0} copy' "$RCS" \
+	| sed -e "s|\$PRIMARY_DEVICE|$TMP/tf1|g" \
 		-e "s|/mnt/sdcard|$TMP/sdcard|g" -e "s|/mnt/system|$TMP/system|g" \
 		-e "s|/proc/mounts|$TMP/mounts|g" \
 		-e "s|/usr/sbin/baseos-config|$SCRIPT|g" \
@@ -276,7 +276,7 @@ line_of() { grep -nF "$1" "$RCS" | head -1 | cut -d: -f1; }
 charger="$(line_of '/usr/sbin/baseos-charger')"
 storage="$(line_of '/usr/sbin/usb-storage-mode prepare')"
 config="$(line_of '/usr/sbin/baseos-config "$BASEOS_CONFIG"')"
-audio="$(line_of '/usr/sbin/h700-speaker-amp-load >')"
+audio="$(line_of 'soc_audio')"
 services="$(line_of '/etc/init.d/dev &')"
 [ "$config" -lt "$audio" ] && [ "$audio" -lt "$services" ] || fail "audio configuration order"
 [ "$charger" -lt "$storage" ] && [ "$storage" -lt "$config" ] && [ "$config" -lt "$services" ] \

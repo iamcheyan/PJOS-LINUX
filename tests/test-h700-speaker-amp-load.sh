@@ -43,9 +43,9 @@ sh "$loader" || status=$?
 [ "$status" -eq 7 ]
 # Exercise the rcS handoff: audio attachment must finish before frontends can
 # run, and USB storage maintenance must skip it entirely.
-awk '/^if .*USB_STORAGE_MODE.*h700-speaker-amp-load/ { copying=1 }
+awk '/^[[:space:]]*if .*USB_STORAGE_MODE.*h700-speaker-amp-load/ { copying=1 }
      copying { print }
-     copying && /^fi$/ { exit }' "$HERE/overlay/etc/init.d/rcS" \
+     copying && /^[[:space:]]*fi$/ { exit }' "$HERE/bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init" \
     | sed "s#/usr/sbin/h700-speaker-amp-load#$TMP/boot-loader#g; s#/run/h700-speaker-amp.log#$TMP/boot.log#g" \
     > "$TMP/boot-audio"
 [ -s "$TMP/boot-audio" ]

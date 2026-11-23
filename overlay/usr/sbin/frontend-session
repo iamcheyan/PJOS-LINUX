@@ -11,6 +11,7 @@ if [ -r /etc/baseos-release ]; then
 fi
 
 SD=/mnt/sdcard
+. "${BASEOS_SOC_HOOK:-/etc/init.d/soc-hw-init}"
 . /usr/share/baseos/boot-log.sh
 select_boot_log
 INSTALL_FAILED=0
@@ -168,8 +169,6 @@ if [ -s /run/usb-storage-device ]; then
 	while :; do sleep 3600; done
 fi
 
-# The card should already be mounted by rcS; retry here covers slow cards
-# and hot re-insertion after an unmount.
 n=0
 while ! mountpoint -q "$SD" 2>/dev/null; do
 	if [ "$n" -ge 15 ]; then
@@ -178,7 +177,7 @@ while ! mountpoint -q "$SD" 2>/dev/null; do
 		CARD_MISSING=1
 		break
 	fi
-	for dev in /dev/mmcblk1p1 /dev/mmcblk0p7; do
+	for dev in "$SECONDARY_DEVICE" "$PRIMARY_DEVICE"; do
 		[ -b "$dev" ] || continue
 		mount -t vfat -o rw,utf8,noatime,shortname=mixed "$dev" "$SD" 2>/dev/null && break
 		mount -t auto -o noatime "$dev" "$SD" 2>/dev/null && break
@@ -193,7 +192,11 @@ if mountpoint -q "$SD" 2>/dev/null; then
 	select_boot_log
 	flush_early_boot_log
 	ZIP="$SD/MinUI.zip"
-	LAUNCH="$SD/.system/h700/paks/MinUI.pak/launch.sh"
+	MINUI_PLATFORM=
+	[ -r /etc/baseos/minui-platform ] && read -r MINUI_PLATFORM < /etc/baseos/minui-platform
+	case "$MINUI_PLATFORM" in ''|*[!A-Za-z0-9._-]*|.*|*-|/*) MINUI_PLATFORM= ;; esac
+	MINUI_LAUNCH=
+	[ -n "$MINUI_PLATFORM" ] && MINUI_LAUNCH="$SD/.system/$MINUI_PLATFORM/paks/MinUI.pak/launch.sh"
 	HAVE_PAKZ=0
 	for z in "$SD"/*.pakz; do [ -f "$z" ] && HAVE_PAKZ=1 && break; done
 	if [ -f "$ZIP" ] || [ "$HAVE_PAKZ" = 1 ]; then
@@ -203,19 +206,21 @@ if mountpoint -q "$SD" 2>/dev/null; then
 		# So paint one static install/update pill and let the (~1 min) work run
 		# under it. Deliberately NOT animated: a background draw loop raced
 		# NextUI's first frame and left the splash stuck over its static menu.
-		if [ -f "$LAUNCH" ]; then
+		if [ -f "$MINUI_LAUNCH" ]; then
 			important_splash 85 "UPDATING FRONTEND"
 		else
 			important_splash 85 "INSTALLING FRONTEND"
 		fi
-		if [ ! -f "$SD/.tmp_update/h700.sh" ] && [ -f "$ZIP" ]; then
+		INSTALLER=
+		[ -n "$MINUI_PLATFORM" ] && INSTALLER="$SD/.tmp_update/$MINUI_PLATFORM.sh"
+		if [ -n "$INSTALLER" ] && [ ! -f "$INSTALLER" ] && [ -f "$ZIP" ]; then
 			log "bootstrapping installer from MinUI.zip"
 			unzip -o "$ZIP" ".tmp_update/*" -d "$SD" >> "$LOG" 2>&1
 			log "bootstrap unzip exited $?"
 		fi
-		if [ -f "$SD/.tmp_update/h700.sh" ]; then
+		if [ -n "$INSTALLER" ] && [ -f "$INSTALLER" ]; then
 			log "running installer/updater"
-			if sh "$SD/.tmp_update/h700.sh" >> "$LOG" 2>&1; then
+			if sh "$INSTALLER" >> "$LOG" 2>&1; then
 				log "installer exited 0"
 			else
 				installer_status=$?
@@ -247,8 +252,8 @@ elif [ -f "$SD/System/slot" ]; then
 	LAUNCH="$SD/System/slot"
 	FRONTEND=slot
 	LAUNCH_TYPE=binary
-elif [ -f "$SD/.system/h700/paks/MinUI.pak/launch.sh" ]; then
-	LAUNCH="$SD/.system/h700/paks/MinUI.pak/launch.sh"
+elif [ -n "$MINUI_LAUNCH" ] && [ -f "$MINUI_LAUNCH" ]; then
+	LAUNCH="$MINUI_LAUNCH"
 	FRONTEND=nextui
 elif [ -f /mnt/SDCARD/spruce/scripts/runtime.sh ]; then
 	# rcS aliases /mnt/SDCARD to the selected card. Spruce uses that path
@@ -263,10 +268,10 @@ if [ "$CARD_MISSING" -eq 0 ] && [ -f "$LAUNCH" ]; then
 	if [ "$FRONTEND" = slot ] || [ "$FRONTEND" = generic ]; then
 		cd "$SD" || exit 1
 	fi
-	# rcS loads mali_kbase in the background; make sure /dev/mali0 exists
+	# The SoC hook starts graphics asynchronously; wait for its ready node
 	# before the frontend initializes graphics (near-always already true).
 	m=0
-	while [ ! -e /dev/mali0 ] && [ "$m" -lt 30 ]; do
+	while [ -n "$GPU_DEVICE" ] && [ ! -e "$GPU_DEVICE" ] && [ "$m" -lt 30 ]; do
 		sleep 0.1 2>/dev/null || sleep 1
 		m=$((m + 1))
 	done

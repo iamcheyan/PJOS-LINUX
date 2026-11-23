@@ -44,6 +44,8 @@ class Boot:
         self.write("dev/console", "")
         self.write("dev/urandom", "seed")
         self.write("etc/hostname", "baseos\n")
+        self.write("etc/init.d/soc-hw-init", (ROOT / "bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init").read_bytes())
+        self.write("etc/pjos/profile.env", "soc=allwinner/h700\n")
         for script in ("etc/init.d/rcS", "etc/init.d/rcK", "usr/sbin/baseos-charger",
                        "usr/bin/baseos-splash", "usr/share/baseos/boot-log.sh"):
             self.write(script, (ROOT / "overlay" / script).read_bytes(), executable=True)
