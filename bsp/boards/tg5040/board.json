@@ -1,0 +1,87 @@
+{
+  "schema": "pjos.board/1",
+  "id": "tg5040",
+  "soc": "allwinner/a133",
+  "firmware": { "mode": "card", "observed_kernel_release": "4.9.191" },
+  "identity": {
+    "model": "TrimUI Smart Pro",
+    "model_string": "TG5040",
+    "frontend_family": "tg5040",
+    "firmware_prefix": "unknown"
+  },
+  "panel": {
+    "width": 1280,
+    "height": 720,
+    "rotation_ccw": 0,
+    "bpp": 32
+  },
+  "display": {
+    "brightness_node": "/sys/class/led/tg5040_exterme_brightness",
+    "brightness_min": 0,
+    "brightness_max": 100,
+    "backend": "fbdev",
+    "node": "/dev/fb0",
+    "brightness_control": "sysfs"
+  },
+  "input": {
+    "roles": {
+      "power": { "name": "axp2202-pek" },
+      "gamepad": { "name": "TRIMUI Player1" }
+    },
+    "keyboard_name": "sunxi-keyboard"
+  },
+  "power": {
+    "long_press": "ignore",
+    "battery": "axp2202-battery",
+    "charger": "axp2202-usb"
+  },
+  "audio": { "card_name": "audiocodec" },
+  "network": { "interfaces": ["wlan0", "wlan1"] },
+  "overrides": {
+    "nodes": {
+      "display": {
+        "fb": ["/dev/fb0"],
+        "brightness_node": "/sys/class/led/tg5040_exterme_brightness"
+      },
+      "input": {
+        "gamepad_name": "TRIMUI Player1"
+      },
+      "audio": {
+        "card_prefix": "audiocodec"
+      },
+      "network": {
+        "interfaces": [
+          "wlan0",
+          "wlan1"
+        ]
+      }
+    }
+  },
+  "capabilities": {
+    "wifi": "yes",
+    "bluetooth": "unknown",
+    "touch": "unknown",
+    "vibration": "unknown",
+    "hdmi": "unknown",
+    "gpu": "unknown",
+    "rtc": "unknown",
+    "usb_gadget": "unknown",
+    "usb_host": "unknown",
+    "brightness": "yes",
+    "audio": "yes"
+  },
+  "features": {
+    "bt_sink": "unknown",
+    "bt_source": "unknown",
+    "audio_hw_volume": "unknown",
+    "audio_hw_mute": "unknown",
+    "display_rotation": "unknown",
+    "display_output_switch": "unknown",
+    "suspend": "unknown",
+    "rtc_alarm": "unknown",
+    "usb_storage_export": "unknown",
+    "usb_adb": "unknown",
+    "usb_host_input": "unknown",
+    "wifi_ap": "unknown"
+  }
+}

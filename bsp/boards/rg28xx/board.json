@@ -1,0 +1,74 @@
+{
+  "schema": "pjos.board/1",
+  "id": "rg28xx",
+  "soc": "allwinner/h700",
+  "firmware": { "mode": "image", "variant": "rg28xx" },
+  "identity": {
+    "model": "RG28XX",
+    "model_string": "RG28xx",
+    "frontend_family": "rg28xx",
+    "firmware_prefix": "RG28XX-",
+    "firmware_alias": null
+  },
+  "panel": {
+    "width": 480,
+    "height": 640,
+    "rotation_ccw": 90,
+    "logical_width": 640,
+    "logical_height": 480
+  },
+  "display": {
+    "brightness_node": "/sys/class/disp/disp/attr/enhance_bright",
+    "backend": "fbdev",
+    "node": "/dev/fb0",
+    "brightness_control": "ioctl"
+  },
+  "power": {
+    "battery": "axp2202-battery",
+    "charger": "axp2202-usb",
+    "long_press": "poweroff"
+  },
+  "input": {
+    "roles": {
+      "power": { "name_prefix": "axp", "name_suffix": "-pek" },
+      "gamepad": { "name": "ANBERNIC-keys" }
+    },
+    "keyboard_name": "ANBERNIC-keys"
+  },
+  "network": {
+    "wifi": false,
+    "bluetooth": false
+  },
+  "logo": {
+    "source": "generated",
+    "width": 480,
+    "height": 640
+  },
+  "capabilities": {
+    "wifi": "no",
+    "bluetooth": "no",
+    "touch": "unknown",
+    "vibration": "unknown",
+    "hdmi": "yes",
+    "gpu": "yes",
+    "rtc": "yes",
+    "usb_gadget": "yes",
+    "usb_host": "yes",
+    "brightness": "yes",
+    "audio": "yes"
+  },
+  "features": {
+    "bt_sink": "no",
+    "bt_source": "no",
+    "audio_hw_volume": "unknown",
+    "audio_hw_mute": "unknown",
+    "display_rotation": "unknown",
+    "display_output_switch": "yes",
+    "suspend": "yes",
+    "rtc_alarm": "unknown",
+    "usb_storage_export": "yes",
+    "usb_adb": "yes",
+    "usb_host_input": "yes",
+    "wifi_ap": "no"
+  }
+}

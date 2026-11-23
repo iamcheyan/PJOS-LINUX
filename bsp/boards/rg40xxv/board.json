@@ -1,0 +1,74 @@
+{
+  "schema": "pjos.board/1",
+  "id": "rg40xxv",
+  "soc": "allwinner/h700",
+  "firmware": { "mode": "image", "variant": "rg40xxv" },
+  "identity": {
+    "model": "RG40XX V",
+    "model_string": "RG40xxV",
+    "frontend_family": "rg40xx",
+    "firmware_prefix": "RG40XXV-",
+    "firmware_alias": null
+  },
+  "panel": {
+    "width": 640,
+    "height": 480,
+    "rotation_ccw": 0,
+    "logical_width": 640,
+    "logical_height": 480
+  },
+  "display": {
+    "brightness_node": "/sys/class/disp/disp/attr/enhance_bright",
+    "backend": "fbdev",
+    "node": "/dev/fb0",
+    "brightness_control": "ioctl"
+  },
+  "power": {
+    "battery": "axp2202-battery",
+    "charger": "axp2202-usb",
+    "long_press": "poweroff"
+  },
+  "input": {
+    "roles": {
+      "power": { "name_prefix": "axp", "name_suffix": "-pek" },
+      "gamepad": { "name": "ANBERNIC-keys" }
+    },
+    "keyboard_name": "ANBERNIC-keys"
+  },
+  "network": {
+    "wifi": true,
+    "bluetooth": true
+  },
+  "logo": {
+    "source": "generated",
+    "width": 640,
+    "height": 480
+  },
+  "capabilities": {
+    "wifi": "yes",
+    "bluetooth": "yes",
+    "touch": "unknown",
+    "vibration": "unknown",
+    "hdmi": "yes",
+    "gpu": "yes",
+    "rtc": "yes",
+    "usb_gadget": "yes",
+    "usb_host": "yes",
+    "brightness": "yes",
+    "audio": "yes"
+  },
+  "features": {
+    "bt_sink": "unknown",
+    "bt_source": "unknown",
+    "audio_hw_volume": "unknown",
+    "audio_hw_mute": "unknown",
+    "display_rotation": "unknown",
+    "display_output_switch": "yes",
+    "suspend": "yes",
+    "rtc_alarm": "unknown",
+    "usb_storage_export": "yes",
+    "usb_adb": "yes",
+    "usb_host_input": "yes",
+    "wifi_ap": "unknown"
+  }
+}

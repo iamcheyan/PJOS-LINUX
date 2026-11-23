@@ -1,0 +1,35 @@
+{
+  "schema": "pjos.soc/1",
+  "soc": "allwinner/h700",
+  "arch": "aarch64",
+  "kernel": {
+    "identity": { "release": "4.9.170", "abi_guard": ["release", "version", "banner"] },
+    "profiles": "kernel/profiles.json",
+    "modules": [
+      { "name": "mali_kbase", "source": "vendor", "flat": "/usr/lib/modules/mali_kbase.ko" },
+      { "name": "8821cs", "source": "vendor", "flat": "/usr/lib/modules/8821cs.ko" },
+      { "name": "rtl_btlpm", "source": "vendor", "flat": "/usr/lib/modules/rtl_btlpm.ko" },
+      { "name": "h700_speaker_amp", "source": "bsp", "build": "kernel/modules/speaker-amp" },
+      { "name": "h700_late_usb", "source": "bsp", "build": "kernel/modules/late-usb" }
+    ]
+  },
+  "dtb": { "source": "stock", "from": "boot-prefix.img" },
+  "harvest": { "list": "harvest.list", "base": "stock" },
+  "nodes": {
+    "display": { "fb": ["/dev/fb0"], "disp": ["/dev/disp"], "brightness_node": "/sys/class/disp/disp/attr/enhance_bright", "debugfs_switch": "/sys/kernel/debug/dispdbg" },
+    "input": { "glob": "/dev/input/event*" },
+    "power": { "supply_glob": "/sys/class/power_supply/*", "rtc": "/sys/class/rtc/rtc0", "long_press": "poweroff" },
+    "audio": { "card_prefix": "audiocodec" },
+    "network": { "wifi_iface": "wlan0", "wifi_ctrl": "/sys/class/misc/sunxi-wlan/rf-ctrl", "bt_uart": "ttyS1" },
+    "storage": { "boot_disk": "/dev/mmcblk0", "roles": { "boot": 4, "rootfs": 5, "data": 6, "primary": 7 } },
+    "led": { "glob": [] }
+  },
+  "hw_init": [
+    { "step": "load-gpu", "module": "mali_kbase", "when": "boot", "background": true },
+    { "step": "load-late-usb", "module": "h700_late_usb", "when": "boot", "background": true },
+    { "step": "load-bt-lpm", "module": "rtl_btlpm", "when": "boot", "background": true },
+    { "step": "load-wifi", "module": "8821cs", "when": "boot", "background": true, "pre": "discard-stale-sdio", "retry": { "unload": true, "hold_ms": 5000 } },
+    { "step": "speaker-amp", "module": "h700_speaker_amp", "when": "before-frontend", "params": { "apply": 1, "headphone_pop_fix": "from-board" } }
+  ],
+  "capabilities": { "wifi": "yes", "bluetooth": "yes", "touch": "unknown", "vibration": "unknown", "hdmi": "yes" }
+}

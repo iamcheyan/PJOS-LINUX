@@ -1,0 +1,12 @@
+{
+  "schema": "pjos.soc/1",
+  "soc": "allwinner/a133",
+  "compatible": ["allwinner,a133", "arm,sun50iw10p1"],
+  "arch": "aarch64",
+  "kernel": {
+    "modules": []
+  },
+  "nodes": {},
+  "hw_init": [],
+  "capabilities": { "wifi": "unknown", "bluetooth": "unknown", "touch": "unknown", "vibration": "unknown", "hdmi": "unknown" }
+}
