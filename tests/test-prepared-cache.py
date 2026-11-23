@@ -27,13 +27,15 @@ class PreparedCacheTests(unittest.TestCase):
         for filename in ("cache-pack.sh", "fetch-prepared.sh"):
             shutil.copy2(REPO / filename, self.root / filename)
         for filename in (
-            "device_profile.py", "docker-platform.sh", "prepare_stock.py",
+            "device_profile.py", "bsp_validate.py", "docker-platform.sh", "prepare_stock.py",
             "source_manifest.py", "kernel_gzip.py", "fdt_edit.py", "verify_harvest.py",
         ):
             shutil.copy2(REPO / "tools" / filename, self.root / "tools" / filename)
         profiles = json.loads((REPO / "devices.json").read_text())
         profiles["targets"] = profiles["targets"][:1]
         self.target = profiles["targets"][0]["id"]
+        for directory in ("schema", "allwinner/h700", f"boards/{self.target}"):
+            shutil.copytree(REPO / "bsp" / directory, self.root / "bsp" / directory)
         (self.root / "devices.json").write_text(json.dumps(profiles))
         (self.root / "manifest/harvest.list").write_text("/usr/lib32/libmali.so.0\n")
         self.work = self.root / "work" / self.target

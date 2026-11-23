@@ -34,7 +34,8 @@ class Profiles(unittest.TestCase):
         self.cli('all')
         result = json.loads(self.cli('compose', 'fakeboard'))
         self.assertEqual(result['soc']['nodes']['network'], {
-            'wifi_iface': 'test0', 'wifi_ctrl': '/sys/class/misc/sunxi-wlan/rf-ctrl'})
+            'wifi_iface': 'test0', 'wifi_ctrl': '/sys/class/misc/sunxi-wlan/rf-ctrl',
+            'bt_backend': 'rtl8821cs-h5'})
         out = self.root.parent / 'out'
         self.cli('generate', 'fakeboard', out)
         for name in ('soc', 'board', 'caps', 'features'):

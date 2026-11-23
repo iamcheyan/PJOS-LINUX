@@ -10,7 +10,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PROFILES = ROOT / "devices.json"
+LEGACY_PROFILES = ROOT / "devices.json"
+BSP_ROOT = ROOT / "bsp"
+DEFAULT_PROFILES = LEGACY_PROFILES
 REQUIRED_FIELDS = {
     "id",
     "model",
@@ -34,15 +36,49 @@ def die(message: str) -> "None":
     raise SystemExit(f"device-profile: {message}")
 
 
-def load_profiles(path: Path = DEFAULT_PROFILES) -> list[dict]:
+def _read_legacy(path: Path) -> list[dict]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         die(f"cannot read {path}: {error}")
     if data.get("schema") != 1 or not isinstance(data.get("targets"), list):
         die(f"unsupported profile schema in {path}")
+    return data["targets"]
 
-    targets = data["targets"]
+
+def image_profiles() -> list[dict]:
+    """BSP is authoritative. devices.json only preserves matrix ordering."""
+    import bsp_validate
+    if not (BSP_ROOT / 'boards').is_dir():
+        die('missing canonical BSP board profiles')
+    result = {}
+    for path in sorted((BSP_ROOT / 'boards').glob('*/board.json')):
+        try:
+            board = bsp_validate.compose(BSP_ROOT, path)['board']
+            if board['firmware']['mode'] == 'card':
+                continue
+            identity = board['identity']
+            profile = {
+                'id': board['id'], 'model': identity['model'],
+                'stockmod_prefix': identity['firmware_prefix'],
+                'baseos_device': identity['frontend_family'],
+                'model_string': identity['model_string'],
+                'bootlogo_width': board['logo']['width'],
+                'bootlogo_height': board['logo']['height'],
+                'panel_rotation_ccw': board['panel']['rotation_ccw'],
+                'wifi': board['network']['wifi'], 'bluetooth': board['network']['bluetooth'],
+            }
+            if identity.get('firmware_alias'):
+                profile['filename_alias'] = identity['firmware_alias']
+            result[board['id']] = profile
+        except (OSError, KeyError, ValueError) as error:
+            die(f'{path}: {error}')
+    # Keep legacy ordering for build-all; new targets are appended deterministically.
+    order = [p['id'] for p in _read_legacy(LEGACY_PROFILES)] if LEGACY_PROFILES.exists() else []
+    return [result[k] for k in dict.fromkeys(order + sorted(result)) if k in result]
+
+
+def _validate_profiles(targets: list[dict]) -> list[dict]:
     ids: set[str] = set()
     prefixes: set[str] = set()
     for profile in targets:
@@ -79,7 +115,17 @@ def load_profiles(path: Path = DEFAULT_PROFILES) -> list[dict]:
     return targets
 
 
-def get_profile(target: str, path: Path = DEFAULT_PROFILES) -> dict:
+
+def load_profiles(path: Path | None = None) -> list[dict]:
+    if path is not None:
+        return _validate_profiles(_read_legacy(path))
+    profiles = _validate_profiles(image_profiles())
+    if profiles != _read_legacy(LEGACY_PROFILES):
+        die('devices.json differs from BSP; regenerate with generate-legacy')
+    return profiles
+
+
+def get_profile(target: str, path: Path | None = None) -> dict:
     for profile in load_profiles(path):
         if profile["id"] == target:
             return profile
@@ -120,7 +166,7 @@ def find_image(directory: Path, profile: dict) -> Path:
     return matches[0]
 
 
-def shell_profile(profile: dict) -> None:
+def shell_profile(profile: dict, canonical: bool) -> None:
     mapping = {
         "PROFILE_TARGET": profile["id"],
         "PROFILE_MODEL": profile["model"],
@@ -133,15 +179,21 @@ def shell_profile(profile: dict) -> None:
         "PROFILE_WIFI": int(profile["wifi"]),
         "PROFILE_BLUETOOTH": int(profile["bluetooth"]),
     }
+    if canonical:
+        board_path = BSP_ROOT / 'boards' / profile['id'] / 'board.json'
+        soc = json.loads(board_path.read_text())['soc']
+        mapping.update(SOC_ID=soc.split('/')[-1], BOARD_ID=profile['id'],
+                       BOARD_PROFILE=board_path, SOC_PROFILE=BSP_ROOT / soc / 'soc.json')
     for key, value in mapping.items():
         print(f"{key}={shlex.quote(str(value))}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--profiles", type=Path, default=DEFAULT_PROFILES)
+    parser.add_argument("--profiles", type=Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("list")
+    subparsers.add_parser("generate-legacy")
     shell_parser = subparsers.add_parser("shell")
     shell_parser.add_argument("target")
     find_parser = subparsers.add_parser("find")
@@ -149,10 +201,12 @@ def main() -> int:
     find_parser.add_argument("target")
     arguments = parser.parse_args()
 
-    if arguments.command == "list":
+    if arguments.command == "generate-legacy":
+        print(json.dumps({"schema": 1, "targets": _validate_profiles(image_profiles())}, indent=2))
+    elif arguments.command == "list":
         print(" ".join(profile["id"] for profile in load_profiles(arguments.profiles)))
     elif arguments.command == "shell":
-        shell_profile(get_profile(arguments.target, arguments.profiles))
+        shell_profile(get_profile(arguments.target, arguments.profiles), arguments.profiles is None)
     elif arguments.command == "find":
         print(find_image(arguments.directory, get_profile(arguments.target, arguments.profiles)))
     return 0

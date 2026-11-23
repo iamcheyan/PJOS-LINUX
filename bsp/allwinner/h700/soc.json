@@ -19,10 +19,10 @@
     "display": { "fb": ["/dev/fb0"], "disp": ["/dev/disp"], "brightness_node": "/sys/class/disp/disp/attr/enhance_bright", "debugfs_switch": "/sys/kernel/debug/dispdbg" },
     "input": { "glob": "/dev/input/event*" },
     "power": { "supply_glob": "/sys/class/power_supply/*", "rtc": "/sys/class/rtc/rtc0", "long_press": "poweroff" },
-    "audio": { "card_prefix": "audiocodec" },
-    "network": { "wifi_iface": "wlan0", "wifi_ctrl": "/sys/class/misc/sunxi-wlan/rf-ctrl", "bt_uart": "ttyS1" },
-    "storage": { "boot_disk": "/dev/mmcblk0", "roles": { "boot": 4, "rootfs": 5, "data": 6, "primary": 7 } },
-    "led": { "glob": [] }
+    "audio": {"volume_control": "digital volume",  "card_prefix": "audiocodec" },
+    "network": {"bt_backend": "rtl8821cs-h5",  "wifi_iface": "wlan0", "wifi_ctrl": "/sys/class/misc/sunxi-wlan/rf-ctrl", "bt_uart": "ttyS1" },
+    "storage": {"layout": "baseos-ab-v1",  "boot_disk": "/dev/mmcblk0", "roles": { "boot": 4, "rootfs": 5, "data": 6, "primary": 7 } },
+    "led": {"work_node": "/sys/class/power_supply/axp2202-battery/work_led",  "glob": [] }
   },
   "hw_init": [
     { "step": "load-gpu", "module": "mali_kbase", "when": "boot", "background": true },

@@ -30,6 +30,8 @@
   },
   "input": {
     "roles": {
+      "directions": { "name": "dierct-keys-polled" },
+      "virtual_dpad": { "name": "PJOS D-pad" },
       "power": { "name_prefix": "axp", "name_suffix": "-pek" },
       "gamepad": { "name": "ANBERNIC-keys" }
     },
