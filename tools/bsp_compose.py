@@ -47,10 +47,13 @@ def dal_profile(profiles, release):
     for name, prefix in [('caps', 'cap'), ('features', 'feature')]:
         for key, value in profiles[name][name].items():
             values[f'{prefix}.{key}'] = value
-
     for section in ('panel', 'display'):
         for key, value in board.get(section, {}).items():
             values[f'display.{key}'] = ' '.join(value) if isinstance(value, list) else value
+    declared = board.get('features', {})
+    for key in ('storage_expand', 'storage_card_mount'):
+        if key not in values:
+            values[f'feature.{key}'] = declared.get(key, 'unknown')
     values['power.long_press'] = board.get('power', {}).get('long_press', 'unknown')
     values.setdefault('display.brightness_node', 'unknown')
     inputs = board.get('input', {})
@@ -81,19 +84,26 @@ def dal_profile(profiles, release):
     # The driver namespace stays in the BSP; project only the records the DAL consumes.
     for group in ('audio', 'network', 'storage', 'led'):
         for key, value in nodes.get(group, {}).items():
-            if isinstance(value, str):
+            if isinstance(value, (str, int, float)):
                 values[f'{group}.{key}'] = value
+            elif group == 'storage' and key == 'roles' and isinstance(value, dict):
+                for role, number in value.items():
+                    values[f'storage.role.{role}'] = f"{nodes['storage']['boot_disk']}p{number}"
+    for group in ('storage', 'network', 'led'):
+        for key, value in board.get(group, {}).items():
+            if isinstance(value, (str, int, float)):
+                values[f'{group}.{key}'] = value
+    for group in ('storage', 'network', 'led'):
+        for key, value in board.get('overrides', {}).get('nodes', {}).get(group, {}).items():
+            if isinstance(value, (str, int, float)):
+                values[f'{group}.{key}'] = value
+
     audio = board.get('audio', {})
     for key in ('card_name', 'volume_control', 'pcm_gain_control', 'pcm_gain_raw', 'soft_volume_control'):
         if key in audio:
             values[f'audio.{key}'] = audio[key]
-    storage = nodes.get('storage', {})
-    if 'boot_disk' in storage:
-        for role, number in storage.get('roles', {}).items():
-            values[f'storage.role.{role}'] = f"{storage['boot_disk']}p{number}"
     values['profile.source'] = f"bsp/boards/{board['id']}/board.json+bsp/{board['soc']}/soc.json"
     values['firmware.mode'] = board['firmware']['mode']
-    values['soc.compatible'] = ' '.join(profiles['soc'].get('compatible', []))
     feature = profiles['features']
     mask = 1 << 31
     for bit, name in enumerate(feature['bitmask_order']):

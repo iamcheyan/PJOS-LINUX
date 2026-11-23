@@ -95,6 +95,12 @@ case "$g" in
             led) [ $# -eq 1 ] || exit 2; case "$1" in on|off|auto) ;; *) exit 2;; esac
                 helper=${BASEOS_HW:-${0%/*}/baseos-hw}; exec "$helper" led set work "$1";;
             *) echo 'baseosctl: unknown power command' >&2; exit 2;; esac;;
-    audio|network|storage|led) helper=${BASEOS_HW:-${0%/*}/baseos-hw}; exec "$helper" "$g" "$@";;
+    audio|network|storage|led) [ $# -ge 1 ] || exit 2
+        case "$g:$1" in
+            storage:expand|storage:card-mount|led:list|led:info|led:vibrate|network:info|network:wifi-up|network:wifi-down|network:wifi-scan|network:bt-up|network:bt-down) ;;
+            storage:role|storage:usb-mode|led:set|network:mdns) [ $# -ge 2 ] || exit 2;;
+            *) exit 2;;
+        esac
+        helper=${BASEOS_HW:-${0%/*}/baseos-hw}; exec "$helper" "$g" "$@";;
     *) echo 'baseosctl: unknown command' >&2; exit 2;;
 esac

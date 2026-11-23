@@ -62,8 +62,9 @@ aux_audio() {
 
 aux_iface() {
     iface=$(dal_meta network.wifi_iface) || return 3
-    case $iface in ''|-*|*[!a-zA-Z0-9_-]*) return 3;; esac
+    case $iface in ''|unknown|-*|*[!a-zA-Z0-9_-]*) return 3;; esac
     netdir=${DAL_SYS_ROOT:-/sys}/class/net/$iface
+    [ -d "$netdir" ]
 }
 
 aux_network() {
@@ -79,18 +80,34 @@ aux_network() {
             if [ -d "${DAL_SYS_ROOT:-/sys}/class/bluetooth/hci0" ]; then printf 'bt_hci=hci0\n'; else printf 'bt_hci=unavailable\n'; fi
         fi;;
     wifi-up:1|wifi-down:1|wifi-scan:1|mdns:2)
-        [ "$1" != mdns ] || [ "$2" = refresh ] || return 2
-        aux_yes cap.wifi && aux_iface || return $?
-        [ -d "$netdir" ] || return 3
-        case $1 in wifi-up) ip link set dev "$iface" up;; wifi-down) ip link set dev "$iface" down;;
-            wifi-scan) iw dev "$iface" scan;; mdns) [ "$iface" = wlan0 ] || return 4
-                /usr/sbin/baseos-mdns refresh "$iface";; esac;;
+        if [ "$1" = mdns ]; then aux_yes cap.wifi && aux_iface || return $?
+        else aux_yes cap.wifi && aux_iface || return $?; fi
+        case $1 in
+            wifi-up) ip link set dev "$iface" up;;
+            wifi-down) ip link set dev "$iface" down;;
+            wifi-scan)
+                iw dev "$iface" scan | awk '
+                    /^BSS / { if (ssid != "") emit(); ssid=""; signal=""; security="open"; next }
+                    /^[[:space:]]*signal:/ { signal=$2; if (signal ~ /^-/) signal=int(100 + signal); next }
+                    /^[[:space:]]*SSID:/ { sub(/^[[:space:]]*SSID:[[:space:]]*/, ""); ssid=$0; next }
+                    /RSN:/ { security="wpa2"; next }
+                    /WPA:/ { if (security == "open") security="wpa"; next }
+                    END { if (ssid != "") emit() }
+                    function emit() { printf "ssid=%s signal=%s security=%s\n", ssid, signal, security }
+                '
+                ;;
+            mdns) aux_iface || return 3
+                mdns=$(dal_meta network.mdns_hook) || return 3
+                case $mdns in unknown|/*) [ "$mdns" != unknown ] || return 3;; *) return 3;; esac
+                [ -x "$mdns" ] || return 3
+                "$mdns" refresh "$iface";;
+        esac;;
     bt-up:1|bt-down:1)
         aux_yes cap.bluetooth || return $?
-        [ "$(dal_meta network.bt_backend)" = rtl8821cs-h5 ] && [ "$(dal_meta network.bt_uart)" = ttyS1 ] || return 3
-        if [ "$1" = bt-up ]; then
-            /mnt/vendor/ctrl/setBluetooth.sh init && hciconfig hci0 up && /usr/sbin/systemctl start bluetooth
-        else /usr/sbin/systemctl stop bluetooth && hciconfig hci0 down; fi;;
+        backend=$(dal_meta network.bt_hook) || return 3
+        case $backend in unknown|/*) [ "$backend" != unknown ] || return 3;; *) return 3;; esac
+        [ -x "$backend" ] || return 3
+        "$backend" "$1";;
     *) return 2;; esac
 }
 
@@ -122,7 +139,14 @@ aux_storage() {
                 /usr/sbin/usb-storage-mode prepare;;
             *) return 2;; esac;;
         # expand-storage can mkfs an occupied filesystem; only first boot owns it.
-        expand:1) return 4;;
+        expand:1|card-mount:1)
+            operation=$1
+            case $operation in expand) feature=storage_expand;; card-mount) feature=storage_card_mount;; esac
+            aux_yes "feature.$feature" || return $?
+            hook=$(dal_meta "storage.${operation}_hook") || return 3
+            case $hook in /*) ;; *) return 3;; esac
+            [ -x "$hook" ] || return 3
+            "$hook";;
         *) return 2;; esac
 }
 
@@ -130,6 +154,16 @@ aux_led() {
     case "$1:$#" in list:1|info:1) ;;
         set:3) [ "$2" = work ] || return 4
             case $3 in on) level=1;; off) level=0;; auto) return 4;; *) return 2;; esac;;
+        vibrate:2) case $2 in ''|*[!0-9]*) return 2;; esac
+            aux_yes cap.vibration || return $?
+            duration=$2
+            [ "$duration" -gt 0 ] 2>/dev/null || return 2
+            node=$(dal_meta led.vibration_node) || return 3
+            case $node in /sys/*) ;; *) return 3;; esac
+            node=${DAL_SYS_ROOT:-/sys}${node#/sys}
+            [ -f "$node" ] || return 3
+            printf '%s\n' "$duration" > "$node" || return 1
+            return 0;;
         *) return 2;; esac
     path=$(dal_meta led.work_node) || return 3
     supply=${path#/sys/class/power_supply/}; supply=${supply%/work_led}

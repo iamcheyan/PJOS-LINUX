@@ -56,7 +56,19 @@ dal_input_list() {
     done
 }
 dal_input_power_node() { dal_input_node power; }
-dal_input_key_state() { return 3; }
+dal_input_key_state() {
+    [ "$#" -eq 2 ] || return 2
+    role=$1 key=$2
+    case "$role" in keyboard|power|gamepad|touch|directions|virtual_dpad) ;; *) return 2;; esac
+    case "$key" in ''|*[!A-Za-z0-9_]*) return 2;; esac
+    node=$(dal_input_node "$role") || return $?
+    helper=${BASEOS_INPUT_STATE:-${BASEOS_SBIN_ROOT:-}/usr/sbin/baseos-input-state}
+    [ -x "$helper" ] || helper=/usr/sbin/baseos-input-state
+    [ -x "$helper" ] || return 3
+    devroot=$(dal_input_root)
+    case "$node" in /dev/*) node="$devroot$node";; esac
+    "$helper" "$node" "$key"
+}
 dal_input_menu_held() (
     dal_init || exit $?
     source=$(dal_meta input.menu_source) || exit $?

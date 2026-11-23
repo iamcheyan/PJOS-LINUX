@@ -35,6 +35,8 @@ python3 "$HERE/tools/bsp_compose.py" --target "$TARGET" --output "$BSP"
 for tool in busybox dropbearmulti curl fbsplash gptgrow gptslot sftp-server adbd axp-off charger-wait avahi-daemon boot-clock native-health baseos-regs e2fsck; do
   [ -x "$TOOLS/$tool" ] || { echo "missing $TOOLS/$tool (run build-tools.sh)"; exit 1; }
 done
+INPUT_HELPER="$TOOLS/baseos-input-state"
+docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" -v "$HERE/src/baseos-input-state":/src:ro -v "$INPUT_HELPER":/out/baseos-input-state alpine:3.20 sh -euc 'apk add --no-cache go >/dev/null; cd /src; CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /out/baseos-input-state .; chmod 755 /out/baseos-input-state'
 BASEOS_VERSION="$(tr -d ' \n' < "$HERE/VERSION")"
 # PocketJS SDK the launcher package is built against (pinned by the runtime
 # package) and the ABI that runtime exports. Reported by the SYSTEM page.
@@ -51,10 +53,10 @@ BASEOS_BUILD="$(git -C "$HERE" describe --always --dirty 2>/dev/null || echo unk
   echo "$TOOLS is stale for the current sources (run build-tools.sh)" >&2; exit 1; }
 python3 "$HERE/tools/source_manifest.py" verify "$WORK/source.json" "$TARGET"
 . "$SOC_DIR/prepare-rootfs.sh"
-
 docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   -v "$WORK":/work -v "$TOOLS":/tools:ro \
   -v "$HERE/tools/strip_gpu_module.py":/build/strip_gpu_module.py:ro \
+  -v "$INPUT_HELPER":/build/baseos-input-state:ro \
   -v "$SOC_DIR/build-rootfs-stage.sh":/build/soc-rootfs-stage.sh:ro \
   -v "$BSP":/bsp:ro -v "$HERE/assets":/assets:ro \
   -v "$HERE/work/pocketjs-runtime":/pocketjs-runtime:ro \
@@ -70,7 +72,6 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   -e POCKETJS_ABI="$POCKETJS_ABI" \
   -e BASEOS_VERSION="$BASEOS_VERSION" \
   -e BASEOS_BUILD="$BASEOS_BUILD" \
-  alpine:3.20 sh -euc '
   # Build tools remain outside the assembled rootfs. Native AArch64 binutils
   # can strip the vendor module without changing its loadable code or ABI.
   apk add --no-cache binutils python3 >/dev/null
@@ -109,7 +110,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   # onto those symlinks would follow them and overwrite busybox, so drop them
   # first — the same hazard the fbsplash applet has further down.
   rm -f "$R/usr/sbin/poweroff" "$R/usr/sbin/reboot"
-  cp -R /bsp/overlay/. "$R/"
+  install -m 0755 /build/baseos-input-state "$R/usr/sbin/baseos-input-state"
   mkdir -p "$R/etc/pjos"
   for manifest in board soc caps features; do
     install -m 0644 "/bsp/$manifest.json" "$R/etc/pjos/$manifest.json"
@@ -224,7 +225,7 @@ PY
            /usr/sbin/poweroff /usr/sbin/reboot \
            /usr/sbin/baseos-config /usr/sbin/baseos-mdns /usr/sbin/baseosctl /usr/sbin/baseos-hotkey-service /usr/sbin/h700-speaker-amp-load \
            /usr/sbin/baseos-startup-sound /usr/sbin/baseos-screen-idle \
-           /usr/sbin/usb-gadget-adb /usr/sbin/usb-storage-mode \
+           /usr/sbin/baseos-input-state \
            /mnt/vendor/ctrl/setBluetooth.sh; do
     [ -x "$R$s" ] || { echo "FATAL: $s is not executable in rootfs"; exit 1; }
   done

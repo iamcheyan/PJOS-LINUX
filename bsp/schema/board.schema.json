@@ -163,7 +163,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "layout": { "enum": ["baseos-ab-v1"] },
+        "storage_expand": {"$ref": "#/$defs/tri"},
+        "storage_card_mount": {"$ref": "#/$defs/tri"},
         "expand_target": { "type": "string" },
         "tf2_disk": { "type": ["string", "null"] }
       }
@@ -195,7 +196,7 @@
       "required": [
         "bt_sink", "bt_source", "audio_hw_volume", "audio_hw_mute",
         "display_rotation", "display_output_switch", "suspend", "rtc_alarm",
-        "usb_storage_export", "usb_adb", "usb_host_input", "wifi_ap"
+        "storage_expand", "storage_card_mount"
       ],
       "properties": {
         "bt_sink": { "$ref": "#/$defs/tri" },
@@ -209,7 +210,9 @@
         "usb_storage_export": { "$ref": "#/$defs/tri" },
         "usb_adb": { "$ref": "#/$defs/tri" },
         "usb_host_input": { "$ref": "#/$defs/tri" },
-        "wifi_ap": { "$ref": "#/$defs/tri" }
+        "wifi_ap": { "$ref": "#/$defs/tri" },
+        "storage_expand": { "$ref": "#/$defs/tri" },
+        "storage_card_mount": { "$ref": "#/$defs/tri" }
       }
     },
     "logo": {
@@ -232,9 +235,9 @@
         "input": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"glob": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "gamepad_name": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}}}]},
         "power": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"poweroff": {"type": ["string", "null"]}, "reboot": {"type": ["string", "null"]}, "suspend_node": {"type": ["string", "null"]}, "supply_glob": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "rtc": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "long_press": {"anyOf": [{"type": "null"}, {"enum": ["ignore", "poweroff", "unknown"]}]}}}]},
         "audio": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"card_prefix": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "lineout_control": {"type": ["string", "null"]}, "speaker_control": {"type": ["string", "null"]}, "volume_control": {"type": ["string", "null"]}}}]},
-        "network": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"wifi_iface": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "interfaces": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "wifi_ctrl": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "bt_uart": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "bt_backend": {"type": ["string", "null"]}}}]},
-        "storage": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"boot_disk": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "roles": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"boot": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "rootfs": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "data": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "primary": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}}}]}, "layout": {"type": ["string", "null"]}}}]},
-        "led": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"glob": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "work_node": {"type": ["string", "null"]}}}]}
+        "network": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"wifi_iface": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "interfaces": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "wifi_ctrl": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "bt_uart": {"type": ["string", "null"]}, "bt_backend": {"type": ["string", "null"]}, "bt_hook": {"type": ["string", "null"]}, "mdns_hook": {"type": ["string", "null"]}}}]},
+        "storage": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"boot_disk": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "roles": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"boot": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "rootfs": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "data": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "primary": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}}}]}, "layout": {"type": ["string", "null"]}, "expand_hook": {"type": ["string", "null"]}, "card-mount_hook": {"type": ["string", "null"]}}}]},
+        "led": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"glob": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "work_node": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "vibration_node": {"type": ["string", "null"]}}}]}
       }
     },
         "hw_init": { "$ref": "soc-1.json#/properties/hw_init" }
