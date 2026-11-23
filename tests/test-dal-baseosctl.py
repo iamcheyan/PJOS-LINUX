@@ -89,6 +89,28 @@ def main():
         hw = env | {'DAL_ENV': str(h700 / 'profile.env'), 'PJOS_PROFILE_DIR': str(h700),
                     'BASEOS_SOC_HOOK': str(hook), 'BASEOS_GPIO_DEBUG': str(gpio),
                     'BASEOS_SBINDIR': str(helpers), 'ACTION_LOG': str(marker)}
+        panel = helpers / 'usr/sbin/baseos-panel'
+        panel.parent.mkdir(parents=True)
+        level_path = tmp / 'panel-level'
+        level_path.write_text('180\n')
+        panel.write_text('''#!/bin/sh
+case "$1:$#" in
+    level:1) cat "$PANEL_LEVEL" ;;
+    level:2) printf '%s\\n' "$2" > "$PANEL_LEVEL" ;;
+    off:1) cp "$PANEL_LEVEL" "$PANEL_LEVEL.saved"; printf '0\\n' > "$PANEL_LEVEL" ;;
+    on:1) cp "$PANEL_LEVEL.saved" "$PANEL_LEVEL" ;;
+    *) exit 2 ;;
+esac
+''')
+        panel.chmod(0o755)
+        panel_hw = hw | {'PJOS_SYS_ROOT': '', 'PJOS_DEV_ROOT': '',
+                         'BASEOS_SBIN_ROOT': str(helpers), 'PANEL_LEVEL': str(level_path)}
+        require(run(panel_hw, 'display', 'blank', 'on', 'idle').returncode == 0
+                and level_path.read_text() == '0\n', 'H700 adapter did not blank')
+        require(run(panel_hw, 'display', 'set-brightness', '77').returncode == 0
+                and level_path.read_text() == '0\n', 'H700 slider woke the blank panel')
+        require(run(panel_hw, 'display', 'blank', 'off', 'idle').returncode == 0
+                and level_path.read_text() == '77\n', 'H700 adapter failed to restore the requested level')
         for level, held in [('hi', 'no'), ('lo', 'yes')]:
             gpio.write_text(f' gpio-17 ( |GPIO Key Menu ) in {level}\n')
             result = run(hw, 'input', 'menu-held')
