@@ -108,14 +108,13 @@ fn kanade_call<S: AsRef<str>>(verb: S, arg: &str) -> String {
         return "ok".into();
     }
     if verb == "screen_off" {
-        for helper in ["/usr/sbin/baseos-panel", "/storage/System/bin/baseos-panel"] {
-            if !std::path::Path::new(helper).is_file() { continue; }
-            return match Command::new(helper).arg("off").stdin(Stdio::null()).stderr(Stdio::null()).output() {
-                Ok(out) if out.status.success() => "ok".into(),
-                _ => "error:screen-off".into(),
-            };
-        }
-        return "error:screen-helper".into();
+        let ctl = std::env::var_os("PJOS_BASEOSCTL").unwrap_or_else(|| "/usr/sbin/baseosctl".into());
+        if !std::path::Path::new(&ctl).is_absolute() { return "error:screen-helper".into(); }
+        return match Command::new(ctl).args(["display", "blank", "on", "manual"])
+            .stdin(Stdio::null()).stderr(Stdio::null()).output() {
+            Ok(out) if out.status.success() => "ok".into(),
+            _ => "error:screen-off".into(),
+        };
     }
     // The share password arrives hex-encoded: argv is readable by every process
     // on the panel, so a passphrase must not sit in plain sight in \`ps\`.

@@ -16,8 +16,16 @@ native = root / 'native.rs'
 s = lib.read_text()
 n = native.read_text()
 if 'fn pjos_layout(' not in s:
-    # Preserve upstream USB input behavior for secondary devices. The primary
-    # gamepad has an explicit map and never takes the upstream branch.
+    # Publish only board-declared bindings. Secondary inputs use the same key
+    # mapping but native.rs restricts the axis rules to the primary input.
+    s = once(s, '    fn decoder() -> Decoder {\n        Decoder::new(',
+             '    fn decoder() -> Decoder {\n        let mut decoder = Decoder::new(')
+    s = once(s, '        .unwrap()\n    }\n    fn report(',
+             '''        .unwrap();
+        decoder.pjos_layout("schema=pjos.input/1\\nCROSS key 44 57\\nSTART key 28\\n").unwrap();
+        decoder
+    }
+    fn report(''')
     start = s.index('        let keys = &self.published.keys;')
     end = s.index('        if self.pointer_enabled {', start)
     s = s[:start] + """        for &(code, mask) in &self.layout_keys {
