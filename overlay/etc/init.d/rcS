@@ -308,19 +308,9 @@ if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-screen-idle ]; then
 	/usr/sbin/baseos-screen-idle </dev/null >/dev/null 2>&1 &
 fi
 
-# Start the sole hotkey owner with the profile's resolved roles and policy.
-if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-hotkeys ]; then
-	if [ "$long_press" != poweroff ] && [ "$long_press" != ignore ]; then
-		log "hotkeys: unsupported power.long_press=${long_press:-unknown}; skipped"
-	elif ! power_dev=$(/usr/sbin/baseosctl input node power) || [ ! -c "$power_dev" ]; then
-		log 'hotkeys: no power input role; skipped'
-	elif ! pad_dev=$(/usr/sbin/baseosctl input node gamepad) || [ ! -c "$pad_dev" ]; then
-		log 'hotkeys: no gamepad input role; skipped'
-	else
-		/usr/sbin/baseos-hotkeys --power-dev "$power_dev" --pad-dev "$pad_dev" \
-			--long-press "$long_press" --runtime "pocket-linux-kms,retroarch" \
-			</dev/null >/dev/null 2>&1 &
-	fi
+# The system input owner re-resolves roles after a device is disconnected.
+if [ "$USB_STORAGE_MODE" -eq 0 ] && [ -x /usr/sbin/baseos-hotkey-service ]; then
+    /usr/sbin/baseos-hotkey-service </dev/null >/run/baseos-hotkeys.log 2>&1 &
 fi
 
 # Dev image extras (serial getty is in inittab; this starts SSH).

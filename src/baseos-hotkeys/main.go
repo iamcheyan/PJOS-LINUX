@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,13 +22,6 @@ const (
 	evKey = 0x01
 
 	keyPower  = 116 // KEY_POWER, axp2202-pek
-	btnSelect = 310 // BTN_TL. Physical Select on the RG34XX.
-	btnStart  = 311 // BTN_TR. Physical Start.
-	// Linux calls 314/315 BTN_SELECT/BTN_START. This board's DTB wires those
-	// codes to the L2/R2 shoulders. Select and Start are 310 and 311, so the
-	// quit combo must not listen here or L2+R2 would leave the game.
-	btnL2 = 314
-	btnR2 = 315
 
 	comboHold = 1500 * time.Millisecond
 	longPress = 2 * time.Second
@@ -54,6 +48,46 @@ type options struct {
 	forceQuitMarker string
 	poweroff        string
 	dryRun          bool
+}
+
+type hotkeyBindings struct {
+    selectKey, startKey, l2, r2 uint16
+}
+
+var bindings hotkeyBindings
+
+// Use the same board-owned Linux key rules as the runtime. The first gamepad
+// code (>= BTN_MISC) is the physical button; keyboard aliases remain runtime-only.
+func parseHotkeyBindings(text string) (hotkeyBindings, error) {
+    var result hotkeyBindings
+    var seen uint8
+    lines := strings.Split(strings.TrimSpace(text), "\n")
+    if len(lines) == 0 || lines[0] != "schema=pjos.input/1" { return result, fmt.Errorf("invalid input map schema") }
+    for _, line := range lines[1:] {
+        fields := strings.Fields(line)
+        if len(fields) < 3 || fields[1] != "key" { continue }
+        var destination *uint16
+        var bit uint8
+        switch fields[0] {
+        case "SELECT": destination, bit = &result.selectKey, 1
+        case "START": destination, bit = &result.startKey, 2
+        case "ZL": destination, bit = &result.l2, 4
+        case "ZR": destination, bit = &result.r2, 8
+        default: continue
+        }
+        for _, word := range fields[2:] {
+            n, err := strconv.ParseUint(word, 10, 16)
+            if err != nil || n > 767 { return result, fmt.Errorf("invalid hotkey code %q", word) }
+            if n >= 256 { *destination = uint16(n); seen |= bit; break }
+        }
+    }
+    if seen != 15 { return result, fmt.Errorf("input map lacks physical hotkey bindings") }
+    if result.selectKey == result.startKey || result.l2 == result.r2 ||
+        result.selectKey == result.l2 || result.selectKey == result.r2 ||
+        result.startKey == result.l2 || result.startKey == result.r2 {
+        return result, fmt.Errorf("hotkey codes overlap")
+    }
+    return result, nil
 }
 
 var opt options
@@ -466,7 +500,7 @@ func (k *powerKey) step(value int32, now time.Time, policy string) string {
 	return action
 }
 
-func watchPower(events <-chan inputEvent) {
+func watchPower(events <-chan inputEvent, failures <-chan error) error {
 	var key powerKey
 	var timer *time.Timer
 	var deadline <-chan time.Time
@@ -482,9 +516,11 @@ func watchPower(events <-chan inputEvent) {
 	for {
 		var action string
 		select {
+		case err := <-failures:
+			return err
 		case ev, ok := <-events:
 			if !ok {
-				return
+				return io.EOF
 			}
 			if ev.Type != evKey || ev.Code != keyPower || ev.Value < 0 || ev.Value > 2 {
 				continue
@@ -514,15 +550,14 @@ func watchPower(events <-chan inputEvent) {
 	}
 }
 
-func readLoop(f *os.File, handle func(inputEvent)) {
+func readLoop(f *os.File, handle func(inputEvent)) error {
 	var ev inputEvent
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(&ev)), int(unsafe.Sizeof(ev)))
 	for {
-		n, err := f.Read(buf)
-		if err != nil || n != len(buf) {
-			logf("watch %s: read ended: %d bytes, %v", f.Name(), n, err)
-			return
-		}
+        _, err := io.ReadFull(f, buf)
+        if err != nil {
+            return fmt.Errorf("watch %s: %w", f.Name(), err)
+        }
 		handle(ev)
 	}
 }
@@ -533,15 +568,15 @@ func handlePad(ev inputEvent) {
 	}
 	woke := ev.Value == 1 && wakePanel()
 	switch ev.Code {
-	case btnSelect:
+	case bindings.selectKey:
 		noteCombo(&combo.selectDown, &combo.selectDownAt, &combo.selectReleased, ev.Value)
-	case btnStart:
+	case bindings.startKey:
 		noteCombo(&combo.startDown, &combo.startDownAt, &combo.startReleased, ev.Value)
-	case btnL2:
+	case bindings.l2:
 		if !woke {
 			onBrightnessKey(-1, ev.Value)
 		}
-	case btnR2:
+	case bindings.r2:
 		if !woke {
 			onBrightnessKey(1, ev.Value)
 		}
@@ -577,6 +612,12 @@ func openInput(path string) (*os.File, error) {
 }
 
 func run() error {
+    profile := os.Getenv("PJOS_PROFILE_DIR")
+    if profile == "" { profile = "/etc/pjos" }
+    mapping, err := os.ReadFile(filepath.Join(profile, "input.map"))
+    if err != nil { return err }
+    bindings, err = parseHotkeyBindings(string(mapping))
+    if err != nil { return err }
 	lock, err := lockOwner("/run/baseos-hotkeys.lock")
 	if err == syscall.EWOULDBLOCK {
 		logf("already running; exiting")
@@ -598,18 +639,19 @@ func run() error {
 	defer pad.Close()
 	logf("start power=%s pad=%s long-press=%s", opt.powerDev, opt.padDev, opt.longPolicy)
 	go watchCombo()
-	go readLoop(pad, handlePad)
+    failures := make(chan error, 2)
+    done := make(chan struct{})
+    defer close(done)
+    go func() { failures <- readLoop(pad, handlePad) }()
 	events := make(chan inputEvent)
 	go func() {
-		defer close(events)
-		readLoop(power, func(ev inputEvent) {
+        failures <- readLoop(power, func(ev inputEvent) {
 			if ev.Type == evKey && ev.Code == keyPower {
-				events <- ev
+                select { case events <- ev: case <-done: }
 			}
 		})
 	}()
-	watchPower(events)
-	return nil
+    return watchPower(events, failures)
 }
 
 func main() {

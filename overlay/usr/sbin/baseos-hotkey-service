@@ -1,0 +1,26 @@
+#!/bin/sh
+# One system owner, independent of the foreground launcher or game. Resolve
+# roles again after disconnection; never reuse an event number from last boot.
+set -u
+CTL=${PJOS_BASEOSCTL:-/usr/sbin/baseosctl}
+DAEMON=${BASEOS_HOTKEY_DAEMON:-/usr/sbin/baseos-hotkeys}
+. "${DAL_LIB:-/usr/lib/baseos/dal.sh}" || exit 1
+dal_init || exit $?
+policy=$(dal_meta power.long_press) || exit $?
+case "$policy" in poweroff|ignore) ;; *) echo 'hotkeys: unknown long-press policy' >&2; exit 3;; esac
+state=${PJOS_RUN_ROOT:-}/run
+mkdir -p "$state" || exit 1
+exec 9>"$state/baseos-hotkey-service.lock" || exit 1
+flock -n 9 || exit 0
+child=
+trap '[ -z "$child" ] || kill "$child" 2>/dev/null || :; exit 0' HUP INT TERM
+while :; do
+    power=$("$CTL" input node power) && pad=$("$CTL" input node gamepad) || { sleep 1; continue; }
+    "$DAEMON" --baseosctl "$CTL" --power-dev "$power" --pad-dev "$pad" --long-press "$policy" 9>&- &
+    child=$!
+    wait "$child"; status=$?
+    child=
+    # Exit zero means another daemon already owns the devices. Do not fight it.
+    [ "$status" -ne 0 ] || exit 0
+    sleep 1
+done
