@@ -20,16 +20,15 @@ class ScreenIdle(unittest.TestCase):
                 path = base/'bin'/name
                 path.write_text('#!/bin/sh\n'+code)
                 path.chmod(0o755)
-            program('panel', 'case "$1" in\nlevel) echo 50;;\noff) echo off >> "$TEST_BASE/actions"; touch "$TEST_BASE/run/panel.off";;\non) echo on >> "$TEST_BASE/actions"; rm -f "$TEST_BASE/run/panel.off";;\nesac\n')
+            program('baseosctl', 'if [ "$1" = power ]; then echo online=0; else echo "$3" >> "$TEST_BASE/actions"; fi\n')
             program('date', 'case "$1" in +%s) echo 100;; *) echo now;; esac\n')
             program('stat', 'cat "$TEST_BASE/last"\n')
             program('sleep', 'n=$(cat "$TEST_BASE/count" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$TEST_BASE/count"; echo 100 > "$TEST_BASE/last"; if [ "$n" -ge 3 ]; then kill -TERM "$PPID"; fi\n')
-            source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'missing-runtime')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseos-panel', str(base/'bin/panel')).replace('/mnt/sdcard/System/bin/baseos-panel', str(base/'missing-panel'))
-            daemon = base/'idle.sh'
-            daemon.write_text(source)
+            source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'missing-runtime')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseosctl', str(base/'bin/baseosctl'))
+            daemon = base/'idle.sh'; daemon.write_text(source)
             env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
             subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)
-            self.assertEqual((base/'actions').read_text().splitlines(), ['off', 'on'])
+            self.assertEqual((base/'actions').read_text().splitlines(), ['on', 'off'])
     def test_audio_owner_defers_poweroff_but_stale_marker_does_not(self):
         for owner, expected in [(str(os.getpid()), False), ('99999999', True)]:
             with self.subTest(owner=owner), tempfile.TemporaryDirectory() as d:
@@ -45,8 +44,8 @@ class ScreenIdle(unittest.TestCase):
                 program('poweroff', 'touch "$TEST_BASE/powered-off"')
                 program('sync', 'exit 0')
                 program('sleep', 'kill -TERM "$PPID"')
-                program('panel', 'echo 50')
-                source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseos-panel', str(base/'bin/panel')).replace('/usr/sbin/baseos-poweroff', str(base/'bin/poweroff')).replace('/mnt/sdcard/System/bin/baseos-save-state', str(base/'none')).replace('/storage/System/bin/baseos-save-state', str(base/'none'))
+                program('baseosctl', 'if [ "$1" = power ]; then echo online=0; else :; fi')
+                source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseosctl', str(base/'bin/baseosctl')).replace('/usr/sbin/baseos-poweroff', str(base/'bin/poweroff')).replace('/mnt/sdcard/System/bin/baseos-save-state', str(base/'none')).replace('/storage/System/bin/baseos-save-state', str(base/'none'))
                 daemon = base/'idle.sh'; daemon.write_text(source)
                 env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
                 subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)
@@ -67,8 +66,8 @@ class ScreenIdle(unittest.TestCase):
             program('poweroff', 'touch "$TEST_BASE/powered-off"')
             program('sync', 'exit 0')
             program('sleep', 'kill -TERM "$PPID"')
-            program('panel', 'echo 50')
-            source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/sys/class/power_supply/*', str(base/'sys/power_supply')+'/*').replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseos-panel', str(base/'bin/panel')).replace('/usr/sbin/baseos-poweroff', str(base/'bin/poweroff')).replace('/mnt/sdcard/System/bin/baseos-save-state', str(base/'none')).replace('/storage/System/bin/baseos-save-state', str(base/'none'))
+            program('baseosctl', 'echo online=1')
+            source = SOURCE.read_text().replace('/run/', str(base/'run')+'/').replace('/tmp/baseos-screen-idle.log', str(base/'log')).replace('/storage/.config/baseos/screen-idle.conf', str(base/'config')).replace('/storage/.config/pocketjs/runtime.conf', str(base/'none')).replace('/dev/input/event*', str(base/'input/event*')).replace('/usr/sbin/baseosctl', str(base/'bin/baseosctl')).replace('/usr/sbin/baseos-poweroff', str(base/'bin/poweroff')).replace('/mnt/sdcard/System/bin/baseos-save-state', str(base/'none'))
             daemon = base/'idle.sh'; daemon.write_text(source)
             env = dict(os.environ, TEST_BASE=d, PATH=str(base/'bin')+':'+os.environ['PATH'])
             subprocess.run(['sh', str(daemon)], env=env, timeout=3, capture_output=True)

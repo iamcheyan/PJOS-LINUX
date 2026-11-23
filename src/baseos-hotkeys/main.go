@@ -1,27 +1,5 @@
-// baseos-hotkeys — the buttons BaseOS is missing on H700 handhelds.
-//
-// Two things the kernel delivers but nobody listened to:
-//
-//   - the PMIC power key (axp2202-pek, /dev/input/event0). A short press turns the
-//     panel off (screen-off sleep: everything keeps running, any key wakes it), a
-//     press held for two seconds powers the device off. ROCKNIX maps the short
-//     press to suspend via logind; BaseOS has no logind and its kernel suspend is
-//     unreliable, so the panel goes dark instead of freezing the board.
-//
-//   - SELECT + START held for 1.5 seconds on the gamepad. ROCKNIX quits the
-//     running program on that combo; here the "program" may be a PocketJS app
-//     (pocket-linux-kms) or the emulator (retroarch), so the daemon terminates
-//     whichever owns the panel and the frontend supervisor respawns the launcher.
-//     A short press does nothing: 1.5 seconds of intent avoids a lost game.
-//
-//   - L2 and R2 while a GBA ROM is running. They are not GBA buttons. L2 asks
-//     baseos-panel to step the backlight down, R2 steps it up. The same binary
-//     owns blanking and wake, so the saved level, the idle blanker and the
-//     power key stay on one value. On the launcher those keys do nothing here.
-//
-// Build (static, for the card):
-//
-//	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o baseos-hotkeys .
+// baseos-hotkeys handles resolved power and gamepad roles. A short power
+// press toggles manual blanking; the board policy controls a two-second hold.
 package main
 
 import (
@@ -30,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,7 +18,6 @@ import (
 )
 
 const (
-	evSyn = 0x00
 	evKey = 0x01
 
 	keyPower  = 116 // KEY_POWER, axp2202-pek
@@ -69,9 +47,7 @@ type inputEvent struct {
 type options struct {
 	powerDev        string
 	padDev          string
-	panel           string
-	level           string
-	marker          string
+	longPolicy      string
 	logPath         string
 	runtime         string
 	foregroundApp   string
@@ -96,142 +72,32 @@ func logf(format string, args ...any) {
 	f.WriteString(line + "\n")
 }
 
-// panelValue reads the first integer of the backlight node. The vendor node holds
-// two space-separated numbers ("50 50"), so a plain Atoi on the whole file fails
-// and every read looked like "panel is on".
-func panelValue() (int, bool) {
-	b, err := os.ReadFile(opt.panel)
-	if err != nil {
-		return 0, false
-	}
-	fields := strings.Fields(string(b))
-	if len(fields) == 0 {
-		return 0, false
-	}
-	v, err := strconv.Atoi(fields[0])
-	if err != nil {
-		return 0, false
-	}
-	return v, true
-}
+var baseosctl string
 
-// realBrightness reads the driver's backlight. The helper's "level" command
-// prints that read-back. The enhance_bright node is not the backlight, so it is
-// only a fallback when the helper is absent.
-func realBrightness() (int, bool) {
-	if helper := panelHelper(); helper != "" && !opt.dryRun {
-		out, err := exec.Command(helper, "level").Output()
-		if err == nil {
-			v, convErr := strconv.Atoi(strings.TrimSpace(string(out)))
-			if convErr == nil {
-				return v, true
-			}
-		}
-	}
-	return panelValue()
-}
+var displayMu sync.Mutex
 
-// panelLit reports whether the panel is currently lit; unknown counts as lit so a
-// missing node never leaves the user staring at a black screen.
-func panelLit() bool {
-	v, ok := realBrightness()
-	if !ok {
-		return true
-	}
-	return v > 0
-}
-
-func panelGet() int {
-	v, ok := panelValue()
-	if !ok || v <= 0 {
-		return 50
-	}
-	return v
-}
-
-func panelSet(level int) error {
+// Callers serialize display operations, including brightness read/modify/write.
+func display(args ...string) bool {
 	if opt.dryRun {
-		logf("dry-run: panel <- %d", level)
-		return nil
-	}
-	return os.WriteFile(opt.panel, []byte(strconv.Itoa(level)), 0o644)
-}
-
-// panelHelper returns the baseos-panel binary, which owns the FBIOBLANK ioctl.
-func panelHelper() string {
-	for _, candidate := range []string{"/mnt/sdcard/System/bin/baseos-panel", "/usr/sbin/baseos-panel"} {
-		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
-			return candidate
-		}
-	}
-	return ""
-}
-
-// panelOff/panelOn prefer the helper (real panel power down) and fall back to the
-// brightness register, which only dims the image.
-func panelOff() bool {
-	if helper := panelHelper(); helper != "" {
-		if err := exec.Command(helper, "off").Run(); err == nil {
-			os.WriteFile(opt.marker, nil, 0o644)
-			return true
-		}
-	}
-	if panelSet(0) == nil {
-		os.WriteFile(opt.marker, nil, 0o644)
+		logf("dry-run: display %s", strings.Join(args, " "))
 		return true
 	}
-	return false
+	out, err := exec.Command(baseosctl, append([]string{"display"}, args...)...).CombinedOutput()
+	if err != nil {
+		logf("display %v: %v %s", args, err, out)
+	}
+	return err == nil
 }
 
-func panelOn() bool {
-	if helper := panelHelper(); helper != "" {
-		if err := exec.Command(helper, "on").Run(); err == nil {
-			os.Remove(opt.marker)
-			return true
-		}
-	}
-	level := 50
-	if b, err := os.ReadFile(opt.level); err == nil {
-		if v, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && v > 0 {
-			level = v
-		}
-	}
-	if panelSet(level) == nil {
-		os.Remove(opt.marker)
-		return true
-	}
-	return false
+func manualBlanked() bool {
+	_, err := os.Stat(os.Getenv("PJOS_RUN_ROOT") + "/run/baseos-display.manual")
+	return err == nil
 }
 
-func toggleSleep() {
-	if _, err := os.Stat(opt.marker); err != nil && panelLit() {
-		if !panelOff() {
-			logf("power: panel off failed")
-			return
-		}
-		logf("power: screen off")
-		return
-	}
-	if !panelOn() {
-		logf("power: panel on failed")
-		return
-	}
-	logf("power: screen on")
-}
-
-// wakePanel restores the level saved before a power-key sleep and clears the
-// marker, so screen-idle takes over again. Any face button does this, which is how
-// a handheld is expected to wake.
 func wakePanel() bool {
-	if _, err := os.Stat(opt.marker); err != nil {
-		return false
-	}
-	if !panelOn() {
-		logf("wake: panel on failed")
-		return false
-	}
-	logf("wake: panel on")
-	return true
+	displayMu.Lock()
+	defer displayMu.Unlock()
+	return manualBlanked() && display("blank", "off", "manual")
 }
 
 // cmdlineIsGBA reports whether a RetroArch command line is a GBA ROM. The
@@ -261,37 +127,35 @@ var bright = struct {
 	stop chan struct{}
 }{}
 
-var brightStep sync.Mutex
-
 func adjustBrightness(dir int) {
-	brightStep.Lock()
-	defer brightStep.Unlock()
 	if !gbaSession() {
 		return
 	}
-	if _, err := os.Stat(opt.marker); err == nil {
+	displayMu.Lock()
+	defer displayMu.Unlock()
+	if manualBlanked() {
 		return
-	}
-	helper := panelHelper()
-	if helper == "" {
-		logf("brightness: baseos-panel missing")
-		return
-	}
-	arg := "down"
-	if dir > 0 {
-		arg = "up"
 	}
 	if opt.dryRun {
-		logf("dry-run: brightness %s", arg)
+		logf("dry-run: brightness step %d", dir)
 		return
 	}
-	out, err := exec.Command(helper, arg).CombinedOutput()
-	text := strings.TrimSpace(string(out))
+	out, err := exec.Command(baseosctl, "display", "get-brightness").Output()
 	if err != nil {
-		logf("brightness: %s failed: %v %s", arg, err, text)
+		logf("brightness: read failed: %v", err)
 		return
 	}
-	logf("brightness: %s %s", arg, text)
+	level, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || level <= 0 || level > 255 {
+		return
+	}
+	next := min(255, level+15)
+	if dir < 0 {
+		next = min(level, max(10, level-15))
+	}
+	if next != level {
+		display("set-brightness", strconv.Itoa(next))
+	}
 }
 
 func stopBrightnessLocked() {
@@ -572,99 +436,201 @@ func noteCombo(down *bool, downAt *time.Time, released *time.Time, value int32) 
 	}
 }
 
-func readLoop(dev string) {
-	f, err := os.Open(dev)
-	if err != nil {
-		logf("watch %s: %v", dev, err)
-		return
-	}
-	defer f.Close()
+// powerKey is owned by the power loop; the reader never touches its timer or
+// state. Keep down set after firing so repeats cannot start another gesture.
+type powerKey struct {
+	down, consumed bool
+	deadline       time.Time
+}
 
-	size := int(unsafe.Sizeof(inputEvent{}))
-	var powerDownAt time.Time
+const deadlineReached = -1
+
+func (k *powerKey) step(value int32, now time.Time, policy string) string {
+	if value == 1 && !k.down {
+		*k = powerKey{down: true, deadline: now.Add(longPress)}
+		return ""
+	}
+	if !k.down || (value != 0 && value != deadlineReached) {
+		return ""
+	}
+	action := ""
+	if !k.consumed && !now.Before(k.deadline) {
+		k.consumed = true
+		action = policy
+	} else if value == 0 && !k.consumed {
+		action = "toggle"
+	}
+	if value == 0 {
+		*k = powerKey{}
+	}
+	return action
+}
+
+func watchPower(events <-chan inputEvent) {
+	var key powerKey
+	var timer *time.Timer
+	var deadline <-chan time.Time
+	stopTimer := func() {
+		if deadline != nil {
+			if !timer.Stop() {
+				<-deadline
+			}
+			deadline = nil
+		}
+	}
+	defer stopTimer()
 	for {
-		buf := make([]byte, size)
+		var action string
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Type != evKey || ev.Code != keyPower || ev.Value < 0 || ev.Value > 2 {
+				continue
+			}
+			wasDown := key.down
+			action = key.step(ev.Value, time.Now(), opt.longPolicy)
+			if !wasDown && key.down {
+				timer = time.NewTimer(time.Until(key.deadline))
+				deadline = timer.C
+			} else if ev.Value == 0 {
+				stopTimer()
+			}
+		case <-deadline:
+			deadline = nil
+			action = key.step(deadlineReached, key.deadline, opt.longPolicy)
+		}
+		switch action {
+		case "toggle":
+			displayMu.Lock()
+			display("blank", "toggle", "manual")
+			displayMu.Unlock()
+		case "poweroff":
+			powerOff()
+		case "ignore":
+			logf("power: long press ignored")
+		}
+	}
+}
+
+func readLoop(f *os.File, handle func(inputEvent)) {
+	var ev inputEvent
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&ev)), int(unsafe.Sizeof(ev)))
+	for {
 		n, err := f.Read(buf)
-		if err != nil || n != size {
-			logf("watch %s: read ended: %v", dev, err)
+		if err != nil || n != len(buf) {
+			logf("watch %s: read ended: %d bytes, %v", f.Name(), n, err)
 			return
 		}
-		ev := *(*inputEvent)(unsafe.Pointer(&buf[0]))
-		if ev.Type != evKey {
-			continue
-		}
-		woke := false
-		if ev.Value == 1 && ev.Code != keyPower {
-			woke = wakePanel()
-		}
-		switch ev.Code {
-		case keyPower:
-			if ev.Value == 1 {
-				powerDownAt = time.Now()
-			} else if ev.Value == 0 && !powerDownAt.IsZero() {
-				held := time.Since(powerDownAt)
-				powerDownAt = time.Time{}
-				if held >= longPress {
-					powerOff()
-				} else {
-					toggleSleep()
-				}
-			}
-		case btnSelect:
-			noteCombo(&combo.selectDown, &combo.selectDownAt, &combo.selectReleased, ev.Value)
-		case btnStart:
-			noteCombo(&combo.startDown, &combo.startDownAt, &combo.startReleased, ev.Value)
-		case btnL2:
-			// The press that wakes the panel must not also dim it.
-			if woke {
-				break
-			}
+		handle(ev)
+	}
+}
+
+func handlePad(ev inputEvent) {
+	if ev.Type != evKey || ev.Code == keyPower {
+		return
+	}
+	woke := ev.Value == 1 && wakePanel()
+	switch ev.Code {
+	case btnSelect:
+		noteCombo(&combo.selectDown, &combo.selectDownAt, &combo.selectReleased, ev.Value)
+	case btnStart:
+		noteCombo(&combo.startDown, &combo.startDownAt, &combo.startReleased, ev.Value)
+	case btnL2:
+		if !woke {
 			onBrightnessKey(-1, ev.Value)
-		case btnR2:
-			if woke {
-				break
-			}
+		}
+	case btnR2:
+		if !woke {
 			onBrightnessKey(1, ev.Value)
 		}
 	}
 }
 
+func lockOwner(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func openInput(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err == nil && info.Mode()&os.ModeCharDevice == 0 {
+		err = fmt.Errorf("%s: not a character device", path)
+	}
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func run() error {
+	lock, err := lockOwner("/run/baseos-hotkeys.lock")
+	if err == syscall.EWOULDBLOCK {
+		logf("already running; exiting")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer lock.Close() // Never unlink: subsequent processes must lock the same inode.
+	power, err := openInput(opt.powerDev)
+	if err != nil {
+		return err
+	}
+	defer power.Close()
+	pad, err := openInput(opt.padDev)
+	if err != nil {
+		return err
+	}
+	defer pad.Close()
+	logf("start power=%s pad=%s long-press=%s", opt.powerDev, opt.padDev, opt.longPolicy)
+	go watchCombo()
+	go readLoop(pad, handlePad)
+	events := make(chan inputEvent)
+	go func() {
+		defer close(events)
+		readLoop(power, func(ev inputEvent) {
+			if ev.Type == evKey && ev.Code == keyPower {
+				events <- ev
+			}
+		})
+	}()
+	watchPower(events)
+	return nil
+}
+
 func main() {
-	flag.StringVar(&opt.powerDev, "power-dev", "/dev/input/event0", "evdev node carrying KEY_POWER (axp2202-pek)")
-	flag.StringVar(&opt.padDev, "pad-dev", "/dev/input/event1", "evdev node carrying the gamepad buttons")
-	flag.StringVar(&opt.panel, "panel", "/sys/class/disp/disp/attr/enhance_bright", "panel brightness node")
-	flag.StringVar(&opt.level, "level", "/run/panel.level", "where the pre-sleep level is stored")
-	flag.StringVar(&opt.marker, "marker", "/run/panel.off", "marker written while the panel is off on purpose")
+	flag.StringVar(&baseosctl, "baseosctl", "/usr/sbin/baseosctl", "absolute path to the semantic hardware CLI")
+	flag.StringVar(&opt.powerDev, "power-dev", "", "resolved evdev node carrying KEY_POWER")
+	flag.StringVar(&opt.padDev, "pad-dev", "", "resolved evdev node carrying gamepad buttons")
+	flag.StringVar(&opt.longPolicy, "long-press", "", "profile hold policy: ignore or poweroff")
 	flag.StringVar(&opt.logPath, "log", "/tmp/baseos-hotkeys.log", "log file")
 	flag.StringVar(&opt.runtime, "runtime", "pocket-linux-kms,retroarch", "comma-separated processes force-quit by SELECT+START")
 	flag.StringVar(&opt.foregroundApp, "foreground-app", "/run/baseos-foreground-app", "volatile installed-app id while its runtime is foreground")
 	flag.StringVar(&opt.forceQuitMarker, "force-quit-marker", "/run/baseos-force-quit", "one-shot installed-app force-quit notification")
 	flag.StringVar(&opt.poweroff, "poweroff", "/usr/sbin/baseos-poweroff", "poweroff helper")
-	flag.BoolVar(&opt.dryRun, "dry-run", false, "log actions without touching the panel or powering off")
+	flag.BoolVar(&opt.dryRun, "dry-run", false, "log actions without modifying the display or stopping processes")
 	flag.Parse()
-
-	// One instance only: a frontend restart replaces the helper, it must not stack
-	// a second reader that would toggle the panel against the first.
-	if b, err := os.ReadFile("/run/baseos-hotkeys.pid"); err == nil {
-		if prev, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && prev > 1 {
-			if err := syscall.Kill(prev, 0); err == nil {
-				logf("already running as %d; exiting", prev)
-				return
-			}
-		}
+	if !filepath.IsAbs(baseosctl) || !filepath.IsAbs(opt.powerDev) || !filepath.IsAbs(opt.padDev) ||
+		(opt.longPolicy != "ignore" && opt.longPolicy != "poweroff") || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "required: --power-dev /absolute/node --pad-dev /absolute/node --long-press ignore|poweroff")
+		os.Exit(2)
 	}
-	os.WriteFile("/run/baseos-hotkeys.pid", []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
-	// Remember the driver's level, not enhance_bright. A missing file used to be
-	// seeded from that register, and the next wake then restored the wrong number.
-	if _, err := os.Stat(opt.level); err != nil {
-		if v, ok := realBrightness(); ok && v > 0 {
-			os.WriteFile(opt.level, []byte(strconv.Itoa(v)+"\n"), 0o644)
-		}
+	if err := run(); err != nil {
+		logf("hotkeys: %v", err)
+		os.Exit(1)
 	}
-	logf("start power=%s pad=%s panel=%s", opt.powerDev, opt.padDev, opt.panel)
-
-	go readLoop(opt.powerDev)
-	go readLoop(opt.padDev)
-	go watchCombo()
-	select {}
 }

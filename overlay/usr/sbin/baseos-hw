@@ -1,0 +1,6 @@
+#!/bin/sh
+# Internal semantic dispatch for baseosctl. Never interpret profile values as commands.
+. "${DAL_LIB:-/usr/lib/baseos/dal.sh}"
+. "$DAL_DIR/aux.sh"
+dal_init || exit $?
+dal_aux "$@"

@@ -1,0 +1,92 @@
+#!/bin/sh
+DAL_LIB=${DAL_LIB:-/usr/lib/baseos/dal.sh}
+[ -r "$DAL_LIB" ] || { echo 'baseosctl: DAL unavailable' >&2; exit 1; }
+. "$DAL_LIB" || exit 1
+
+json=0 quiet=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --json) json=1; shift;;
+        --quiet) quiet=1; shift;;
+        --timeout) [ $# -ge 2 ] || exit 2; case "$2" in ''|*[!0-9]*) exit 2;; esac; shift 2;;
+        --version) printf 'baseosctl=2\nschema=pjos.dal/1\n'; exit 0;;
+        *) break;;
+    esac
+done
+[ $# -ge 1 ] || { echo 'baseosctl: command required' >&2; exit 2; }
+g=$1; shift
+if [ "$g" = version ]; then
+    [ $# -eq 0 ] || exit 2
+    dal_init || exit $?
+    printf 'baseosctl=2\nschema=pjos.dal/1\nboard=%s\nsoc=%s\nversion=%s\n' "$DAL_board" "$DAL_soc" "${DAL_version:-unknown}"
+    exit 0
+fi
+if [ "$json" -eq 1 ]; then
+    case "$g:$*" in
+        cap:list) output=$(dal_cap_list) || exit $?;;
+        feature:list) output=$(dal_feature_list) || exit $?;;
+        display:info) output=$(dal_display_info) || exit $?;;
+        display:output\ list) output=$(dal_display_output list) || exit $?;;
+        input:list) output=$(dal_input_list) || exit $?;;
+        power:battery) output=$(dal_power_battery) || exit $?;;
+        power:charger) output=$(dal_power_charger) || exit $?;;
+        power:supplies) output=$(dal_power_supplies) || exit $?;;
+        power:boot-reason) output=$(dal_power_boot_reason) || exit $?;;
+        *) echo 'baseosctl: --json unsupported for this command' >&2; exit 2;;
+    esac
+    if [ "$g" = cap ] || [ "$g" = feature ]; then
+        printf '%s\n' "$output" | awk -F= -v group="$g" '
+            $1 == "schema" { schema=$2; next }
+            $1 == "board" { board=$2; next }
+            $1 == "soc" { soc=$2; next }
+            { values[$1]=$2 }
+            END {
+                printf "{\"schema\":\"%s\",\"board\":\"%s\",\"soc\":\"%s\",\"verified\":false,\"%s\":{", schema, board, soc, group == "cap" ? "caps" : "features"
+                if (group == "cap") order="wifi bluetooth touch vibration hdmi gpu rtc usb_gadget usb_host brightness audio"
+                else order="bt_sink bt_source audio_hw_volume audio_hw_mute display_rotation display_output_switch suspend rtc_alarm usb_storage_export usb_adb usb_host_input wifi_ap"
+                sep=""; n=split(order, keys, " ")
+                for (i=1; i<=n; i++) printf "%s\"%s\":\"%s\"", sep, keys[i], values[keys[i]] == "" ? "unknown" : values[keys[i]], sep="," 
+                print "}}"
+            }'
+    else
+        printf '%s\n' "$output" | awk -F= 'BEGIN { printf "{"; sep="" } { if (NF < 2) next; key=$1; sub(/^[^=]*=/, ""); value=$0; gsub(/\\/, "\\\\", value); gsub(/"/, "\\\"", value); if (value ~ /^[0-9]+$/) printf "%s\"%s\":%s", sep, key, value; else printf "%s\"%s\":\"%s\"", sep, key, value; sep="," } END { print "}" }'
+    fi
+    exit 0
+fi
+case "$g" in
+    cap|feature)
+        [ $# -ge 1 ] || exit 2
+        verb=$1; shift
+        case "$g:$verb" in
+            cap:list) [ $# -eq 0 ] || exit 2; dal_cap_list; exit $?;;
+            cap:get) [ $# -eq 1 ] || exit 2; dal_cap_get "$1"; exit $?;;
+            cap:has) [ $# -eq 1 ] || exit 2; dal_cap_has "$1"; exit $?;;
+            feature:get) [ $# -eq 1 ] || exit 2; dal_feature_get "$1"; exit $?;;
+            feature:has) [ $# -eq 1 ] || exit 2; dal_feature_has "$1"; exit $?;;
+            feature:list) [ $# -eq 0 ] || exit 2; dal_feature_list; exit $?;;
+            feature:bitmask)
+                [ $# -eq 0 ] || exit 2; dal_init || exit $?
+                mask=$(dal_feature_bitmask) || exit $?
+                printf 'bitmask=%s\nbitmask_hex=0x%x\nbitmask_version=1\n' "$mask" "$mask"; exit 0;;
+            *) echo 'baseosctl: unknown capability command' >&2; exit 2;;
+        esac;;
+    display)
+        [ $# -ge 1 ] || exit 2; verb=$1; shift
+        case "$verb" in
+            info) [ $# -eq 0 ] || exit 2; dal_display_info; exit $?;;
+            node) [ $# -eq 0 ] || exit 2; dal_display_node; exit $?;;
+            get-brightness) [ $# -eq 0 ] || exit 2; dal_display_brightness_get; exit $?;;
+            set-brightness) [ $# -eq 1 ] || exit 2; dal_display_brightness_set "$1"; exit $?;;
+            blank) [ $# -ge 1 ] && [ $# -le 2 ] || exit 2; dal_display_blank "$@"; exit $?;;
+            output) [ $# -ge 1 ] || exit 2; op=$1; shift; case "$op" in list) [ $# -eq 0 ] || exit 2; dal_display_output list; exit $?;; set) [ $# -eq 1 ] || exit 2; dal_display_output_set "$1"; exit $?;; *) exit 2;; esac;;
+            *) echo 'baseosctl: unknown display command' >&2; exit 2;;
+        esac;;
+    input)
+        [ $# -ge 1 ] || exit 2; verb=$1; shift
+        case "$verb" in list) [ $# -eq 0 ] || exit 2; dal_input_list; exit $?;; node) [ $# -eq 1 ] || exit 2; dal_input_node "$1"; exit $?;; key-state) [ $# -eq 2 ] || exit 2; dal_input_key_state "$1" "$2"; exit $?;; menu-held) [ $# -eq 0 ] || exit 2; dal_input_menu_held; exit $?;; *) exit 2;; esac;;
+    power)
+        [ $# -ge 1 ] || exit 2; verb=$1; shift
+        case "$verb" in battery) [ $# -eq 0 ] || exit 2; dal_power_battery; exit $?;; charger) [ $# -eq 0 ] || exit 2; dal_power_charger; exit $?;; supplies) [ $# -eq 0 ] || exit 2; dal_power_supplies; exit $?;; boot-reason) [ $# -eq 0 ] || exit 2; dal_power_boot_reason; exit $?;; *) echo 'baseosctl: unsupported power command' >&2; exit 4;; esac;;
+    audio|network|storage|led) helper=${BASEOS_HW:-${0%/*}/baseos-hw}; exec "$helper" "$g" "$@";;
+    *) echo 'baseosctl: unknown command' >&2; exit 2;;
+esac
