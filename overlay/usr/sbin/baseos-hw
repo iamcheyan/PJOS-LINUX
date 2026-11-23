@@ -3,4 +3,12 @@
 . "${DAL_LIB:-/usr/lib/baseos/dal.sh}"
 . "$DAL_DIR/aux.sh"
 dal_init || exit $?
+if [ "$1" = input ]; then
+    shift
+    case "${1:-}" in
+        key-state) [ "$#" -eq 3 ] || exit 2; dal_input_key_state "$2" "$3"; exit $?;;
+        menu-held) [ "$#" -eq 1 ] || exit 2; dal_input_menu_held; exit $?;;
+        *) exit 2;;
+    esac
+fi
 dal_aux "$@"

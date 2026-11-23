@@ -45,15 +45,15 @@ class DalOperations(unittest.TestCase):
         return path
 
     def test_key_state_role_resolves_and_runs_actual_helper(self):
-        self.metadata('input.gamepad.name=Game Pad')
+        self.metadata('input.gamepad.name=Game Pad', 'display.backend=fbdev', 'display.node=/dev/fb0')
         event = self.root / 'dev/input/event9'
         event.parent.mkdir(parents=True)
         event.touch()
-        self.file('sys/class/input/event9/device/name', 'Game Pad')
+        self.file('sys/sys/class/input/event9/device/name', 'Game Pad')
         helper = self.file('key-state', '#!/bin/sh\nprintf "pressed=1\\n"\nprintf "%s %s\\n" "$1" "$2" > "$TRACE"')
         helper.chmod(0o755)
         trace = self.root / 'trace'
-        self.env.update(BASEOS_INPUT_STATE=str(helper), TRACE=str(trace))
+        self.env.update(BASEOS_INPUT_STATE_HELPER=str(helper), TRACE=str(trace))
         self.assertEqual(self.call('input', 'key-state', 'gamepad', 'BTN_A'), 'pressed=1\n')
         self.assertEqual(trace.read_text(), f'{event} BTN_A\n')
         self.call('input', 'key-state', 'power', 'BTN_A', expected=3)

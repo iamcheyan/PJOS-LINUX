@@ -102,7 +102,7 @@ def main():
         shutil.copyfile(layout, profile / 'input.map')
         shutil.copyfile(overlay / 'usr/lib/baseos/dal.sh', system / 'dal.sh')
         shutil.copytree(overlay / 'usr/lib/baseos/dal', system / 'dal')
-        for name in ('baseosctl', 'baseos-hw', 'baseos-hotkeys', 'baseos-hotkey-service'):
+        for name in ('baseosctl', 'baseos-hw', 'baseos-input-state', 'baseos-hotkeys', 'baseos-hotkey-service'):
             shutil.copy2(overlay / 'usr/sbin' / name, system / name)
         hook = card / 'trimui/app/MainUI'
         hook.parent.mkdir(parents=True)

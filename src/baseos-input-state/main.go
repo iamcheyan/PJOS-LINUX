@@ -62,7 +62,7 @@ func ioctl(fd int, request uintptr, arg unsafe.Pointer) error {
 }
 
 func request(group byte, number, size uintptr) uintptr {
-	return uintptr(3<<30) | (size << 16) | (uintptr(group) << 8) | number
+	return uintptr(2<<30) | (size << 16) | (uintptr(group) << 8) | number
 }
 
 func parseKey(text string) (uint16, error) {
@@ -92,6 +92,7 @@ func keyState(path, key string) (bool, error) {
 
 func run(args []string) int {
 	if len(args) != 2 { fmt.Fprintln(os.Stderr, "usage: baseos-input-state <event-node> <KEY_NAME|CODE>"); return 2 }
+    if _, err := parseKey(args[1]); err != nil { fmt.Fprintln(os.Stderr, err); return 2 }
 	pressed, err := keyState(args[0], args[1])
 	if err != nil { fmt.Fprintln(os.Stderr, "baseos-input-state:", err); return 3 }
 	if pressed { fmt.Println("pressed=1") } else { fmt.Println("pressed=0") }

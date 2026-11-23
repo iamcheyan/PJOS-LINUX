@@ -48,7 +48,7 @@ class AuxHardware(unittest.TestCase):
         self.cli('network', 'wifi-up', code=4)
         self.cli('network', 'bt-up', code=3)
         self.cli('audio', 'set-volume', '65', code=3)
-        self.cli('storage', 'expand', code=4)
+        self.cli('storage', 'expand', code=3)
         self.cli('storage', 'usb-mode', 'prepare', code=3)
         self.cli('storage', 'role', 'rootfs', code=3)
 

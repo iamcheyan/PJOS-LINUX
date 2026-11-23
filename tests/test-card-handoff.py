@@ -65,7 +65,7 @@ printf '  variant %s (abi %s) hash 1234\\n    profile %s\\n' "$target" "$abi" "$
                 (overlay / directory).mkdir(parents=True)
             for file in ('usr/lib/baseos/dal.sh', 'usr/share/pocketshell/trimui/app/MainUI',
                          'usr/sbin/baseosctl', 'usr/sbin/baseos-hw', 'usr/sbin/baseos-hotkeys',
-                         'usr/sbin/baseos-hotkey-service'):
+                         'usr/sbin/baseos-hotkey-service', 'usr/sbin/baseos-input-state'):
                 (overlay / file).touch()
             if layout is not None:
                 (overlay / 'etc/pjos/input.map').write_text(layout)

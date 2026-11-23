@@ -50,10 +50,8 @@ def dal_profile(profiles, release):
     for section in ('panel', 'display'):
         for key, value in board.get(section, {}).items():
             values[f'display.{key}'] = ' '.join(value) if isinstance(value, list) else value
-    declared = board.get('features', {})
     for key in ('storage_expand', 'storage_card_mount'):
-        if key not in values:
-            values[f'feature.{key}'] = declared.get(key, 'unknown')
+        values[f'feature.{key}'] = board.get('features', {}).get(key, 'unknown')
     values['power.long_press'] = board.get('power', {}).get('long_press', 'unknown')
     values.setdefault('display.brightness_node', 'unknown')
     inputs = board.get('input', {})
@@ -104,6 +102,7 @@ def dal_profile(profiles, release):
             values[f'audio.{key}'] = audio[key]
     values['profile.source'] = f"bsp/boards/{board['id']}/board.json+bsp/{board['soc']}/soc.json"
     values['firmware.mode'] = board['firmware']['mode']
+    values['soc.compatible'] = ' '.join(profiles['soc'].get('compatible', []))
     feature = profiles['features']
     mask = 1 << 31
     for bit, name in enumerate(feature['bitmask_order']):

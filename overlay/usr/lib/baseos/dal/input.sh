@@ -63,6 +63,8 @@ dal_input_key_state() {
     case "$key" in ''|*[!A-Za-z0-9_]*) return 2;; esac
     node=$(dal_input_node "$role") || return $?
     helper=${BASEOS_INPUT_STATE:-${BASEOS_SBIN_ROOT:-}/usr/sbin/baseos-input-state}
+    [ -x "$helper" ] || helper=${BASEOS_INPUT_STATE_HELPER:-}
+    [ -x "$helper" ] || helper=${DAL_DIR%/dal}/baseos-input-state
     [ -x "$helper" ] || helper=/usr/sbin/baseos-input-state
     [ -x "$helper" ] || return 3
     devroot=$(dal_input_root)
