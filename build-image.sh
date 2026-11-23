@@ -29,7 +29,8 @@ if [ -n "$NATIVE_RELEASE" ]; then
     echo "$NATIVE_RELEASE is not a native release for $TARGET" >&2; exit 1;
   }
 fi
-eval "$(python3 "$HERE/tools/device_profile.py" shell "$TARGET")"
+PROFILE=$(python3 "$HERE/tools/device_profile.py" shell "$TARGET")
+eval "$PROFILE"
 
 WORK="$HERE/work/$TARGET"
 SOURCE="$WORK/source.json"

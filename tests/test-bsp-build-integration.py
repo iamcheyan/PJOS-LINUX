@@ -87,6 +87,17 @@ class BspIntegration(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('source.json', result.stdout + result.stderr)
 
+    def test_card_target_cannot_enter_image_build(self):
+        shutil.copy(ROOT / 'tools/docker-platform.sh', self.root / 'tools')
+        for script in ('build-rootfs.sh', 'build-image.sh'):
+            with self.subTest(script=script):
+                shutil.copy(ROOT / script, self.root)
+                result = subprocess.run(['sh', self.root / script, 'tg5040'],
+                                        capture_output=True, text=True, cwd=self.root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('vendor SD card target only; standalone image disabled', result.stderr)
+                self.assertFalse((self.root / 'work/tg5040').exists())
+
     def test_unknown_target_has_no_generated_metadata(self):
         self.cli('bsp_compose.py', '--target', 'notaboard', '--output', self.out, success=False)
         self.assertFalse((self.out / 'board.json').exists())

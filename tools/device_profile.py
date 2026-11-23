@@ -126,10 +126,18 @@ def load_profiles(path: Path | None = None) -> list[dict]:
 
 
 def get_profile(target: str, path: Path | None = None) -> dict:
-    for profile in load_profiles(path):
+    profiles = load_profiles(path)
+    for profile in profiles:
         if profile["id"] == target:
             return profile
-    known = " ".join(profile["id"] for profile in load_profiles(path))
+    if path is None and target.isascii() and target.isalnum() and target.islower():
+        board_path = BSP_ROOT / 'boards' / target / 'board.json'
+        if board_path.is_file():
+            import bsp_validate
+            board = bsp_validate.compose(BSP_ROOT, target)['board']
+            if board['firmware']['mode'] == 'card':
+                die(f'{target}: vendor SD card target only; standalone image disabled (use tools/build_card.py)')
+    known = " ".join(profile["id"] for profile in profiles)
     die(f"unknown target {target!r}; expected one of: {known}")
 
 

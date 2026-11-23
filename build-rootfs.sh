@@ -16,8 +16,6 @@ TARGET="${1:?usage: $0 <target>}"
 [ "$#" -eq 1 ] || { echo "usage: $0 <target>" >&2; exit 2; }
 PROFILE="$(python3 "$HERE/tools/device_profile.py" shell "$TARGET")"
 eval "$PROFILE"
-# Kernel, module and harvest assembly below is supported only for H700.
-[ "$SOC_ID" = h700 ] || { echo "unsupported rootfs platform: $SOC_ID" >&2; exit 1; }
 WORK="$HERE/work/$TARGET"
 TOOLS="$HERE/work/tools"
 
@@ -26,6 +24,10 @@ for input in source.json stock-harvest.tar boot-prefix.img; do
     echo "missing prepared vendor input: $WORK/$input (run prepare-stock.sh $TARGET IMAGE)" >&2
     exit 1
   }
+done
+SOC_DIR=${SOC_PROFILE%/*}
+for hook in prepare-rootfs.sh build-rootfs-stage.sh; do
+  [ -r "$SOC_DIR/$hook" ] || { echo "missing image assembly adapter: $SOC_DIR/$hook" >&2; exit 1; }
 done
 BSP="$(mktemp -d "$WORK/bsp.XXXXXX")"
 trap 'rm -rf "$BSP"' EXIT
@@ -48,16 +50,12 @@ BASEOS_BUILD="$(git -C "$HERE" describe --always --dirty 2>/dev/null || echo unk
 "$HERE/tools/tools-stamp.sh" | cmp -s - "$TOOLS/.stamp" || {
   echo "$TOOLS is stale for the current sources (run build-tools.sh)" >&2; exit 1; }
 python3 "$HERE/tools/source_manifest.py" verify "$WORK/source.json" "$TARGET"
-python3 "$HERE/tools/verify_harvest.py" "$WORK/stock-harvest.tar" \
-  "$HERE/manifest/harvest.list" "$HERE/devices.json" "$TARGET"
-python3 "$HERE/tools/kernel_gzip.py" prepare "$TARGET" "$WORK/boot-prefix.img" "$WORK/boot-gzip"
-
-# Every released rootfs must contain the module built for this exact vendor kernel.
-"$HERE/build-audio-module.sh" "$TARGET"
+. "$SOC_DIR/prepare-rootfs.sh"
 
 docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   -v "$WORK":/work -v "$TOOLS":/tools:ro \
   -v "$HERE/tools/strip_gpu_module.py":/build/strip_gpu_module.py:ro \
+  -v "$SOC_DIR/build-rootfs-stage.sh":/build/soc-rootfs-stage.sh:ro \
   -v "$BSP":/bsp:ro -v "$HERE/assets":/assets:ro \
   -v "$HERE/work/pocketjs-runtime":/pocketjs-runtime:ro \
   -e BASEOS_PLATFORM="$SOC_ID" \
@@ -97,25 +95,7 @@ docker run --rm --platform "$BASEOS_DOCKER_PLATFORM_AARCH64" \
   tar -xf /work/stock-harvest.tar -C "$R"
   # This alias is fixed; bake it in instead of recreating it on every boot.
   ln -sfn /mnt/sdcard "$R/mnt/SDCARD"
-  # Keep the prepared stock harvest pristine. Only remove GPU debug data from
-  # this build copy, and fail rather than ship a changed module ABI/signature.
-  GPU="$R/usr/lib/modules/mali_kbase.ko"
-  [ -f "$GPU" ] || { echo "FATAL: missing harvested GPU module" >&2; exit 1; }
-  python3 /build/strip_gpu_module.py "$GPU" "$GPU.strip-debug" \
-    --report /work/gpu-strip-report.json
-  mv "$GPU.strip-debug" "$GPU"
-  # alsa-lib plugin dir: drop static/libtool litter
-  rm -f "$R"/usr/lib/aarch64-linux-gnu/alsa-lib/*.a "$R"/usr/lib/aarch64-linux-gnu/alsa-lib/*.la
-  # The build is mandatory: do not silently ship only its userspace loader.
-  install -m 644 /work/audio-module/h700_speaker_amp.ko "$R/usr/lib/modules/h700_speaker_amp.ko"
-  # Starts the USB host controllers that the boot files hold back; see rcS.
-  install -m 644 /work/audio-module/h700_late_usb.ko "$R/usr/lib/modules/h700_late_usb.ko"
-
-  # flat module paths used by rcS / setBluetooth.sh
-  [ ! -f "$R/usr/lib/modules/4.9.170/kernel/drivers/net/wireless/rtl8821cs/8821cs.ko" ] \
-    || ln -sf 4.9.170/kernel/drivers/net/wireless/rtl8821cs/8821cs.ko "$R/usr/lib/modules/8821cs.ko"
-  [ ! -f "$R/usr/lib/modules/4.9.170/kernel/drivers/bluetooth/rtl_btlpm.ko" ] \
-    || ln -sf 4.9.170/kernel/drivers/bluetooth/rtl_btlpm.ko "$R/usr/lib/modules/rtl_btlpm.ko"
+  . /build/soc-rootfs-stage.sh
   # ELF interpreter compat path: every dynamic binary requests
   # /lib/ld-linux-aarch64.so.1 (resolves via the /lib -> usr/lib symlink)
   ln -sf aarch64-linux-gnu/ld-linux-aarch64.so.1 "$R/usr/lib/ld-linux-aarch64.so.1"
