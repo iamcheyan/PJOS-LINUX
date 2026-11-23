@@ -105,6 +105,10 @@
       "additionalProperties": false,
       "properties": {
         "card_name": { "type": "string", "minLength": 1 },
+        "volume_control": { "type": "string", "minLength": 1 },
+        "pcm_gain_control": { "type": "string", "minLength": 1 },
+        "pcm_gain_raw": { "type": "string", "pattern": "^[0-9]+,[0-9]+$" },
+        "soft_volume_control": { "type": "string", "minLength": 1 },
         "card": { "type": "integer", "minimum": 0 },
         "controls": {
           "type": "object",
@@ -225,8 +229,8 @@
       "properties": {
         "display": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"fb": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "disp": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "brightness_node": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "debugfs_switch": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}}}]},
         "input": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"glob": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "gamepad_name": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}}}]},
-        "power": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"supply_glob": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "rtc": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "long_press": {"anyOf": [{"type": "null"}, {"enum": ["ignore", "poweroff", "unknown"]}]}}}]},
-        "audio": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"card_prefix": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "volume_control": {"type": ["string", "null"]}}}]},
+        "power": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"poweroff": {"type": ["string", "null"]}, "reboot": {"type": ["string", "null"]}, "suspend_node": {"type": ["string", "null"]}, "supply_glob": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "rtc": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "long_press": {"anyOf": [{"type": "null"}, {"enum": ["ignore", "poweroff", "unknown"]}]}}}]},
+        "audio": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"card_prefix": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "lineout_control": {"type": ["string", "null"]}, "speaker_control": {"type": ["string", "null"]}, "volume_control": {"type": ["string", "null"]}}}]},
         "network": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"wifi_iface": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "interfaces": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "wifi_ctrl": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "bt_uart": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "bt_backend": {"type": ["string", "null"]}}}]},
         "storage": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"boot_disk": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "roles": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"boot": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "rootfs": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "data": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "primary": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}}}]}, "layout": {"type": ["string", "null"]}}}]},
         "led": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "properties": {"glob": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "string", "minLength": 1}}]}, "work_node": {"type": ["string", "null"]}}}]}

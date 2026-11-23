@@ -73,11 +73,20 @@ def dal_profile(profiles, release):
         values[f'power.{key}'] = device
 
     nodes = profiles['soc']['nodes']
+    for key in ('rtc', 'poweroff', 'reboot', 'suspend_node'):
+        if key in nodes.get('power', {}):
+            values[f'power.{key}'] = nodes['power'][key]
+    if 'menu_source' in inputs:
+        values['input.menu_source'] = inputs['menu_source']
     # The driver namespace stays in the BSP; project only the records the DAL consumes.
     for group in ('audio', 'network', 'storage', 'led'):
         for key, value in nodes.get(group, {}).items():
             if isinstance(value, str):
                 values[f'{group}.{key}'] = value
+    audio = board.get('audio', {})
+    for key in ('card_name', 'volume_control', 'pcm_gain_control', 'pcm_gain_raw', 'soft_volume_control'):
+        if key in audio:
+            values[f'audio.{key}'] = audio[key]
     storage = nodes.get('storage', {})
     if 'boot_disk' in storage:
         for role, number in storage.get('roles', {}).items():

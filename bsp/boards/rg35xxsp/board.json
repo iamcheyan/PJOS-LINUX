@@ -29,6 +29,7 @@
     "long_press": "poweroff"
   },
   "input": {
+    "menu_source": "gpio",
     "roles": {
       "directions": { "name": "dierct-keys-polled" },
       "virtual_dpad": { "name": "PJOS D-pad" },

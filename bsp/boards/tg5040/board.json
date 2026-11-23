@@ -35,7 +35,13 @@
     "battery": "axp2202-battery",
     "charger": "axp2202-usb"
   },
-  "audio": { "card_name": "audiocodec" },
+  "audio": {
+    "card_name": "audiocodec",
+    "volume_control": "Headphone",
+    "pcm_gain_control": "DAC volume",
+    "pcm_gain_raw": "160,160",
+    "soft_volume_control": "Soft Volume Master"
+  },
   "network": { "interfaces": ["wlan0", "wlan1"] },
   "overrides": {
     "nodes": {

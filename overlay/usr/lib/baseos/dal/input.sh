@@ -6,10 +6,12 @@ dal_input_match_role() {
     expected=$(dal_meta "input.$role.name" 2>/dev/null || :)
     prefix=$(dal_meta "input.$role.name_prefix" 2>/dev/null || :)
     suffix=$(dal_meta "input.$role.name_suffix" 2>/dev/null || :)
-    [ -n "$expected" ] && [ "$expected" != unknown ] && [ "$name" = "$expected" ] && return 0
-    [ -n "$prefix" ] && case "$name" in "$prefix"*) ;; *) return 1;; esac
-    [ -n "$suffix" ] && case "$name" in *"$suffix") ;; *) return 1;; esac
-    [ -n "$prefix" ] || [ -n "$suffix" ]
+    [ "$expected" != unknown ] || expected=
+    [ "$prefix" != unknown ] || prefix=
+    [ "$suffix" != unknown ] || suffix=
+    [ -n "$expected$prefix$suffix" ] || return 1
+    [ -z "$expected" ] || [ "$expected" = "$name" ] || return 1
+    case "$name" in "$prefix"*"$suffix") return 0;; *) return 1;; esac
 }
 dal_input_node() {
     dal_init || return $?
@@ -21,6 +23,7 @@ dal_input_node() {
     [ "$expected" != unknown ] || expected=; [ "$prefix" != unknown ] || prefix=; [ "$suffix" != unknown ] || suffix=
     [ -n "$expected$prefix$suffix" ] || return 3
     devroot=$(dal_input_root)
+    match=
     for node in "$devroot"/dev/input/event*; do
         [ -c "$node" ] || [ -f "$node" ] || continue
         sysnode="$(dal_sys_root)/sys/class/input/${node##*/}/device/name"
@@ -29,9 +32,11 @@ dal_input_node() {
         [ -z "$expected" ] || [ "$name" = "$expected" ] || continue
         [ -z "$prefix" ] || case "$name" in "$prefix"*) ;; *) continue;; esac
         [ -z "$suffix" ] || case "$name" in *"$suffix") ;; *) continue;; esac
-        printf '/dev/input/%s\n' "${node##*/}"; return 0
+        [ -z "$match" ] || return 3
+        match=${node##*/}
     done
-    return 3
+    [ -n "$match" ] || return 3
+    printf '/dev/input/%s\n' "$match"
 }
 dal_input_list() {
     dal_init || return $?
@@ -41,10 +46,27 @@ dal_input_list() {
         name=$(cat "$(dal_sys_root)/sys/class/input/${node##*/}/device/name" 2>/dev/null || :)
         [ -n "$name" ] || continue
         kind=unknown
-        for role in keyboard power gamepad touch; do if dal_input_match_role "$role" "$name"; then kind=$role; break; fi; done
-        printf 'node=/dev/input/%s name=%s kind=%s\n' "${node##*/}" "$name" "$kind"
+        for role in keyboard power gamepad touch directions virtual_dpad; do
+            dal_input_match_role "$role" "$name" || continue
+            [ "$kind" = unknown ] || { kind=unknown; break; }
+            kind=$role
+        done
+        [ "${1:-}" != --nodes ] || printf 'node=/dev/input/%s ' "${node##*/}"
+        printf 'name=%s kind=%s\n' "$name" "$kind"
     done
 }
 dal_input_power_node() { dal_input_node power; }
 dal_input_key_state() { return 3; }
-dal_input_menu_held() { source=$(dal_meta input.menu_source 2>/dev/null) || return 3; [ "$source" = no ] && return 4; [ "$source" = unknown ] && return 3; return 3; }
+dal_input_menu_held() (
+    dal_init || exit $?
+    source=$(dal_meta input.menu_source) || exit $?
+    case "$source" in none|no) exit 4;; gpio) ;; *) exit 3;; esac
+    dal_soc_hook || exit $?
+    command -v soc_boot_menu_held >/dev/null || exit 3
+    GPIO=${BASEOS_GPIO_DEBUG:-${PJOS_SYS_ROOT:-}/sys/kernel/debug/gpio}
+    # The vendor predicate returns false both for a released key and for no
+    # matching GPIO. Require a labelled input line before reporting release.
+    BASEOS_GPIO_DEBUG=$GPIO
+    grep -Eq '\|GPIO Key [Mm]enu[[:space:]]*\)[[:space:]]+in[[:space:]]+(hi|lo)([[:space:]]|$)' "$GPIO" 2>/dev/null || exit 3
+    if soc_boot_menu_held; then printf 'held=yes\n'; else printf 'held=no\n'; fi
+)

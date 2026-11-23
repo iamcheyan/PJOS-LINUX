@@ -9,12 +9,18 @@ aux_audio() {
         mute:2) case $2 in on|off) ;; *) return 2;; esac;; *) return 2;; esac
     aux_yes cap.audio || return $?
     if [ "$1" = cards ]; then cat "${DAL_PROC_ROOT:-/proc}/asound/cards"; return; fi
-    prefix=$(dal_meta audio.card_prefix) && [ -n "$prefix" ] || return 3
+    exact=$(dal_meta audio.card_name) || exact=
+    prefix=$(dal_meta audio.card_prefix) || prefix=
+    [ -n "$exact$prefix" ] || return 3
     card=''
     for id in "${DAL_SYS_ROOT:-/sys}"/class/sound/card[0-9]*/id; do
         [ -r "$id" ] || continue
         IFS= read -r card_name < "$id" || continue
-        case $card_name in "$prefix"*) ;; *) continue;; esac
+        if [ -n "$exact" ]; then
+            [ "$card_name" = "$exact" ] || continue
+        else
+            case $card_name in "$prefix"*) ;; *) continue;; esac
+        fi
         [ -z "$card" ] || return 3
         card=${id%/id}; card=${card##*/card}
         matched_name=$card_name
@@ -22,7 +28,25 @@ aux_audio() {
     [ -n "$card" ] || return 3
     ctl=$(dal_meta audio.volume_control) && [ -n "$ctl" ] || return 3
     case $1 in
-        set-volume) amixer -q -c "$card" sset "$ctl" "$2%";;
+        set-volume)
+            lineout=$(dal_meta audio.lineout_control) || lineout=
+            speaker=$(dal_meta audio.speaker_control) || speaker=
+            [ -z "$lineout" ] || amixer -q -c "$card" sset "$lineout" "$2%" || return 1
+            amixer -q -c "$card" sset "$ctl" "$2%" || return 1
+            # A softvol control only exists once the configured PCM has opened.
+            soft=$(dal_meta audio.soft_volume_control) || soft=
+            if [ -n "$soft" ] && amixer -c "$card" sget "$soft" >/dev/null 2>&1; then
+                amixer -q -c "$card" sset "$soft" "$2%" || return 1
+            fi
+            gain=$(dal_meta audio.pcm_gain_control) || gain=
+            if [ -n "$gain" ]; then
+                raw=$(dal_meta audio.pcm_gain_raw) || return 6
+                amixer -q -c "$card" cset "name=$gain" "$raw" || return 1
+            fi
+            if [ -n "$speaker" ]; then
+                if [ "$2" -eq 0 ]; then switch=off; else switch=on; fi
+                amixer -q -c "$card" sset "$speaker" "$switch" || return 1
+            fi;;
         mute) aux_yes feature.audio_hw_mute || return $?
             ctl=$(dal_meta audio.mute_control) && [ -n "$ctl" ] || return 3
             if [ "$2" = on ]; then switch=mute; else switch=unmute; fi

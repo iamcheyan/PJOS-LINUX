@@ -74,6 +74,65 @@ def main():
         require('board=tg5040' in run(env, 'version').stdout, 'version diagnostics missing identity')
         require(run(env, 'input', 'node', 'gamepad').stdout.strip() == '/dev/input/event3',
                 'role based input lookup failed')
+        h700 = tmp / 'h700'
+        subprocess.run(['python3', str(COMPOSE), '--target', 'rg35xxh', '--output', str(h700)],
+                       cwd=ROOT, check=True, capture_output=True)
+        gpio = tmp / 'gpio'
+        helpers = tmp / 'helpers'
+        helpers.mkdir()
+        marker = tmp / 'action'
+        for action in ('reboot', 'poweroff'):
+            helper = helpers / f'baseos-{action}'
+            helper.write_text('#!/bin/sh\nprintf "%s" "${0##*/}" > "$ACTION_LOG"\n')
+            helper.chmod(0o755)
+        hook = ROOT / 'bsp/allwinner/h700/overlay/etc/init.d/soc-hw-init'
+        hw = env | {'DAL_ENV': str(h700 / 'profile.env'), 'PJOS_PROFILE_DIR': str(h700),
+                    'BASEOS_SOC_HOOK': str(hook), 'BASEOS_GPIO_DEBUG': str(gpio),
+                    'BASEOS_SBINDIR': str(helpers), 'ACTION_LOG': str(marker)}
+        for level, held in [('hi', 'no'), ('lo', 'yes')]:
+            gpio.write_text(f' gpio-17 ( |GPIO Key Menu ) in {level}\n')
+            result = run(hw, 'input', 'menu-held')
+            require((result.returncode, result.stdout.strip()) == (0, f'held={held}'),
+                    'vendor GPIO key level lost')
+        gpio.write_text('unrelated GPIO\n')
+        require(run(hw, 'input', 'menu-held').returncode == 3, 'missing GPIO reported released')
+        fake_hook = tmp / 'soc-hook'
+        fake_hook.write_text('SOC_ID=allwinner/h700\nsoc_boot_reason() { boot_mode=1; }\n')
+        result = run(hw | {'BASEOS_SOC_HOOK': str(fake_hook)}, 'power', 'boot-reason')
+        require(result.returncode == 0 and 'reason=charger' in result.stdout, 'boot hook ignored')
+        state = sysroot / 'sys/power/state'
+        state.parent.mkdir(parents=True)
+        state.write_text('freeze mem\n')
+        for action in ('poweroff', 'reboot'):
+            result = run(hw, 'power', action)
+            require(result.returncode == 0 and marker.read_text() == f'baseos-{action}',
+                    f'{action} did not use the lifecycle helper')
+        usb = runroot / 'run/usb-storage-device'
+        usb.parent.mkdir(parents=True, exist_ok=True)
+        usb.write_text('active\n')
+        require(run(hw, 'power', 'suspend').returncode == 5 and state.read_text() == 'freeze mem\n',
+                'suspend not blocked during USB export')
+        usb.unlink()
+        require(run(hw, 'power', 'suspend').returncode == 0 and state.read_text() == 'mem\n',
+                'suspend did not select declared state')
+        require(run(hw, 'power', 'alarm', 'set', '1000').returncode == 3,
+                'unverified alarm should not write')
+        require('/dev/input/' not in run(env, 'input', 'list').stdout and
+                '/dev/input/event3' in run(env, 'input', 'list', '--nodes').stdout,
+                'input enumeration disclosed or lost diagnostic path')
+        (event.parent / 'event4').touch()
+        duplicate = name.parents[2] / 'event4/device/name'
+        duplicate.parent.mkdir(parents=True)
+        duplicate.write_text(name.read_text())
+        result = run(env, 'input', 'node', 'gamepad')
+        require(result.returncode == 3 and not result.stdout, 'duplicate role was guessed')
+        version = json.loads(run(env, '--json', 'version').stdout)
+        require(version['profile_source'] == str(profile) and version['board'] == 'tg5040',
+                'version lost active profile source')
+        for args in [('power', 'invalid'), ('power', 'alarm', 'set', '-1'),
+                     ('--timeout', '2', 'version'), ('--quiet', 'version'),
+                     ('--version', 'ignored')]:
+            require(run(env, *args).returncode == 2, f'invalid usage accepted: {args}')
         battery_out = run(env, 'power', 'battery')
         require(battery_out.returncode == 0 and 'capacity=79' in battery_out.stdout and
                 'voltage_uv=3980000' in battery_out.stdout, 'dynamic battery query failed')

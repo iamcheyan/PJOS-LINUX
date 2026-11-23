@@ -76,6 +76,16 @@ class AuxHardware(unittest.TestCase):
         self.assertEqual(self.cli('network', 'wifi-up').splitlines(),
                          ['link', 'set', 'dev', 'radio1', 'up'])
 
+    def test_analog_volume_and_speaker_follow_user_setting(self):
+        self.metadata('cap.audio=yes', 'audio.card_prefix=codec', 'audio.volume_control=digital volume',
+                      'audio.lineout_control=lineout volume', 'audio.speaker_control=SPK')
+        self.node('sys/class/sound/card2/id', 'codec0')
+        self.node('amixer', '#!/bin/sh\nprintf "%s\\n" "$*"').chmod(0o755)
+        self.assertEqual(self.cli('audio', 'set-volume', '0').splitlines(), [
+            '-q -c 2 sset lineout volume 0%', '-q -c 2 sset digital volume 0%', '-q -c 2 sset SPK off'])
+        self.assertEqual(self.cli('audio', 'set-volume', '50').splitlines(), [
+            '-q -c 2 sset lineout volume 50%', '-q -c 2 sset digital volume 50%', '-q -c 2 sset SPK on'])
+
     def test_audio_matches_card_and_quotes_control(self):
         self.metadata('cap.audio=yes', 'audio.card_prefix=codec', 'audio.volume_control=digital volume')
         self.node('sys/class/sound/card2/id', 'codec0')

@@ -248,7 +248,7 @@ read -r boot_id < /proc/sys/kernel/random/boot_id
 [ ! -r /etc/baseos-release ] || . /etc/baseos-release
 log "=== BaseOS boot $(date '+%Y-%m-%d %H:%M:%S'), BaseOS ${BASEOS_VERSION:-?} for ${BASEOS_TARGET:-?}, boot ${boot_id%%-*} ==="
 profile_status=unavailable
-board_id= soc_id= long_press= panel_node=
+board_id= soc_id= long_press= profile_source=
 if [ -r /usr/lib/baseos/dal.sh ]; then
 	. /usr/lib/baseos/dal.sh
 	if dal_init; then
@@ -256,10 +256,10 @@ if [ -r /usr/lib/baseos/dal.sh ]; then
 		board_id=$(dal_meta board)
 		soc_id=$(dal_meta soc)
 		long_press=$(dal_meta power.long_press)
-		panel_node=$(dal_meta display.brightness_node)
+		profile_source=$(dal_meta profile.source)
 	fi
 fi
-log "BSP profile=$profile_status board=${board_id:-unknown} soc=${soc_id:-unknown}"
+log "BSP profile=$profile_status board=${board_id:-unknown} soc=${soc_id:-unknown} source=${profile_source:-unknown}"
 flush_early_boot_log
 
 # BaseOS settings always come from TF1, even when TF2 holds the frontend. Reuse

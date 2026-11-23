@@ -3,13 +3,14 @@ DAL_LIB=${DAL_LIB:-/usr/lib/baseos/dal.sh}
 [ -r "$DAL_LIB" ] || { echo 'baseosctl: DAL unavailable' >&2; exit 1; }
 . "$DAL_LIB" || exit 1
 
-json=0 quiet=0
+json=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --json) json=1; shift;;
-        --quiet) quiet=1; shift;;
-        --timeout) [ $# -ge 2 ] || exit 2; case "$2" in ''|*[!0-9]*) exit 2;; esac; shift 2;;
-        --version) printf 'baseosctl=2\nschema=pjos.dal/1\n'; exit 0;;
+        --quiet|--timeout) echo "baseosctl: $1 unsupported" >&2; exit 2;;
+        --version) [ $# -eq 1 ] || exit 2
+            if [ "$json" -eq 1 ]; then printf '{"baseosctl":2,"schema":"pjos.dal/1"}\n'; else printf 'baseosctl=2\nschema=pjos.dal/1\n'; fi
+            exit 0;;
         *) break;;
     esac
 done
@@ -18,11 +19,12 @@ g=$1; shift
 if [ "$g" = version ]; then
     [ $# -eq 0 ] || exit 2
     dal_init || exit $?
-    printf 'baseosctl=2\nschema=pjos.dal/1\nboard=%s\nsoc=%s\nversion=%s\n' "$DAL_board" "$DAL_soc" "${DAL_version:-unknown}"
-    exit 0
+    output=$(printf 'baseosctl=2\nschema=%s\nboard=%s\nsoc=%s\nversion=%s\nprofile_source=%s\n' "$DAL_schema" "$DAL_board" "$DAL_soc" "${DAL_version:-unknown}" "$DAL_profile")
+    if [ "$json" -eq 0 ]; then printf '%s\n' "$output"; exit 0; fi
 fi
 if [ "$json" -eq 1 ]; then
     case "$g:$*" in
+        version:) ;;
         cap:list) output=$(dal_cap_list) || exit $?;;
         feature:list) output=$(dal_feature_list) || exit $?;;
         display:info) output=$(dal_display_info) || exit $?;;
@@ -45,7 +47,7 @@ if [ "$json" -eq 1 ]; then
                 if (group == "cap") order="wifi bluetooth touch vibration hdmi gpu rtc usb_gadget usb_host brightness audio"
                 else order="bt_sink bt_source audio_hw_volume audio_hw_mute display_rotation display_output_switch suspend rtc_alarm usb_storage_export usb_adb usb_host_input wifi_ap"
                 sep=""; n=split(order, keys, " ")
-                for (i=1; i<=n; i++) printf "%s\"%s\":\"%s\"", sep, keys[i], values[keys[i]] == "" ? "unknown" : values[keys[i]], sep="," 
+                for (i=1; i<=n; i++) { printf "%s\"%s\":\"%s\"", sep, keys[i], values[keys[i]] == "" ? "unknown" : values[keys[i]]; sep="," } 
                 print "}}"
             }'
     else
@@ -83,10 +85,15 @@ case "$g" in
         esac;;
     input)
         [ $# -ge 1 ] || exit 2; verb=$1; shift
-        case "$verb" in list) [ $# -eq 0 ] || exit 2; dal_input_list; exit $?;; node) [ $# -eq 1 ] || exit 2; dal_input_node "$1"; exit $?;; key-state) [ $# -eq 2 ] || exit 2; dal_input_key_state "$1" "$2"; exit $?;; menu-held) [ $# -eq 0 ] || exit 2; dal_input_menu_held; exit $?;; *) exit 2;; esac;;
+        case "$verb" in list) [ $# -eq 0 ] || { [ $# -eq 1 ] && [ "$1" = --nodes ]; } || exit 2; dal_input_list "$@"; exit $?;; node) [ $# -eq 1 ] || exit 2; dal_input_node "$1"; exit $?;; key-state) [ $# -eq 2 ] || exit 2; dal_input_key_state "$1" "$2"; exit $?;; menu-held) [ $# -eq 0 ] || exit 2; dal_input_menu_held; exit $?;; *) exit 2;; esac;;
     power)
         [ $# -ge 1 ] || exit 2; verb=$1; shift
-        case "$verb" in battery) [ $# -eq 0 ] || exit 2; dal_power_battery; exit $?;; charger) [ $# -eq 0 ] || exit 2; dal_power_charger; exit $?;; supplies) [ $# -eq 0 ] || exit 2; dal_power_supplies; exit $?;; boot-reason) [ $# -eq 0 ] || exit 2; dal_power_boot_reason; exit $?;; *) echo 'baseosctl: unsupported power command' >&2; exit 4;; esac;;
+        case "$verb" in battery) [ $# -eq 0 ] || exit 2; dal_power_battery; exit $?;; charger) [ $# -eq 0 ] || exit 2; dal_power_charger; exit $?;; supplies) [ $# -eq 0 ] || exit 2; dal_power_supplies; exit $?;; boot-reason) [ $# -eq 0 ] || exit 2; dal_power_boot_reason; exit $?;;
+            suspend|poweroff|reboot) [ $# -eq 0 ] || exit 2; dal_power_action "$verb"; exit $?;;
+            alarm) dal_power_alarm "$@"; exit $?;;
+            led) [ $# -eq 1 ] || exit 2; case "$1" in on|off|auto) ;; *) exit 2;; esac
+                helper=${BASEOS_HW:-${0%/*}/baseos-hw}; exec "$helper" led set work "$1";;
+            *) echo 'baseosctl: unknown power command' >&2; exit 2;; esac;;
     audio|network|storage|led) helper=${BASEOS_HW:-${0%/*}/baseos-hw}; exec "$helper" "$g" "$@";;
     *) echo 'baseosctl: unknown command' >&2; exit 2;;
 esac
