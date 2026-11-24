@@ -128,12 +128,6 @@ func manualBlanked() bool {
 	return err == nil
 }
 
-func wakePanel() bool {
-	displayMu.Lock()
-	defer displayMu.Unlock()
-	return manualBlanked() && display("blank", "off", "manual")
-}
-
 // cmdlineIsGBA reports whether a RetroArch command line is a GBA ROM. The
 // supervisor passes the ROM path as an argument, so ".gba" is in the bytes.
 // ".gb" and ".gbc" do not contain that suffix.
@@ -258,11 +252,13 @@ func powerOff() {
 	}
 }
 
-// forceQuit ends whatever owns the panel: a PocketJS app runtime or the
-// emulator started for a ROM. The frontend supervisor sees its child exit and
-// brings the launcher back.
+// forceQuit stops the native Zircon client (not its server) or falls back to
+// the usual launcher/emulator runtime. The supervisor handles the return.
 func forceQuit() {
-	targets := captureRuntimeTargets(strings.Split(opt.runtime, ","))
+	targets := zirconRuntimeTargets()
+	if len(targets) == 0 {
+		targets = captureRuntimeTargets(strings.Split(opt.runtime, ","))
+	}
 	// Capture identity before signaling: the supervisor clears it on child exit.
 	appRaw, _ := os.ReadFile(opt.foregroundApp)
 	app := strings.TrimSpace(string(appRaw))
@@ -345,6 +341,38 @@ func captureRuntimeTargets(names []string) []runtimeTarget {
 			if started := processStart(pid); started != "" {
 				targets = append(targets, runtimeTarget{name, pid, started})
 			}
+		}
+	}
+	return targets
+}
+
+// Prefer an installed Zircon client even if a stray launcher also exists.
+// Do not signal unrelated processes with the same executable basename.
+func zirconRuntimeTargets() []runtimeTarget {
+	card := os.Getenv("PJOS_CARD_ROOT")
+	if card == "" {
+		card = "/storage"
+	}
+	if !filepath.IsAbs(card) {
+		return nil
+	}
+	paths := make(map[string]bool)
+	for _, apps := range []string{"apps", "Apps"} {
+		for _, app := range []string{"Zircon", "zircon"} {
+			path, err := filepath.EvalSymlinks(filepath.Join(card, apps, app, "GodotClient", "Mir2eiClient"))
+			if err == nil {
+				paths[path] = true
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	var targets []runtimeTarget
+	for _, target := range captureRuntimeTargets([]string{"Mir2eiClient"}) {
+		exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", target.pid))
+		if err == nil && paths[strings.TrimSuffix(exe, " (deleted)")] {
+			targets = append(targets, target)
 		}
 	}
 	return targets
@@ -566,20 +594,17 @@ func handlePad(ev inputEvent) {
 	if ev.Type != evKey || ev.Code == keyPower {
 		return
 	}
-	woke := ev.Value == 1 && wakePanel()
+	// Idle blanking has its own watcher. Only watchPower clears manual blank;
+	// the volume service receives input independently of this reader.
 	switch ev.Code {
 	case bindings.selectKey:
 		noteCombo(&combo.selectDown, &combo.selectDownAt, &combo.selectReleased, ev.Value)
 	case bindings.startKey:
 		noteCombo(&combo.startDown, &combo.startDownAt, &combo.startReleased, ev.Value)
 	case bindings.l2:
-		if !woke {
-			onBrightnessKey(-1, ev.Value)
-		}
+		onBrightnessKey(-1, ev.Value)
 	case bindings.r2:
-		if !woke {
-			onBrightnessKey(1, ev.Value)
-		}
+		onBrightnessKey(1, ev.Value)
 	}
 }
 

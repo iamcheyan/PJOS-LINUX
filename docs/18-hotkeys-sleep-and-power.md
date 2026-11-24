@@ -64,12 +64,11 @@ CGO_ENABLED=0 交叉编译）：
 |---|---|
 | 短按电源键（< 2 s） | 面板关灯（亮度写 0）、写 `/run/panel.off` 标记；系统照常运行，正在播的音频/下载不受影响 |
 | 再短按一次 | 恢复 `/run/panel.level` 里记下的亮度，删掉标记 |
-| 任意手柄按键（睡眠期间） | 同样唤醒，恢复亮度（手感和掌机一致） |
+| 手柄键、音量键 | 只可唤醒自动空闲熄屏，不能解除电源键触发的手动熄屏；调音量的功能照常运行。 |
 | 长按电源键（≥ 2 s） | `/usr/sbin/baseos-poweroff`（真正的关机） |
-| SELECT + START（400 ms 内） | `SIGTERM` 当前 PocketJS 运行时；`frontend-session` 会把它重新拉起来，等于「强制退出当前程序」回到启动器 |
+| 同时按住 SELECT + START 约 1.5 秒 | 由系统守护进程退出当前程序。运行 Zircon 时优先向 SD 卡上的 `Mir2eiClient` 发送 `SIGTERM`，不直接停止 `ServerCore`，由 Zircon 的启动脚本处理服务端和启动器交接。没有 Zircon 时沿用 PocketJS / RetroArch 的系统退出规则。 |
 
-标记文件是给 screen-idle 看的：`/run/panel.off` 存在时它完全不碰亮度节点，
-避免「刚关灯又被自动熄屏循环点亮」的打架。
+当前硬件抽象层将手动熄屏记录在 `${PJOS_RUN_ROOT:-}/run/baseos-display.manual`。空闲管理器不会清除此标记；再次短按电源键才会恢复亮度。下面的节点和旧标记说明是早期实现的记录。
 
 ## 3. 面板亮度节点不是单个数字
 
